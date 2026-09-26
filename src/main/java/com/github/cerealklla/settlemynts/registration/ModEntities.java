@@ -1,6 +1,7 @@
 package com.github.cerealklla.settlemynts.registration;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
+import com.github.cerealklla.settlemynts.founding.GhostPerimeterStakeEntity;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 
 import net.minecraft.world.entity.EntityType;
@@ -21,4 +22,10 @@ public final class ModEntities {
             GhostTownHallCoreEntity::new,
             MobCategory.MISC,
             builder -> builder.sized(1.0f, 1.0f));
+
+    public static final DeferredHolder<EntityType<?>, EntityType<GhostPerimeterStakeEntity>> GHOST_PERIMETER_STAKE = ENTITIES.registerEntityType(
+            "ghost_perimeter_stake",
+            GhostPerimeterStakeEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(0.5f, 1.0f));
 }

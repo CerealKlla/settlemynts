@@ -1,6 +1,7 @@
 package com.github.cerealklla.settlemynts.registration;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
+import com.github.cerealklla.settlemynts.founding.PlannedPerimeterStakeItem;
 import com.github.cerealklla.settlemynts.founding.SettlementClaimFlagItem;
 
 import net.minecraft.core.component.DataComponents;
@@ -27,4 +28,12 @@ public final class ModItems {
                     .stacksTo(1)
                     .setId(ResourceKey.create(Registries.ITEM, id))
                     .component(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true)));
+
+    // Design doc Section 6: obtained from a settlement's Ghost Town Hall Core, not crafted --
+    // stacksTo(1) since each placement is a distinct, individually-manageable perimeter marker.
+    public static final DeferredItem<PlannedPerimeterStakeItem> PLANNED_PERIMETER_STAKE = ITEMS.register(
+            "planned_perimeter_stake",
+            id -> new PlannedPerimeterStakeItem(new Item.Properties()
+                    .stacksTo(1)
+                    .setId(ResourceKey.create(Registries.ITEM, id))));
 }

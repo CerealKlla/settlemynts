@@ -1,5 +1,9 @@
 package com.github.cerealklla.settlemynts.founding;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.registration.ModEntities;
@@ -7,6 +11,7 @@ import com.github.cerealklla.settlemynts.registration.ModEntities;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
@@ -19,6 +24,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
  * The Ghost Town Hall Core (design doc Sections 3, 5) -- a "ghost" placeholder marking the center
@@ -46,6 +52,8 @@ import net.minecraft.world.phys.Vec3;
 public class GhostTownHallCoreEntity extends Entity {
 
     private UUID founderId;
+    private String settlementName = "";
+    private final Set<UUID> townPlanners = new HashSet<>();
 
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
@@ -56,17 +64,58 @@ public class GhostTownHallCoreEntity extends Entity {
         GhostTownHallCoreEntity core = new GhostTownHallCoreEntity(ModEntities.GHOST_TOWN_HALL_CORE.get(), level);
         core.setPos(x, y, z);
         core.founderId = founderId;
+        core.townPlanners.add(founderId); // The founder is always a Town Planner (design doc Section 6).
         level.addFreshEntity(core);
         return core;
     }
 
+    public String getSettlementName() {
+        return settlementName;
+    }
+
+    public void setSettlementName(String settlementName) {
+        this.settlementName = settlementName;
+    }
+
+    public boolean isFounder(UUID playerId) {
+        return founderId != null && founderId.equals(playerId);
+    }
+
+    public boolean isTownPlanner(UUID playerId) {
+        return townPlanners.contains(playerId);
+    }
+
+    public Set<UUID> getTownPlanners() {
+        return Set.copyOf(townPlanners);
+    }
+
+    /** Only the founder can grant the permission (design doc Section 6: "the player [who placed the flag] can grant... permissions"). */
+    public boolean grantTownPlanner(UUID granterId, UUID targetId) {
+        if (!isFounder(granterId)) {
+            return false;
+        }
+        return townPlanners.add(targetId);
+    }
+
+    /** Player-facing names of every current Town Planner, resolved from the server's player list (offline planners are skipped -- a known v1 limitation, see decisions.md). */
+    public List<String> getTownPlannerNames(MinecraftServer server) {
+        List<String> names = new ArrayList<>();
+        for (UUID id : townPlanners) {
+            ServerPlayer player = server.getPlayerList().getPlayer(id);
+            names.add(player != null ? player.getName().getString() : id.toString());
+        }
+        return names;
+    }
+
     /**
-     * Founder-only for now (see class doc's "known v1 simplification") -- the real permission set
-     * (Town Planners, per Section 6) doesn't exist yet.
+     * Visible to any current Town Planner (design doc Section 6, extended 2026-09-26 from the
+     * founder-only v1 simplification now that the real permission set exists) -- see the class
+     * doc's "per-player visibility is real" note for why this is a genuine visibility gate, not a
+     * client-side hint.
      */
     @Override
     public boolean broadcastToPlayer(ServerPlayer player) {
-        return founderId != null && founderId.equals(player.getUUID());
+        return isTownPlanner(player.getUUID());
     }
 
     // Entity#isPickable() defaults to false -- without this override this entity would be
@@ -83,10 +132,8 @@ public class GhostTownHallCoreEntity extends Entity {
             return InteractionResult.PASS;
         }
         if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
-            // Placeholder until Section 6's permissions/staking UI exists -- this milestone only
-            // covers founding (Section 5), not staking/finalization.
-            serverPlayer.sendSystemMessage(Component.literal(
-                    "Ghost Town Hall Core -- permissions and staking UI not yet implemented."));
+            PacketDistributor.sendToPlayer(serverPlayer, new OpenFoundingScreenPayload(
+                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID())));
         }
         return InteractionResult.SUCCESS;
     }
@@ -110,10 +157,15 @@ public class GhostTownHallCoreEntity extends Entity {
     @Override
     protected void readAdditionalSaveData(ValueInput input) {
         founderId = input.read("FounderId", UUIDUtil.CODEC).orElse(null);
+        settlementName = input.getStringOr("SettlementName", "");
+        townPlanners.clear();
+        townPlanners.addAll(input.read("TownPlanners", UUIDUtil.CODEC_SET).orElse(Set.of()));
     }
 
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
         output.storeNullable("FounderId", UUIDUtil.CODEC, founderId);
+        output.putString("SettlementName", settlementName);
+        output.store("TownPlanners", UUIDUtil.CODEC_SET, Set.copyOf(townPlanners));
     }
 }
