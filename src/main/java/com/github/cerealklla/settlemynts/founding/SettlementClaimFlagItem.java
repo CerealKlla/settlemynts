@@ -1,5 +1,7 @@
 package com.github.cerealklla.settlemynts.founding;
 
+import java.util.Optional;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -40,10 +42,15 @@ public class SettlementClaimFlagItem extends Item {
         }
 
         BlockPos sitePos = context.getClickedPos().above();
-        double distance = SettlementFounding.distanceToNearestSettlement(serverLevel, sitePos.getX(), sitePos.getZ());
-        if (distance < SettlementFounding.MIN_DISTANCE_BLOCKS) {
+        Optional<SettlementFounding.NearestSettlement> nearest =
+                SettlementFounding.findNearestSettlement(serverLevel, sitePos.getX(), sitePos.getZ());
+        if (nearest.isPresent() && nearest.get().distanceBlocks() < SettlementFounding.MIN_DISTANCE_BLOCKS) {
+            SettlementFounding.NearestSettlement settlement = nearest.get();
             player.sendSystemMessage(Component.literal(
-                    "Too close to another settlement -- must be at least "
+                    "Too close to another settlement -- the nearest one is "
+                            + Math.round(settlement.distanceBlocks()) + " blocks (~"
+                            + Math.round(SettlementFounding.blocksToFeet(settlement.distanceBlocks())) + " feet) to the "
+                            + settlement.compassDirection() + ". Must be at least "
                             + SettlementFounding.MIN_DISTANCE_BLOCKS + " blocks (~"
                             + (int) SettlementFounding.MIN_DISTANCE_FEET + " feet) away."));
             return InteractionResult.FAIL;

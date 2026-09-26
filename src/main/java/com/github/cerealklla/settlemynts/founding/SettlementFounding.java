@@ -1,5 +1,7 @@
 package com.github.cerealklla.settlemynts.founding;
 
+import java.util.Optional;
+
 import com.github.cerealklla.cartographyr.api.Cartography;
 import com.github.cerealklla.cartographyr.geo.Classification;
 import com.github.cerealklla.cartographyr.geo.EntityType;
@@ -37,28 +39,67 @@ public final class SettlementFounding {
     }
 
     /**
-     * Distance in blocks from {@code (x, z)} to the nearest existing settlement (player-founded or
-     * natural), or {@link Double#MAX_VALUE} if none exist yet in this dimension. Reuses
+     * The nearest existing settlement (player-founded or natural) to {@code (x, z)}, with its
+     * distance and compass direction, or empty if none exist yet in this dimension. Reuses
      * Cartographyr's existing {@code Cartography.findEntities}/{@code Classification.CONSTRUCTED}
      * query -- no new Cartographyr API needed, since natural villages are already tracked there
      * (design doc Section 1), and a player-founded settlement registers itself there too once
      * finalized (Section 8, not built yet this milestone).
+     *
+     * <p>Added 2026-09-26 (see decisions.md) -- a real playtest request: a bare "too close" message
+     * gave the player no way to judge how far to walk or which way, since there's no in-game frame
+     * of reference for a raw block count. Replaces the previous {@code distanceToNearestSettlement}.
      */
-    public static double distanceToNearestSettlement(ServerLevel level, int x, int z) {
-        double closest = Double.MAX_VALUE;
+    public static Optional<NearestSettlement> findNearestSettlement(ServerLevel level, int x, int z) {
+        GeographicEntity nearest = null;
+        double closestDistanceSq = Double.MAX_VALUE;
         for (GeographicEntity entity : Cartography.findEntities(level, Classification.CONSTRUCTED)) {
             if (!entity.type().equals(EntityType.SETTLEMENT)) {
                 continue;
             }
             double dx = entity.geometry().centerBlockX() - x;
             double dz = entity.geometry().centerBlockZ() - z;
-            closest = Math.min(closest, Math.sqrt(dx * dx + dz * dz));
+            double distanceSq = dx * dx + dz * dz;
+            if (distanceSq < closestDistanceSq) {
+                closestDistanceSq = distanceSq;
+                nearest = entity;
+            }
         }
-        return closest;
+        if (nearest == null) {
+            return Optional.empty();
+        }
+        double dx = nearest.geometry().centerBlockX() - x;
+        double dz = nearest.geometry().centerBlockZ() - z;
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        return Optional.of(new NearestSettlement(distance, compassDirectionOf(dx, dz)));
     }
 
     public static boolean isFarEnoughFromExistingSettlements(ServerLevel level, int x, int z) {
-        return distanceToNearestSettlement(level, x, z) >= MIN_DISTANCE_BLOCKS;
+        return findNearestSettlement(level, x, z)
+                .map(nearest -> nearest.distanceBlocks() >= MIN_DISTANCE_BLOCKS)
+                .orElse(true);
+    }
+
+    public static double blocksToFeet(double blocks) {
+        return blocks / BLOCKS_PER_FOOT;
+    }
+
+    /**
+     * 8-point compass direction from a viewer toward a point offset by {@code (dx, dz)} -- vanilla
+     * Minecraft's world axes: -Z is north, +Z is south, +X is east, -X is west.
+     */
+    private static String compassDirectionOf(double dx, double dz) {
+        double bearingDegrees = Math.toDegrees(Math.atan2(dx, -dz));
+        if (bearingDegrees < 0) {
+            bearingDegrees += 360;
+        }
+        String[] directions = {"north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"};
+        int index = (int) Math.round(bearingDegrees / 45.0) % directions.length;
+        return directions[index];
+    }
+
+    /** A found settlement's distance (in blocks) and compass direction from the query point. */
+    public record NearestSettlement(double distanceBlocks, String compassDirection) {
     }
 
     /**
