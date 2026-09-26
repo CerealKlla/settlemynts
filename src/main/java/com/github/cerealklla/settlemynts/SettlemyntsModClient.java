@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts;
 
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
 import com.github.cerealklla.settlemynts.founding.client.FoundingScreen;
+import com.github.cerealklla.settlemynts.founding.client.GhostBoundaryWallRenderer;
 import com.github.cerealklla.settlemynts.founding.client.GhostPerimeterStakeRenderer;
 import com.github.cerealklla.settlemynts.founding.client.GhostTownHallCoreRenderer;
 import com.github.cerealklla.settlemynts.founding.client.StakeScreen;
@@ -27,6 +28,7 @@ public class SettlemyntsModClient {
     static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(ModEntities.GHOST_TOWN_HALL_CORE.get(), GhostTownHallCoreRenderer::new);
         event.registerEntityRenderer(ModEntities.GHOST_PERIMETER_STAKE.get(), GhostPerimeterStakeRenderer::new);
+        event.registerEntityRenderer(ModEntities.GHOST_BOUNDARY_WALL.get(), GhostBoundaryWallRenderer::new);
     }
 
     // Polls the zero-server-refs bridge (see ClientFoundingRequests' own doc) for a pending

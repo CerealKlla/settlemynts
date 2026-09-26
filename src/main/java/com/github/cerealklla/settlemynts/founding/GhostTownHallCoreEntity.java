@@ -54,6 +54,7 @@ public class GhostTownHallCoreEntity extends Entity {
     private UUID founderId;
     private String settlementName = "";
     private final Set<UUID> townPlanners = new HashSet<>();
+    private boolean boundaryVisible;
 
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
@@ -75,6 +76,15 @@ public class GhostTownHallCoreEntity extends Entity {
 
     public void setSettlementName(String settlementName) {
         this.settlementName = settlementName;
+    }
+
+    /** Design doc Section 9: "View Settlement Boundaries" -- whether {@code GhostBoundaryWallEntity} instances currently exist for this settlement. Existence-gated, see that class's own doc; this flag just tracks which state we're in so the UI shows the right label and toggling twice quickly doesn't double-create/double-discard. */
+    public boolean isBoundaryVisible() {
+        return boundaryVisible;
+    }
+
+    public void setBoundaryVisible(boolean boundaryVisible) {
+        this.boundaryVisible = boundaryVisible;
     }
 
     public boolean isFounder(UUID playerId) {
@@ -133,7 +143,7 @@ public class GhostTownHallCoreEntity extends Entity {
         }
         if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
             PacketDistributor.sendToPlayer(serverPlayer, new OpenFoundingScreenPayload(
-                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID())));
+                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible));
         }
         return InteractionResult.SUCCESS;
     }
@@ -160,6 +170,7 @@ public class GhostTownHallCoreEntity extends Entity {
         settlementName = input.getStringOr("SettlementName", "");
         townPlanners.clear();
         townPlanners.addAll(input.read("TownPlanners", UUIDUtil.CODEC_SET).orElse(Set.of()));
+        boundaryVisible = input.getBooleanOr("BoundaryVisible", false);
     }
 
     @Override
@@ -167,5 +178,6 @@ public class GhostTownHallCoreEntity extends Entity {
         output.storeNullable("FounderId", UUIDUtil.CODEC, founderId);
         output.putString("SettlementName", settlementName);
         output.store("TownPlanners", UUIDUtil.CODEC_SET, Set.copyOf(townPlanners));
+        output.putBoolean("BoundaryVisible", boundaryVisible);
     }
 }

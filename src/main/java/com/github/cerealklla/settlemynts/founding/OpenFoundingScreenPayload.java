@@ -19,7 +19,7 @@ import net.minecraft.resources.Identifier;
  * makes no further server queries of its own to render the screen -- same shape as Lyfe's
  * {@code OpenWritingScreenPayload}.
  */
-public record OpenFoundingScreenPayload(int coreEntityId, String settlementName, List<String> townPlannerNames, boolean viewerIsFounder)
+public record OpenFoundingScreenPayload(int coreEntityId, String settlementName, List<String> townPlannerNames, boolean viewerIsFounder, boolean boundaryVisible)
         implements CustomPacketPayload {
 
     public static final Type<OpenFoundingScreenPayload> TYPE =
@@ -30,6 +30,7 @@ public record OpenFoundingScreenPayload(int coreEntityId, String settlementName,
             ByteBufCodecs.STRING_UTF8, OpenFoundingScreenPayload::settlementName,
             ByteBufCodecs.collection(ArrayList::new, ByteBufCodecs.STRING_UTF8), OpenFoundingScreenPayload::townPlannerNames,
             ByteBufCodecs.BOOL, OpenFoundingScreenPayload::viewerIsFounder,
+            ByteBufCodecs.BOOL, OpenFoundingScreenPayload::boundaryVisible,
             OpenFoundingScreenPayload::new);
 
     @Override

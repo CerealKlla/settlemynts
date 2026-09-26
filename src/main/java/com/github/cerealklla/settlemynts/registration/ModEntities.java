@@ -1,6 +1,7 @@
 package com.github.cerealklla.settlemynts.registration;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
+import com.github.cerealklla.settlemynts.founding.GhostBoundaryWallEntity;
 import com.github.cerealklla.settlemynts.founding.GhostPerimeterStakeEntity;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 
@@ -28,4 +29,10 @@ public final class ModEntities {
             GhostPerimeterStakeEntity::new,
             MobCategory.MISC,
             builder -> builder.sized(0.5f, 1.0f));
+
+    public static final DeferredHolder<EntityType<?>, EntityType<GhostBoundaryWallEntity>> GHOST_BOUNDARY_WALL = ENTITIES.registerEntityType(
+            "ghost_boundary_wall",
+            GhostBoundaryWallEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(1.0f, 1.0f));
 }

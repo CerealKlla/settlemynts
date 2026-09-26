@@ -7,8 +7,10 @@ import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.github.cerealklla.settlemynts.founding.BoundaryWallLayout;
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
 import com.github.cerealklla.settlemynts.founding.FinalizeSettlementPayload;
+import com.github.cerealklla.settlemynts.founding.GhostBoundaryWallEntity;
 import com.github.cerealklla.settlemynts.founding.GhostPerimeterStakeEntity;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.founding.GrantTownPlannerPayload;
@@ -17,6 +19,7 @@ import com.github.cerealklla.settlemynts.founding.OpenStakeScreenPayload;
 import com.github.cerealklla.settlemynts.founding.PerimeterFit;
 import com.github.cerealklla.settlemynts.founding.RemoveStakePayload;
 import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
+import com.github.cerealklla.settlemynts.founding.SetBoundaryVisiblePayload;
 import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
 import com.github.cerealklla.settlemynts.founding.SetStakeAbsolutePayload;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
@@ -145,6 +148,50 @@ public class SettlemyntsMod {
 
         registrar.playToServer(FinalizeSettlementPayload.TYPE, FinalizeSettlementPayload.STREAM_CODEC,
                 (payload, context) -> finalizeSettlement(payload, context));
+
+        registrar.playToServer(SetBoundaryVisiblePayload.TYPE, SetBoundaryVisiblePayload.STREAM_CODEC,
+                (payload, context) -> setBoundaryVisible(payload, context));
+    }
+
+    /**
+     * Toggles "View Settlement Boundaries" (design doc Section 9). Turning it on discards any
+     * existing wall (in case one was left over from a stale state) and generates a fresh one from
+     * the settlement's *current* stake positions -- always live, not a snapshot from whenever it
+     * was last toggled on. Turning it off just discards every wall point for this core.
+     */
+    private static void setBoundaryVisible(SetBoundaryVisiblePayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)
+                || !(player.level() instanceof ServerLevel serverLevel)
+                || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)
+                || !core.isTownPlanner(player.getUUID())) {
+            return;
+        }
+
+        for (GhostBoundaryWallEntity existing : GhostBoundaryWallEntity.findByOwnerCore(serverLevel, core.getUUID())) {
+            existing.discard();
+        }
+
+        if (!payload.visible()) {
+            core.setBoundaryVisible(false);
+            return;
+        }
+
+        List<GhostPerimeterStakeEntity> stakes = GhostPerimeterStakeEntity.findByOwnerCore(serverLevel, core.getUUID());
+        if (stakes.size() < 3) {
+            player.sendSystemMessage(Component.literal("Place at least 3 perimeter stakes before showing the boundary."));
+            return;
+        }
+
+        List<PerimeterFit.StakeInput> inputs = new ArrayList<>(stakes.size());
+        for (GhostPerimeterStakeEntity stake : stakes) {
+            inputs.add(new PerimeterFit.StakeInput(stake.getX(), stake.getZ(), stake.isAbsolute()));
+        }
+        List<PerimeterFit.StakeInput> ordered = PerimeterFit.sortAngularly(inputs, core.getX(), core.getZ());
+
+        for (BoundaryWallLayout.Point point : BoundaryWallLayout.layout(ordered, BoundaryWallLayout.DEFAULT_SPACING_BLOCKS)) {
+            GhostBoundaryWallEntity.create(serverLevel, point.x(), core.getY(), point.z(), core.getUUID());
+        }
+        core.setBoundaryVisible(true);
     }
 
     /**

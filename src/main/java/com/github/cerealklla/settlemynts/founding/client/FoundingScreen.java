@@ -6,6 +6,7 @@ import com.github.cerealklla.settlemynts.founding.FinalizeSettlementPayload;
 import com.github.cerealklla.settlemynts.founding.GrantTownPlannerPayload;
 import com.github.cerealklla.settlemynts.founding.OpenFoundingScreenPayload;
 import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
+import com.github.cerealklla.settlemynts.founding.SetBoundaryVisiblePayload;
 import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
 
 import net.minecraft.client.Minecraft;
@@ -32,9 +33,11 @@ public final class FoundingScreen extends Screen {
     private final String initialName;
     private final List<String> townPlannerNames;
     private final boolean viewerIsFounder;
+    private boolean boundaryVisible;
 
     private EditBox nameBox;
     private EditBox grantBox;
+    private Button boundaryToggleButton;
 
     public FoundingScreen(OpenFoundingScreenPayload payload) {
         super(Component.literal("Settlement"));
@@ -42,6 +45,7 @@ public final class FoundingScreen extends Screen {
         this.initialName = payload.settlementName();
         this.townPlannerNames = payload.townPlannerNames();
         this.viewerIsFounder = payload.viewerIsFounder();
+        this.boundaryVisible = payload.boundaryVisible();
     }
 
     @Override
@@ -57,6 +61,10 @@ public final class FoundingScreen extends Screen {
         y += 30;
 
         addRenderableWidget(Button.builder(Component.literal("Get Perimeter Stake"), b -> getStake())
+                .bounds(centerX - 100, y, 245, 20).build());
+        y += 30;
+
+        boundaryToggleButton = addRenderableWidget(Button.builder(boundaryToggleLabel(), b -> toggleBoundary())
                 .bounds(centerX - 100, y, 245, 20).build());
         y += 30;
 
@@ -91,6 +99,16 @@ public final class FoundingScreen extends Screen {
         if (grantBox != null && !grantBox.getValue().isBlank()) {
             send(new GrantTownPlannerPayload(coreEntityId, grantBox.getValue()));
         }
+    }
+
+    private void toggleBoundary() {
+        boundaryVisible = !boundaryVisible;
+        send(new SetBoundaryVisiblePayload(coreEntityId, boundaryVisible));
+        boundaryToggleButton.setMessage(boundaryToggleLabel());
+    }
+
+    private Component boundaryToggleLabel() {
+        return Component.literal("View Settlement Boundaries: " + (boundaryVisible ? "ON" : "OFF"));
     }
 
     private void send(net.minecraft.network.protocol.common.custom.CustomPacketPayload payload) {
