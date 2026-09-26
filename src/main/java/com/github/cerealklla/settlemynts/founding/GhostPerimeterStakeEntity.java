@@ -42,6 +42,13 @@ public class GhostPerimeterStakeEntity extends Entity {
 
     public static final int MAX_ABSOLUTE_STAKES = 5;
 
+    // Not part of the original design doc -- added 2026-09-26 alongside making the Planned
+    // Perimeter Stake item reusable (no longer consumed on placement). Without some cap, multiple
+    // Town Planners freely re-placing the same item could pile up an unbounded number of stakes
+    // for one settlement; enforced server-side in PlannedPerimeterStakeItem regardless of how many
+    // stake items exist.
+    public static final int MAX_STAKES_PER_SETTLEMENT = 20;
+
     // Design doc Section 6: "within a 500 foot radius from the Town Hall Core," converted to
     // blocks at the suite's 1 block ~= 1 meter ~= 3.28 ft rate (see SettlementFounding).
     public static final double MAX_PLACEMENT_RADIUS_FEET = 500.0;

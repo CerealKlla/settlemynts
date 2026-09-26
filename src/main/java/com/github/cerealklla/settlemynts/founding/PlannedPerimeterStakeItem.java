@@ -26,6 +26,11 @@ import net.minecraft.world.phys.AABB;
  * GhostPerimeterStakeEntity#MAX_PLACEMENT_RADIUS_BLOCKS} of that specific core -- not simply "the
  * nearest core," since a planner of a distant settlement could otherwise be blocked by an
  * unrelated nearby one they have no permission on.
+ *
+ * <p><b>Not consumed on placement</b> (2026-09-26 -- the item was originally shrunk by 1 per
+ * placement, which turned out not to match the intent: a Planner should be able to keep
+ * right-clicking with one stake in hand to place several in a row, without walking back to the
+ * core for a fresh one each time).
  */
 public class PlannedPerimeterStakeItem extends Item {
 
@@ -54,8 +59,14 @@ public class PlannedPerimeterStakeItem extends Item {
             return InteractionResult.FAIL;
         }
 
+        int existingStakes = GhostPerimeterStakeEntity.findByOwnerCore(serverLevel, ownerCore.getUUID()).size();
+        if (existingStakes >= GhostPerimeterStakeEntity.MAX_STAKES_PER_SETTLEMENT) {
+            player.sendSystemMessage(Component.literal(
+                    "This settlement already has the maximum of " + GhostPerimeterStakeEntity.MAX_STAKES_PER_SETTLEMENT + " perimeter stakes."));
+            return InteractionResult.FAIL;
+        }
+
         GhostPerimeterStakeEntity.create(serverLevel, placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5, ownerCore.getUUID());
-        context.getItemInHand().shrink(1);
         return InteractionResult.SUCCESS_SERVER;
     }
 
