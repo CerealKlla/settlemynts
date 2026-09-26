@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import com.mojang.serialization.Codec;
+
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 
 import net.minecraft.core.UUIDUtil;
@@ -55,6 +57,14 @@ public class GhostTownHallCoreEntity extends Entity {
     private String settlementName = "";
     private final Set<UUID> townPlanners = new HashSet<>();
     private boolean boundaryVisible;
+    // Cartographyr's own EntityId#value() once this settlement has been registered there (design
+    // doc Section 8) -- null until the first successful Finalize. Lets a later Finalize (re-fitting
+    // the perimeter) update the existing Cartographyr entity's geometry instead of creating a
+    // duplicate every time. Not a Cartographyr type directly, since GhostTownHallCoreEntity must
+    // stay loadable even if Cartographyr's own classes aren't on the classpath in some hypothetical
+    // future -- see decisions.md for why Cartographyr is currently a required (not optional)
+    // dependency regardless, this is just extra caution for this one persisted field's shape.
+    private Long cartographyrEntityId;
 
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
@@ -85,6 +95,14 @@ public class GhostTownHallCoreEntity extends Entity {
 
     public void setBoundaryVisible(boolean boundaryVisible) {
         this.boundaryVisible = boundaryVisible;
+    }
+
+    public Long getCartographyrEntityId() {
+        return cartographyrEntityId;
+    }
+
+    public void setCartographyrEntityId(long cartographyrEntityId) {
+        this.cartographyrEntityId = cartographyrEntityId;
     }
 
     public boolean isFounder(UUID playerId) {
@@ -171,6 +189,7 @@ public class GhostTownHallCoreEntity extends Entity {
         townPlanners.clear();
         townPlanners.addAll(input.read("TownPlanners", UUIDUtil.CODEC_SET).orElse(Set.of()));
         boundaryVisible = input.getBooleanOr("BoundaryVisible", false);
+        cartographyrEntityId = input.read("CartographyrEntityId", Codec.LONG).orElse(null);
     }
 
     @Override
@@ -179,5 +198,6 @@ public class GhostTownHallCoreEntity extends Entity {
         output.putString("SettlementName", settlementName);
         output.store("TownPlanners", UUIDUtil.CODEC_SET, Set.copyOf(townPlanners));
         output.putBoolean("BoundaryVisible", boundaryVisible);
+        output.storeNullable("CartographyrEntityId", Codec.LONG, cartographyrEntityId);
     }
 }

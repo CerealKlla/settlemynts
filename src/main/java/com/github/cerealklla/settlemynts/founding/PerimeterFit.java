@@ -21,8 +21,12 @@ import java.util.List;
  */
 public final class PerimeterFit {
 
-    /** Design doc Section 7: proposed v1 target, ~20,000 blocks^2 -- see design-document.md Section 7 for the full sizing rationale. First-draft, expected to be tuned via playtesting. */
-    public static final double DEFAULT_TARGET_AREA_BLOCKS = 20_000.0;
+    /**
+     * Design doc Section 7's original proposed v1 target was ~20,000 blocks^2; doubled to 40,000
+     * (2026-09-26, user request after a live test -- felt too small once actually walked/seen in
+     * game) -- still first-draft, still expected to be tuned further via playtesting.
+     */
+    public static final double DEFAULT_TARGET_AREA_BLOCKS = 40_000.0;
 
     /**
      * The bound to actually pass as {@code maxRadiusFromCore} when fitting toward {@link

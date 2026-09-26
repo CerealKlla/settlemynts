@@ -18,11 +18,18 @@ public final class ModEntities {
 
     public static final DeferredRegister.Entities ENTITIES = DeferredRegister.createEntities(SettlemyntsMod.MODID);
 
+    // clientTrackingRange is in CHUNKS, not blocks -- the vanilla default (5 chunks = 80 blocks)
+    // was a real playtest bug (2026-09-26): the entity simply stops being sent to the client
+    // beyond that range, so anything reading it client-side (the stake distance HUD) silently
+    // lost it well within the 500 ft/1000 ft ranges this mod actually cares about. 20 chunks =
+    // 320 blocks, comfortably covers the user's requested 1000 ft (~305 blocks) with margin.
+    private static final int CORE_TRACKING_RANGE_CHUNKS = 20;
+
     public static final DeferredHolder<EntityType<?>, EntityType<GhostTownHallCoreEntity>> GHOST_TOWN_HALL_CORE = ENTITIES.registerEntityType(
             "ghost_town_hall_core",
             GhostTownHallCoreEntity::new,
             MobCategory.MISC,
-            builder -> builder.sized(1.0f, 1.0f));
+            builder -> builder.sized(1.0f, 1.0f).clientTrackingRange(CORE_TRACKING_RANGE_CHUNKS));
 
     public static final DeferredHolder<EntityType<?>, EntityType<GhostPerimeterStakeEntity>> GHOST_PERIMETER_STAKE = ENTITIES.registerEntityType(
             "ghost_perimeter_stake",

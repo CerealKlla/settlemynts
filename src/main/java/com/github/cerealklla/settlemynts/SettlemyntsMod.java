@@ -6,7 +6,18 @@ import com.mojang.logging.LogUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
+import com.github.cerealklla.cartographyr.api.Cartography;
+import com.github.cerealklla.cartographyr.geo.Classification;
+import com.github.cerealklla.cartographyr.geo.EntityDefinition;
+import com.github.cerealklla.cartographyr.geo.EntityId;
+import com.github.cerealklla.cartographyr.geo.EntityType;
+import com.github.cerealklla.cartographyr.geo.GeographicEntity;
+import com.github.cerealklla.cartographyr.geo.Geometry;
+import com.github.cerealklla.cartographyr.geo.Layer;
+import com.github.cerealklla.cartographyr.geo.LifecycleState;
 import com.github.cerealklla.settlemynts.founding.BoundaryWallLayout;
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
 import com.github.cerealklla.settlemynts.founding.FinalizeSettlementPayload;
@@ -208,10 +219,18 @@ public class SettlemyntsMod {
         core.setBoundaryVisible(true);
     }
 
+    // Design doc Section 8: "10 feet larger in every direction" -- corrected to blocks in the
+    // design doc itself (2026-09-26, see decisions.md): the user's real intent was 10 blocks
+    // (~33 feet), not 10 literal feet (~3 blocks, too thin to read as a real buffer).
+    private static final double CARTOGRAPHYR_PADDING_BLOCKS = 10.0;
+
     /**
-     * Runs the perimeter auto-fit (design doc Section 7, {@link PerimeterFit}) and repositions the
-     * stakes accordingly -- the rest of finalization (solidifying stakes/core, Cartographyr
-     * registration, protection, design doc Section 8) is a later milestone, not built here.
+     * Runs the perimeter auto-fit (design doc Section 7, {@link PerimeterFit}), repositions the
+     * stakes, registers (or updates) the settlement's polygon with Cartographyr (design doc Section
+     * 8 -- a 10-block padded buffer around the fitted perimeter, "a no man's zone"), and clears any
+     * leftover Planned Perimeter Stake items from the settlement's online Town Planners (no longer
+     * needed once staking is done). **Does not yet solidify the stakes/core into real blocks or
+     * enable protection** -- the rest of Section 8, a later milestone.
      */
     private static void finalizeSettlement(FinalizeSettlementPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player)) {
@@ -262,10 +281,79 @@ public class SettlemyntsMod {
             stake.setPos(fitted.x(), stake.getY(), fitted.z());
         }
 
+        registerWithCartographyr(serverLevel, core, result.fittedStakes());
+        int stakesCleared = clearPerimeterStakeItems(serverLevel, core);
+
         player.sendSystemMessage(Component.literal(
                 "Perimeter fitted to " + Math.round(result.achievedArea()) + " blocks^2 (target "
-                        + Math.round(PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS) + "). "
-                        + "Finalization (solidifying, protection, Cartographyr registration) isn't implemented yet."));
+                        + Math.round(PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS) + "). Registered with Cartographyr"
+                        + (stakesCleared > 0 ? " -- cleared " + stakesCleared + " leftover Perimeter Stake item(s)." : ".")
+                        + " Solidifying the core/stakes and enabling protection isn't implemented yet."));
+    }
+
+    /**
+     * Registers this settlement's fitted perimeter with Cartographyr as a {@code
+     * Classification.CONSTRUCTED}/{@code EntityType.SETTLEMENT} entity -- design doc Section 8. The
+     * polygon sent is padded {@link #CARTOGRAPHYR_PADDING_BLOCKS} outward from the core along each
+     * vertex's own direction (a radial approximation of a uniform buffer, not a true geometric
+     * offset -- adequate for the star-shaped-around-the-core polygons this algorithm always
+     * produces, not a general-purpose polygon buffer). Idempotent: a settlement already registered
+     * (tracked via {@code GhostTownHallCoreEntity#getCartographyrEntityId}) gets its existing
+     * entity's geometry *updated* instead of a duplicate being created, so re-running Finalize
+     * later (e.g. after adjusting stakes) doesn't leave stale entries behind.
+     */
+    private static void registerWithCartographyr(ServerLevel level, GhostTownHallCoreEntity core, List<PerimeterFit.StakeInput> fittedStakes) {
+        List<PerimeterFit.StakeInput> ordered = PerimeterFit.sortAngularly(fittedStakes, core.getX(), core.getZ());
+        List<Geometry.Polygon.Vertex> vertices = new ArrayList<>(ordered.size());
+        for (PerimeterFit.StakeInput stake : ordered) {
+            double dx = stake.x() - core.getX();
+            double dz = stake.z() - core.getZ();
+            double distance = Math.hypot(dx, dz);
+            double scale = distance > 1.0e-9 ? (distance + CARTOGRAPHYR_PADDING_BLOCKS) / distance : 1.0;
+            vertices.add(new Geometry.Polygon.Vertex(
+                    (int) Math.round(core.getX() + dx * scale),
+                    (int) Math.round(core.getZ() + dz * scale)));
+        }
+        Geometry paddedPolygon = new Geometry.Polygon(vertices);
+
+        Long existingId = core.getCartographyrEntityId();
+        if (existingId != null) {
+            Optional<GeographicEntity> updated = Cartography.updateEntity(level, new EntityId(existingId), e -> e.withGeometry(paddedPolygon));
+            if (updated.isPresent()) {
+                return;
+            }
+            // The tracked id no longer resolves to a real entity (shouldn't normally happen) --
+            // fall through and register fresh rather than leaving this settlement unregistered.
+        }
+
+        GeographicEntity created = Cartography.createEntity(level, new EntityDefinition(
+                level.dimension(),
+                Classification.CONSTRUCTED,
+                EntityType.SETTLEMENT,
+                Layer.LOCATION_ID,
+                Optional.of(core.getSettlementName()),
+                paddedPolygon,
+                LifecycleState.REALIZED));
+        core.setCartographyrEntityId(created.id().value());
+    }
+
+    /** Removes every Planned Perimeter Stake item from each of the settlement's currently-online Town Planners' inventories -- no longer needed once staking is done. Offline planners are left alone (nothing to touch); returns the total number of item stacks removed, for the confirmation message. */
+    private static int clearPerimeterStakeItems(ServerLevel level, GhostTownHallCoreEntity core) {
+        int cleared = 0;
+        for (UUID plannerId : core.getTownPlanners()) {
+            ServerPlayer planner = level.getServer().getPlayerList().getPlayer(plannerId);
+            if (planner == null) {
+                continue;
+            }
+            var inventory = planner.getInventory();
+            for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+                if (inventory.getItem(slot).is(ModItems.PLANNED_PERIMETER_STAKE.get())) {
+                    inventory.setItem(slot, ItemStack.EMPTY);
+                    cleared++;
+                }
+            }
+        }
+        return cleared;
     }
 
     private static GhostTownHallCoreEntity ownerCoreOf(ServerLevel level, GhostPerimeterStakeEntity stake) {
