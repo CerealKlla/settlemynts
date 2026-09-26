@@ -38,6 +38,16 @@ import net.minecraft.world.phys.AABB;
  */
 public class GhostBoundaryWallEntity extends Entity {
 
+    /**
+     * How many blocks tall each wall column is (2026-09-26, playtest feedback: individual
+     * floating blocks pinned to the core's own Y didn't read as a wall at all once terrain height
+     * varied along the perimeter -- some floated well above the ground, others sat underground).
+     * Each {@link BoundaryWallLayout} point now gets a short vertical stack anchored to that
+     * point's own local ground height instead of a single block at a shared Y -- see {@code
+     * SettlemyntsMod#setBoundaryVisible}.
+     */
+    public static final int WALL_HEIGHT_BLOCKS = 4;
+
     private UUID ownerCoreId;
 
     public GhostBoundaryWallEntity(EntityType<? extends GhostBoundaryWallEntity> type, Level level) {

@@ -38,6 +38,7 @@ public final class FoundingScreen extends Screen {
     private EditBox nameBox;
     private EditBox grantBox;
     private Button boundaryToggleButton;
+    private int plannerListY;
 
     public FoundingScreen(OpenFoundingScreenPayload payload) {
         super(Component.literal("Settlement"));
@@ -78,6 +79,14 @@ public final class FoundingScreen extends Screen {
 
         addRenderableWidget(Button.builder(Component.literal("Finalize"), b -> finalizeSettlement())
                 .bounds(centerX - 100, y, 245, 20).build());
+        y += 30;
+
+        // Rendered below every button (see extractRenderState) -- computed here, not a fixed
+        // constant, so it never overlaps the button stack above regardless of whether the
+        // founder-only grant row is present. A real layout bug (2026-09-26 playtest round):
+        // the planner list and the founder-only grant row previously occupied the same fixed y,
+        // visually overlapping whenever more than one planner was listed.
+        plannerListY = y + 10;
 
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
                 .bounds(centerX - 50, height - 30, 100, 20).build());
@@ -121,7 +130,7 @@ public final class FoundingScreen extends Screen {
         int titleWidth = font.width(title);
         graphics.text(font, title, width / 2 - titleWidth / 2, 15, 0xFFFFFF);
 
-        int listY = 130;
+        int listY = plannerListY;
         String header = "Town Planners:";
         graphics.text(font, header, width / 2 - 100, listY, 0xAAAAAA);
         listY += 12;

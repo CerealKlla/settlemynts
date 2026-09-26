@@ -31,6 +31,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
@@ -160,10 +161,16 @@ public class SettlemyntsMod {
      * was last toggled on. Turning it off just discards every wall point for this core.
      */
     private static void setBoundaryVisible(SetBoundaryVisiblePayload payload, IPayloadContext context) {
-        if (!(context.player() instanceof ServerPlayer player)
-                || !(player.level() instanceof ServerLevel serverLevel)
-                || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)
-                || !core.isTownPlanner(player.getUUID())) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        if (!(player.level() instanceof ServerLevel serverLevel) || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal(
+                    "Couldn't find this settlement's Town Hall Core anymore -- try right-clicking it again to reopen this screen."));
+            return;
+        }
+        if (!core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
             return;
         }
 
@@ -189,7 +196,14 @@ public class SettlemyntsMod {
         List<PerimeterFit.StakeInput> ordered = PerimeterFit.sortAngularly(inputs, core.getX(), core.getZ());
 
         for (BoundaryWallLayout.Point point : BoundaryWallLayout.layout(ordered, BoundaryWallLayout.DEFAULT_SPACING_BLOCKS)) {
-            GhostBoundaryWallEntity.create(serverLevel, point.x(), core.getY(), point.z(), core.getUUID());
+            // Anchored to this point's own local ground height, not the core's fixed Y (fixed
+            // 2026-09-26, playtest feedback -- varying terrain along the perimeter made single
+            // fixed-height blocks read as scattered floating icons, not a wall). A short vertical
+            // stack per point gives a real "wall" silhouette even where the ground itself slopes.
+            int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, (int) Math.floor(point.x()), (int) Math.floor(point.z()));
+            for (int level = 0; level < GhostBoundaryWallEntity.WALL_HEIGHT_BLOCKS; level++) {
+                GhostBoundaryWallEntity.create(serverLevel, point.x(), groundY + level, point.z(), core.getUUID());
+            }
         }
         core.setBoundaryVisible(true);
     }
@@ -200,12 +214,20 @@ public class SettlemyntsMod {
      * registration, protection, design doc Section 8) is a later milestone, not built here.
      */
     private static void finalizeSettlement(FinalizeSettlementPayload payload, IPayloadContext context) {
-        if (!(context.player() instanceof ServerPlayer player)
-                || !(player.level() instanceof ServerLevel serverLevel)
-                || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return; // No player to message -- genuinely nothing to do.
+        }
+        if (!(player.level() instanceof ServerLevel serverLevel) || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
+            // Every other branch below can explain itself in a chat message; this one can't --
+            // the core entity this screen was opened for is gone (a stale network id from an
+            // entity reload, or the core was somehow removed). Still message rather than fail
+            // silently, so a report like "Finalize does nothing" is actually diagnosable.
+            player.sendSystemMessage(Component.literal(
+                    "Couldn't find this settlement's Town Hall Core anymore -- try right-clicking it again to reopen this screen."));
             return;
         }
         if (!core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
             return;
         }
         if (core.getSettlementName().isBlank()) {
