@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.founding.client;
 
 import java.util.List;
 
+import com.github.cerealklla.settlemynts.founding.FinalizeSettlementPayload;
 import com.github.cerealklla.settlemynts.founding.GrantTownPlannerPayload;
 import com.github.cerealklla.settlemynts.founding.OpenFoundingScreenPayload;
 import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
@@ -19,9 +20,11 @@ import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
  * The Ghost Town Hall Core's permissions/naming UI (design doc Section 6) -- opened via {@link
  * OpenFoundingScreenPayload}. A deliberately minimal first pass: name entry, granting Town Planner
  * by online player name (founder-only, enforced server-side regardless of what this screen shows),
- * a plain list of current planners, and retrieving a Planned Perimeter Stake. No Finalize button
- * yet -- the perimeter fit algorithm and finalization effects (design doc Sections 7-8) are a
- * separate milestone.
+ * a plain list of current planners, retrieving a Planned Perimeter Stake, and Finalize (runs the
+ * perimeter auto-fit -- design doc Section 7 -- but not yet the rest of finalization: solidifying
+ * stakes/core, Cartographyr registration, or protection, design doc Section 8, a later milestone).
+ * All server-side validation (name set, enough stakes, shape encapsulates the core) happens on
+ * click rather than being precomputed here, since this screen has no live view of the stakes.
  */
 public final class FoundingScreen extends Screen {
 
@@ -65,8 +68,15 @@ public final class FoundingScreen extends Screen {
             y += 30;
         }
 
+        addRenderableWidget(Button.builder(Component.literal("Finalize"), b -> finalizeSettlement())
+                .bounds(centerX - 100, y, 245, 20).build());
+
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
                 .bounds(centerX - 50, height - 30, 100, 20).build());
+    }
+
+    private void finalizeSettlement() {
+        send(new FinalizeSettlementPayload(coreEntityId));
     }
 
     private void setName() {

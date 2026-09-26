@@ -4,12 +4,17 @@ import org.slf4j.Logger;
 
 import com.mojang.logging.LogUtils;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
+import com.github.cerealklla.settlemynts.founding.FinalizeSettlementPayload;
 import com.github.cerealklla.settlemynts.founding.GhostPerimeterStakeEntity;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.founding.GrantTownPlannerPayload;
 import com.github.cerealklla.settlemynts.founding.OpenFoundingScreenPayload;
 import com.github.cerealklla.settlemynts.founding.OpenStakeScreenPayload;
+import com.github.cerealklla.settlemynts.founding.PerimeterFit;
 import com.github.cerealklla.settlemynts.founding.RemoveStakePayload;
 import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
 import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
@@ -31,6 +36,7 @@ import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 // The value here must match the modId entry in META-INF/neoforge.mods.toml (sourced from mod_id in gradle.properties)
 @Mod(SettlemyntsMod.MODID)
@@ -136,6 +142,61 @@ public class SettlemyntsMod {
                         stake.removeAndReturnItem(player);
                     }
                 });
+
+        registrar.playToServer(FinalizeSettlementPayload.TYPE, FinalizeSettlementPayload.STREAM_CODEC,
+                (payload, context) -> finalizeSettlement(payload, context));
+    }
+
+    /**
+     * Runs the perimeter auto-fit (design doc Section 7, {@link PerimeterFit}) and repositions the
+     * stakes accordingly -- the rest of finalization (solidifying stakes/core, Cartographyr
+     * registration, protection, design doc Section 8) is a later milestone, not built here.
+     */
+    private static void finalizeSettlement(FinalizeSettlementPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)
+                || !(player.level() instanceof ServerLevel serverLevel)
+                || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
+            return;
+        }
+        if (!core.isTownPlanner(player.getUUID())) {
+            return;
+        }
+        if (core.getSettlementName().isBlank()) {
+            player.sendSystemMessage(Component.literal("Set a settlement name before finalizing."));
+            return;
+        }
+
+        List<GhostPerimeterStakeEntity> stakes = GhostPerimeterStakeEntity.findByOwnerCore(serverLevel, core.getUUID());
+        if (stakes.size() < 3) {
+            player.sendSystemMessage(Component.literal("Place at least 3 perimeter stakes before finalizing."));
+            return;
+        }
+
+        List<PerimeterFit.StakeInput> inputs = new ArrayList<>(stakes.size());
+        for (GhostPerimeterStakeEntity stake : stakes) {
+            inputs.add(new PerimeterFit.StakeInput(stake.getX(), stake.getZ(), stake.isAbsolute()));
+        }
+
+        List<PerimeterFit.StakeInput> orderedForContainment = PerimeterFit.sortAngularly(inputs, core.getX(), core.getZ());
+        if (!PerimeterFit.containsPoint(orderedForContainment, core.getX(), core.getZ())) {
+            player.sendSystemMessage(Component.literal(
+                    "The perimeter stakes don't fully encompass the Town Hall Core yet."));
+            return;
+        }
+
+        PerimeterFit.FitResult result = PerimeterFit.fit(
+                core.getX(), core.getZ(), inputs, PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS, GhostPerimeterStakeEntity.MAX_PLACEMENT_RADIUS_BLOCKS);
+
+        for (int i = 0; i < stakes.size(); i++) {
+            PerimeterFit.StakeInput fitted = result.fittedStakes().get(i);
+            GhostPerimeterStakeEntity stake = stakes.get(i);
+            stake.setPos(fitted.x(), stake.getY(), fitted.z());
+        }
+
+        player.sendSystemMessage(Component.literal(
+                "Perimeter fitted to " + Math.round(result.achievedArea()) + " blocks^2 (target "
+                        + Math.round(PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS) + "). "
+                        + "Finalization (solidifying, protection, Cartographyr registration) isn't implemented yet."));
     }
 
     private static GhostTownHallCoreEntity ownerCoreOf(ServerLevel level, GhostPerimeterStakeEntity stake) {
