@@ -24,6 +24,21 @@ public final class PerimeterFit {
     /** Design doc Section 7: proposed v1 target, ~20,000 blocks^2 -- see design-document.md Section 7 for the full sizing rationale. First-draft, expected to be tuned via playtesting. */
     public static final double DEFAULT_TARGET_AREA_BLOCKS = 20_000.0;
 
+    /**
+     * The bound to actually pass as {@code maxRadiusFromCore} when fitting toward {@link
+     * #DEFAULT_TARGET_AREA_BLOCKS} -- deliberately **not** {@code
+     * GhostPerimeterStakeEntity#MAX_PLACEMENT_RADIUS_BLOCKS} (~152 blocks). Placement radius
+     * constrains where a Planner may physically walk to place a stake; it has nothing to do with
+     * how far the fit is allowed to grow that stake afterward, and reusing it here was a real bug
+     * (2026-09-26 playtest): a stake placed anywhere near the placement radius left almost no room
+     * to grow, so the fit silently capped out well short of the target -- observed as a 14,327
+     * vs. 20,000 blocks^2 result, not the "same area every time, tiny variance" the user actually
+     * wants. This bound is chosen generously larger than any legitimate stake's starting distance
+     * (which can never exceed the placement radius in the first place), so it essentially never
+     * binds in practice -- the search converges on the real target instead of an artificial cap.
+     */
+    public static final double DEFAULT_MAX_FIT_RADIUS_BLOCKS = 2000.0;
+
     // Bounds worst-case cost, same "don't loop forever" precedent used elsewhere in this suite
     // (e.g. Cartographyr's MAX_CELLS/MAX_NAME_ATTEMPTS) -- far more than needed for float
     // precision at this scale.

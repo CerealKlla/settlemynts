@@ -254,7 +254,7 @@ public class SettlemyntsMod {
         }
 
         PerimeterFit.FitResult result = PerimeterFit.fit(
-                core.getX(), core.getZ(), inputs, PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS, GhostPerimeterStakeEntity.MAX_PLACEMENT_RADIUS_BLOCKS);
+                core.getX(), core.getZ(), inputs, PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS, PerimeterFit.DEFAULT_MAX_FIT_RADIUS_BLOCKS);
 
         for (int i = 0; i < stakes.size(); i++) {
             PerimeterFit.StakeInput fitted = result.fittedStakes().get(i);

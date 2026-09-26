@@ -97,6 +97,27 @@ class PerimeterFitTest {
     }
 
     @Test
+    void reachesTheRealSettlementTargetEvenWhenOneStakeStartsNearThePlacementRadius() {
+        // Regression test for a real 2026-09-26 playtest bug: reusing the ~152-block placement
+        // radius as the fit's own max-radius bound left almost no room to grow whenever a stake
+        // happened to already sit near that radius, capping the result well short of the target
+        // (observed: 14,327 vs. 20,000 blocks^2). This shape's original area is only 3,400 blocks^2
+        // (irregular: three stakes clustered near the core, one "spike" out at distance 150, close
+        // to the old placement-radius cap) -- exactly the shape of the real bug, not a regular
+        // polygon. Under the old (buggy) 152-block bound this could barely grow past ~3,492; with
+        // DEFAULT_MAX_FIT_RADIUS_BLOCKS it must reach the real target almost exactly.
+        List<StakeInput> spikeShape = List.of(
+                new StakeInput(150, 0, false),
+                new StakeInput(0, 20, false),
+                new StakeInput(-20, 0, false),
+                new StakeInput(0, -20, false));
+
+        FitResult result = PerimeterFit.fit(0, 0, spikeShape, PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS, PerimeterFit.DEFAULT_MAX_FIT_RADIUS_BLOCKS);
+
+        assertEquals(PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS, result.achievedArea(), PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS * 0.01);
+    }
+
+    @Test
     void allAbsoluteStakesMeansNoAdjustmentIsPossible() {
         List<StakeInput> square = List.of(
                 new StakeInput(5, 5, true),

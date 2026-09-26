@@ -10,11 +10,24 @@ import java.util.List;
  */
 public final class BoundaryWallLayout {
 
-    /** Default spacing between wall points along each edge -- untuned, easy to retune (matches every other placeholder magnitude in this project). */
-    public static final double DEFAULT_SPACING_BLOCKS = 4.0;
+    /**
+     * Default spacing between wall points along each edge -- every block (2026-09-26, playtest
+     * feedback: 4-block spacing read as "a series of pillars," not a wall). Combined with {@link
+     * GhostBoundaryWallEntity#WALL_HEIGHT_BLOCKS}, this produces a real, dense, contiguous-looking
+     * wall at the cost of a much higher entity count for a large perimeter -- see {@link
+     * #MAX_WALL_POINTS}'s own note.
+     */
+    public static final double DEFAULT_SPACING_BLOCKS = 1.0;
 
-    /** Hard cap on total wall points regardless of perimeter length or requested spacing -- bounds worst-case entity count for a very large or oddly-shaped perimeter. */
-    public static final int MAX_WALL_POINTS = 300;
+    /**
+     * Hard cap on total wall points regardless of perimeter length or requested spacing -- bounds
+     * worst-case entity count for a very large or oddly-shaped perimeter. Raised alongside the
+     * spacing change above (2026-09-26) so a typical test-scale settlement's perimeter doesn't
+     * trigger the auto-widening fallback and silently space points out again, defeating "every
+     * block." Still just a safety net for genuinely large perimeters, not expected to bind for
+     * ordinary settlement sizes.
+     */
+    public static final int MAX_WALL_POINTS = 2000;
 
     private BoundaryWallLayout() {
     }
