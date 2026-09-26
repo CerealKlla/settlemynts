@@ -1,19 +1,16 @@
 package com.github.cerealklla.settlemynts.founding;
 
-import java.util.List;
 import java.util.Optional;
 
 import com.github.cerealklla.cartographyr.api.Cartography;
 import com.github.cerealklla.cartographyr.geo.Classification;
 import com.github.cerealklla.cartographyr.geo.EntityType;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
-import com.github.cerealklla.settlemynts.registration.ModEntities;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
-import net.minecraft.world.phys.AABB;
 
 /**
  * Settlement founding (design doc Section 5): the minimum-distance check against existing
@@ -42,23 +39,28 @@ public final class SettlementFounding {
     }
 
     /**
-     * The nearest existing settlement (player-founded or natural) to {@code (x, z)}, with its
-     * distance and compass direction, or empty if none exist yet in this dimension. Reuses
-     * Cartographyr's existing {@code Cartography.findEntities}/{@code Classification.CONSTRUCTED}
-     * query -- no new Cartographyr API needed, since natural villages are already tracked there
-     * (design doc Section 1), and a player-founded settlement registers itself there too once
-     * finalized (Section 8, not built yet this milestone).
+     * The nearest existing settlement (player-founded or natural, finalized or still being staked)
+     * to {@code (x, z)}, with its distance and compass direction, or empty if none exist yet in
+     * this dimension. Reuses Cartographyr's existing {@code Cartography.findEntities}/{@code
+     * Classification.CONSTRUCTED} query -- no new Cartographyr API needed, since natural villages
+     * are already tracked there (design doc Section 1).
      *
      * <p>Added 2026-09-26 (see decisions.md) -- a real playtest request: a bare "too close" message
      * gave the player no way to judge how far to walk or which way, since there's no in-game frame
      * of reference for a raw block count. Replaces the previous {@code distanceToNearestSettlement}.
      *
-     * <p><b>Also counts unfinalized Ghost Town Hall Cores already placed in the world</b> (fixed
-     * 2026-09-26, same day -- a real playtest report: two claim flags could be placed right next to
-     * each other, since only Cartographyr-registered settlements were checked, and a player-founded
-     * settlement isn't registered there until finalization, Section 8, not built yet). Scans the
-     * level directly for {@code GhostTownHallCoreEntity} instances within the founding-distance
-     * radius, since there's no other registry of in-progress foundings yet.
+     * <p><b>Relies entirely on Cartographyr's persistent registry, not live entities</b> (fixed
+     * 2026-09-26, a real playtest-found bug -- see decisions.md and {@code
+     * SettlementClaimFlagItem}'s own doc): an earlier version additionally scanned the level
+     * directly for currently-*loaded* {@code GhostTownHallCoreEntity} instances, to catch
+     * unfinalized settlements before Cartographyr registration existed for them. That was
+     * chunk-load-dependent -- if an unfinalized settlement's chunk happened to be unloaded (e.g.
+     * the founder walked far away to test a different spot), it silently vanished from this check
+     * entirely, allowing placement arbitrarily close. Now every settlement is registered with
+     * Cartographyr immediately at founding (at {@code LifecycleState.PLANNED}, not just at
+     * finalization), so this method only ever needs Cartographyr's own persistent data, which
+     * doesn't depend on chunk-load state at all -- the same failure mode is now structurally
+     * impossible, not just less likely.
      */
     public static Optional<NearestSettlement> findNearestSettlement(ServerLevel level, int x, int z) {
         double closestDistanceSq = Double.MAX_VALUE;
@@ -72,23 +74,6 @@ public final class SettlementFounding {
             }
             double dx = entity.geometry().centerBlockX() - x;
             double dz = entity.geometry().centerBlockZ() - z;
-            double distanceSq = dx * dx + dz * dz;
-            if (distanceSq < closestDistanceSq) {
-                closestDistanceSq = distanceSq;
-                closestDx = dx;
-                closestDz = dz;
-                found = true;
-            }
-        }
-
-        AABB searchBox = new AABB(
-                x - MIN_DISTANCE_BLOCKS, level.getMinY(), z - MIN_DISTANCE_BLOCKS,
-                x + MIN_DISTANCE_BLOCKS, level.getMaxY(), z + MIN_DISTANCE_BLOCKS);
-        List<GhostTownHallCoreEntity> nearbyGhostCores =
-                level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), searchBox, ignored -> true);
-        for (GhostTownHallCoreEntity core : nearbyGhostCores) {
-            double dx = core.getX() - x;
-            double dz = core.getZ() - z;
             double distanceSq = dx * dx + dz * dz;
             if (distanceSq < closestDistanceSq) {
                 closestDistanceSq = distanceSq;

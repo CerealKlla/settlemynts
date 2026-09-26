@@ -2,6 +2,16 @@ package com.github.cerealklla.settlemynts.founding;
 
 import java.util.Optional;
 
+import com.github.cerealklla.cartographyr.api.Cartography;
+import com.github.cerealklla.cartographyr.geo.Classification;
+import com.github.cerealklla.cartographyr.geo.EntityDefinition;
+import com.github.cerealklla.cartographyr.geo.EntityType;
+import com.github.cerealklla.cartographyr.geo.GeographicEntity;
+import com.github.cerealklla.cartographyr.geo.Geometry;
+import com.github.cerealklla.cartographyr.geo.Layer;
+import com.github.cerealklla.cartographyr.geo.LifecycleState;
+import com.github.cerealklla.cartographyr.geo.ProtectionLevel;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -22,6 +32,17 @@ import net.minecraft.world.level.Level;
  * player-founded). On success, clears a 5x5 construction site and spawns a {@link
  * GhostTownHallCoreEntity} at its center, visible only to the founder for now (Section 6's
  * permission-granting UI is a later milestone). Consumes the flag on success.
+ *
+ * <p><b>Also registers a placeholder Cartographyr entity immediately, at {@code
+ * LifecycleState.PLANNED}</b> (fixed 2026-09-26, a real playtest-found bug -- see decisions.md):
+ * before this, an unfinalized settlement's only record of its own existence was its live {@code
+ * GhostTownHallCoreEntity}, and {@link SettlementFounding#findNearestSettlement} could only find it
+ * by scanning currently-*loaded* entities. If that settlement's chunk happened to be unloaded (e.g.
+ * the founder had walked far away to test a different spot), the distance check found nothing for
+ * it at all and silently allowed placement arbitrarily close. Cartographyr's own registry is
+ * persistent regardless of chunk-load state, so registering here (not just at finalization)
+ * closes that gap entirely -- {@code SettlemyntsMod#registerWithCartographyr} then updates this
+ * same entity in place at finalization rather than creating a duplicate.
  */
 public class SettlementClaimFlagItem extends Item {
 
@@ -57,7 +78,19 @@ public class SettlementClaimFlagItem extends Item {
         }
 
         SettlementFounding.clearConstructionSite(serverLevel, sitePos);
-        GhostTownHallCoreEntity.create(serverLevel, sitePos.getX() + 0.5, sitePos.getY(), sitePos.getZ() + 0.5, player.getUUID());
+        GhostTownHallCoreEntity core = GhostTownHallCoreEntity.create(
+                serverLevel, sitePos.getX() + 0.5, sitePos.getY(), sitePos.getZ() + 0.5, player.getUUID());
+
+        GeographicEntity registered = Cartography.createEntity(serverLevel, new EntityDefinition(
+                serverLevel.dimension(),
+                Classification.CONSTRUCTED,
+                EntityType.SETTLEMENT,
+                Layer.LOCATION_ID,
+                Optional.empty(),
+                new Geometry.Point(sitePos.getX(), sitePos.getZ()),
+                LifecycleState.PLANNED,
+                Optional.of(ProtectionLevel.NO_VOXEL_CHANGE_ALONG_SURFACE_AND_UP)));
+        core.setCartographyrEntityId(registered.id().value());
 
         context.getItemInHand().shrink(1);
         return InteractionResult.SUCCESS_SERVER;

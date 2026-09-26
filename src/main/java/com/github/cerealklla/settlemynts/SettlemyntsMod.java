@@ -18,6 +18,7 @@ import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.cartographyr.geo.Layer;
 import com.github.cerealklla.cartographyr.geo.LifecycleState;
+import com.github.cerealklla.cartographyr.geo.ProtectionLevel;
 import com.github.cerealklla.settlemynts.founding.BoundaryWallLayout;
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
 import com.github.cerealklla.settlemynts.founding.FinalizeSettlementPayload;
@@ -318,7 +319,15 @@ public class SettlemyntsMod {
 
         Long existingId = core.getCartographyrEntityId();
         if (existingId != null) {
-            Optional<GeographicEntity> updated = Cartography.updateEntity(level, new EntityId(existingId), e -> e.withGeometry(paddedPolygon));
+            // The common case now: every settlement is already registered at LifecycleState.PLANNED
+            // from the moment it was founded (see SettlementClaimFlagItem) specifically so the
+            // founding-distance check has a chunk-load-independent record of it even before this
+            // point is ever reached. Finalize is what promotes it to REALIZED, fills in the real
+            // name (blank at founding time), and swaps in the real fitted/padded polygon.
+            Optional<GeographicEntity> updated = Cartography.updateEntity(level, new EntityId(existingId), e -> e
+                    .withGeometry(paddedPolygon)
+                    .withName(Optional.of(core.getSettlementName()))
+                    .withLifecycleState(LifecycleState.REALIZED));
             if (updated.isPresent()) {
                 return;
             }
@@ -333,7 +342,8 @@ public class SettlemyntsMod {
                 Layer.LOCATION_ID,
                 Optional.of(core.getSettlementName()),
                 paddedPolygon,
-                LifecycleState.REALIZED));
+                LifecycleState.REALIZED,
+                Optional.of(ProtectionLevel.NO_VOXEL_CHANGE_ALONG_SURFACE_AND_UP)));
         core.setCartographyrEntityId(created.id().value());
     }
 
