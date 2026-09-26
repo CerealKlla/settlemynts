@@ -1,16 +1,19 @@
 package com.github.cerealklla.settlemynts.founding;
 
+import java.util.List;
 import java.util.Optional;
 
 import com.github.cerealklla.cartographyr.api.Cartography;
 import com.github.cerealklla.cartographyr.geo.Classification;
 import com.github.cerealklla.cartographyr.geo.EntityType;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
+import com.github.cerealklla.settlemynts.registration.ModEntities;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.phys.AABB;
 
 /**
  * Settlement founding (design doc Section 5): the minimum-distance check against existing
@@ -49,10 +52,20 @@ public final class SettlementFounding {
      * <p>Added 2026-09-26 (see decisions.md) -- a real playtest request: a bare "too close" message
      * gave the player no way to judge how far to walk or which way, since there's no in-game frame
      * of reference for a raw block count. Replaces the previous {@code distanceToNearestSettlement}.
+     *
+     * <p><b>Also counts unfinalized Ghost Town Hall Cores already placed in the world</b> (fixed
+     * 2026-09-26, same day -- a real playtest report: two claim flags could be placed right next to
+     * each other, since only Cartographyr-registered settlements were checked, and a player-founded
+     * settlement isn't registered there until finalization, Section 8, not built yet). Scans the
+     * level directly for {@code GhostTownHallCoreEntity} instances within the founding-distance
+     * radius, since there's no other registry of in-progress foundings yet.
      */
     public static Optional<NearestSettlement> findNearestSettlement(ServerLevel level, int x, int z) {
-        GeographicEntity nearest = null;
         double closestDistanceSq = Double.MAX_VALUE;
+        double closestDx = 0;
+        double closestDz = 0;
+        boolean found = false;
+
         for (GeographicEntity entity : Cartography.findEntities(level, Classification.CONSTRUCTED)) {
             if (!entity.type().equals(EntityType.SETTLEMENT)) {
                 continue;
@@ -62,16 +75,33 @@ public final class SettlementFounding {
             double distanceSq = dx * dx + dz * dz;
             if (distanceSq < closestDistanceSq) {
                 closestDistanceSq = distanceSq;
-                nearest = entity;
+                closestDx = dx;
+                closestDz = dz;
+                found = true;
             }
         }
-        if (nearest == null) {
+
+        AABB searchBox = new AABB(
+                x - MIN_DISTANCE_BLOCKS, level.getMinY(), z - MIN_DISTANCE_BLOCKS,
+                x + MIN_DISTANCE_BLOCKS, level.getMaxY(), z + MIN_DISTANCE_BLOCKS);
+        List<GhostTownHallCoreEntity> nearbyGhostCores =
+                level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), searchBox, ignored -> true);
+        for (GhostTownHallCoreEntity core : nearbyGhostCores) {
+            double dx = core.getX() - x;
+            double dz = core.getZ() - z;
+            double distanceSq = dx * dx + dz * dz;
+            if (distanceSq < closestDistanceSq) {
+                closestDistanceSq = distanceSq;
+                closestDx = dx;
+                closestDz = dz;
+                found = true;
+            }
+        }
+
+        if (!found) {
             return Optional.empty();
         }
-        double dx = nearest.geometry().centerBlockX() - x;
-        double dz = nearest.geometry().centerBlockZ() - z;
-        double distance = Math.sqrt(dx * dx + dz * dz);
-        return Optional.of(new NearestSettlement(distance, compassDirectionOf(dx, dz)));
+        return Optional.of(new NearestSettlement(Math.sqrt(closestDistanceSq), compassDirectionOf(closestDx, closestDz)));
     }
 
     public static boolean isFarEnoughFromExistingSettlements(ServerLevel level, int x, int z) {
