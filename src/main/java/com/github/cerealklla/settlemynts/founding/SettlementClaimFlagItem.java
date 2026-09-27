@@ -10,7 +10,6 @@ import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.cartographyr.geo.Layer;
 import com.github.cerealklla.cartographyr.geo.LifecycleState;
-import com.github.cerealklla.cartographyr.geo.ProtectionLevel;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -85,11 +84,11 @@ public class SettlementClaimFlagItem extends Item {
                 serverLevel.dimension(),
                 Classification.CONSTRUCTED,
                 EntityType.SETTLEMENT,
-                Layer.LOCATION_ID,
+                Layer.SETTLEMENT_ID,
                 Optional.empty(),
                 new Geometry.Point(sitePos.getX(), sitePos.getZ()),
                 LifecycleState.PLANNED,
-                Optional.of(ProtectionLevel.NO_VOXEL_CHANGE_ALONG_SURFACE_AND_UP)));
+                Optional.empty()));
         core.setCartographyrEntityId(registered.id().value());
 
         context.getItemInHand().shrink(1);

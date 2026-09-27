@@ -57,6 +57,8 @@ Scaffolded 2026-09-26 (see [context/decisions.md](context/decisions.md)):
 
 **Zone/Plot HUD design finalized (not yet implemented), same day** (see [context/decisions.md](context/decisions.md), design-document.md Section 11a) — one Cartographyr entity/layer per plot (not two), reusing the existing `designation`/`name` field split for zone-type/plot-name, with "Outskirts"/"Residence" fallback text confirmed. Written into both this mod's and Lyfe's design docs ahead of plot subdivision (Sections 10-11) actually being built.
 
+**Settlements now register under Cartographyr's `Layer.SETTLEMENT_ID`, same day** (see [context/decisions.md](context/decisions.md)) — Cartographyr split its former shared `Location` layer into separate Region/Settlement layers; both call sites here (`SettlementClaimFlagItem`, `SettlemyntsMod#registerWithCartographyr`) updated to match, and both dropped their explicit `ProtectionLevel` override since the Settlement layer's own configured default now covers it. `./gradlew build`/`test` green, whole-suite rebuild + boot-smoke-test clean.
+
 Next: live-test this round's fixes (HUD range, doubled area, stake cleanup on finalize, and especially the chunk-load bug fix — try reproducing the original "too close" scenario deliberately, e.g. walk far enough from an unfinalized settlement for its chunk to unload, then attempt a second placement nearby). After that: finish Section 8 (solidifying stakes/core, enabling protection), or start plot subdivision (Sections 10-11a) now that its HUD design is settled — whichever the user prioritizes next.
 
 See [context/classes/](context/classes/) for per-class reference.

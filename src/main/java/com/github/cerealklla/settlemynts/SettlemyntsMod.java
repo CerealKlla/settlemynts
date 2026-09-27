@@ -18,7 +18,6 @@ import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.cartographyr.geo.Layer;
 import com.github.cerealklla.cartographyr.geo.LifecycleState;
-import com.github.cerealklla.cartographyr.geo.ProtectionLevel;
 import com.github.cerealklla.settlemynts.founding.BoundaryWallLayout;
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
 import com.github.cerealklla.settlemynts.founding.FinalizeSettlementPayload;
@@ -339,11 +338,11 @@ public class SettlemyntsMod {
                 level.dimension(),
                 Classification.CONSTRUCTED,
                 EntityType.SETTLEMENT,
-                Layer.LOCATION_ID,
+                Layer.SETTLEMENT_ID,
                 Optional.of(core.getSettlementName()),
                 paddedPolygon,
                 LifecycleState.REALIZED,
-                Optional.of(ProtectionLevel.NO_VOXEL_CHANGE_ALONG_SURFACE_AND_UP)));
+                Optional.empty()));
         core.setCartographyrEntityId(created.id().value());
     }
 
