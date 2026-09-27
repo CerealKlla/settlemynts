@@ -72,23 +72,14 @@ public final class PlotGeometry {
     }
 
     /**
-     * The plot's "Town Proper" buffer polygon (design doc Section 11a) -- each vertex scaled
-     * outward from the plot's own centroid by {@code paddingBlocks}, the same radial-padding
-     * approximation {@code SettlemyntsMod#registerWithCartographyr} already uses for a settlement's
-     * own buffer (adequate for the same reason: a plot's polygon is star-shaped around its centroid
-     * by construction, since every vertex was angularly sorted around it).
+     * The plot's "Town Proper" buffer polygon (design doc Section 11a) -- {@code plot} grown outward
+     * by {@code paddingBlocks} via Cartographyr's {@link Geometry.Polygon#expandedBy}, which follows
+     * the plot's own shape rather than cutting across a concave notch. Replaced a radial-scale-from-
+     * centroid version (2026-09-27, live playtest: a C-shaped plot's buffer cut straight across the
+     * C's open notch instead of following it -- scaling every vertex away from one shared center
+     * point has no notion of the shape's own concavity).
      */
-    public static Geometry.Polygon paddedBuffer(Geometry.Polygon plot, double centerX, double centerZ, double paddingBlocks) {
-        List<Geometry.Polygon.Vertex> padded = new ArrayList<>(plot.vertices().size());
-        for (Geometry.Polygon.Vertex vertex : plot.vertices()) {
-            double dx = vertex.x() - centerX;
-            double dz = vertex.z() - centerZ;
-            double distance = Math.hypot(dx, dz);
-            double scale = distance > 1.0e-9 ? (distance + paddingBlocks) / distance : 1.0;
-            padded.add(new Geometry.Polygon.Vertex(
-                    (int) Math.round(centerX + dx * scale),
-                    (int) Math.round(centerZ + dz * scale)));
-        }
-        return new Geometry.Polygon(padded);
+    public static Geometry.Polygon paddedBuffer(Geometry.Polygon plot, double paddingBlocks) {
+        return Geometry.Polygon.expandedBy(plot, (int) Math.round(paddingBlocks));
     }
 }

@@ -3,65 +3,53 @@ package com.github.cerealklla.settlemynts.zone;
 import java.util.List;
 import java.util.UUID;
 
-import com.github.cerealklla.settlemynts.founding.GhostBoundaryWallEntity;
+import com.github.cerealklla.settlemynts.founding.GhostBlockDisplays;
 import com.github.cerealklla.settlemynts.founding.GhostPerimeterStakeEntity;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.syncher.EntityDataAccessor;
-import net.minecraft.network.syncher.EntityDataSerializers;
-import net.minecraft.network.syncher.SynchedEntityData;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
 
 /**
- * One point along a finalized plot's "Show Plot Perimeters" wall (design doc Section 11a) --
- * same floating-block-item technique as {@code founding.GhostBoundaryWallEntity}, but the block
- * varies per instance: each plot's own {@link ZoneType#wallBlock()}, so different plot types read
- * as visibly different colors along the same settlement's perimeter.
+ * One point along a finalized plot's "Show Plot Perimeters" wall (design doc Section 11a) -- a
+ * real block-model marker (a vanilla {@link Display.BlockDisplay}, walk-through/non-solid by
+ * default), same technique as {@code founding.GhostBoundaryWallEntity} (switched from a floating
+ * held-item icon 2026-09-27, see decisions.md), but the block varies per instance: each plot's own
+ * {@link ZoneType#wallBlock()}, so different plot types read as visibly different colors.
  *
  * <p>Existence-gated exactly like {@code GhostBoundaryWallEntity} -- only exists while "Show Plot
  * Perimeters" is toggled on, regenerated fresh from every finalized plot's Cartographyr-stored
  * polygon each time it's toggled on (never stale).
  */
-public class GhostPlotWallEntity extends Entity {
+public class GhostPlotWallEntity extends Display.BlockDisplay {
 
     /** Deliberately shorter than {@code founding.GhostBoundaryWallEntity#WALL_HEIGHT_BLOCKS} (10) -- a plot's own perimeter is a finer-grained marker than the settlement's outer wall, not meant to loom as tall. */
     public static final int WALL_HEIGHT_BLOCKS = 3;
-
-    private static final EntityDataAccessor<BlockState> WALL_BLOCK =
-            SynchedEntityData.defineId(GhostPlotWallEntity.class, EntityDataSerializers.BLOCK_STATE);
 
     private UUID ownerCoreId;
 
     public GhostPlotWallEntity(EntityType<? extends GhostPlotWallEntity> type, Level level) {
         super(type, level);
-        this.noPhysics = true;
     }
 
     public static GhostPlotWallEntity create(ServerLevel level, double x, double y, double z, UUID ownerCoreId, BlockState wallBlock) {
         GhostPlotWallEntity wall = new GhostPlotWallEntity(ModEntities.GHOST_PLOT_WALL.get(), level);
         wall.setPos(x, y, z);
         wall.ownerCoreId = ownerCoreId;
-        wall.entityData.set(WALL_BLOCK, wallBlock);
+        GhostBlockDisplays.setBlockState(level, wall, wallBlock);
         level.addFreshEntity(wall);
         return wall;
-    }
-
-    public BlockState getWallBlock() {
-        return entityData.get(WALL_BLOCK);
     }
 
     /** Every currently-loaded plot-wall point belonging to {@code coreId} -- used to discard the whole display when toggled off. */
@@ -100,25 +88,14 @@ public class GhostPlotWallEntity extends Entity {
     }
 
     @Override
-    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
-        return false;
-    }
-
-    @Override
-    protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        builder.define(WALL_BLOCK, Blocks.WHITE_WOOL.defaultBlockState());
-    }
-
-    @Override
     protected void readAdditionalSaveData(ValueInput input) {
+        super.readAdditionalSaveData(input);
         ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
-        input.read("WallBlock", BuiltInRegistries.BLOCK.byNameCodec())
-                .ifPresent(block -> entityData.set(WALL_BLOCK, block.defaultBlockState()));
     }
 
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
+        super.addAdditionalSaveData(output);
         output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
-        output.store("WallBlock", BuiltInRegistries.BLOCK.byNameCodec(), getWallBlock().getBlock());
     }
 }

@@ -7,44 +7,46 @@ import com.github.cerealklla.settlemynts.registration.ModEntities;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
 
 /**
- * One point along a settlement's "View Settlement Boundaries" wall (design doc Section 9) -- a
- * marker entity floating vanilla's own {@code Items.GLASS} (a real block-item, so it renders as an
- * actual 3D cube via the same item-in-world machinery every other ghost object here uses, not a
- * flat icon -- looks like a genuine glass block strung along the line). Positions come from {@link
- * BoundaryWallLayout}.
+ * One point along a settlement's "View Settlement Boundaries" wall (design doc Section 9) -- a real
+ * block-model marker (a vanilla {@link Display.BlockDisplay}, walk-through/non-solid by default,
+ * per-player-visible via the usual {@code broadcastToPlayer} mechanism), floating {@code
+ * Blocks.WHITE_WOOL}. Positions come from Cartographyr's {@code Geometry.Polygon#outerRing}.
+ *
+ * <p>Switched from a floating held-item icon to a real block display 2026-09-27 (see
+ * decisions.md) -- item rendering shows a dropped-item-scale/orientation icon, not a proper
+ * full-size block, which read as "strange" and hard to follow along diagonal/vertical runs.
  *
  * <p><b>Existence-gated, not a separate visibility flag</b> -- these entities are only ever
  * created while a settlement's boundary display is toggled on ({@code
- * SettlemyntsMod#toggleBoundaryWall}), and discarded when toggled off. Visibility is still
+ * SettlemyntsMod#setBoundaryVisible}), and discarded when toggled off. Visibility is still
  * permission-gated on top of that (only the owning core's Town Planners can see them at all, same
  * {@code broadcastToPlayer} mechanism as every other ghost entity), but there's no separate
  * "is the toggle on" check needed here -- if one of these entities exists, the toggle is on.
  *
  * <p>Explicitly noted in the design doc: this is a **different** boundary line than the one
- * Settlemynts sends to Cartographyr (design doc Section 8, not built yet) -- this one is always
- * whatever the *current* stake positions describe, live, not the finalized/padded polygon.
+ * Settlemynts sends to Cartographyr (design doc Section 8) -- this one is always whatever the
+ * *current* stake positions describe, live, not the finalized/padded polygon.
  */
-public class GhostBoundaryWallEntity extends Entity {
+public class GhostBoundaryWallEntity extends Display.BlockDisplay {
 
     /**
      * How many blocks tall each wall column is (2026-09-26, playtest feedback: individual
      * floating blocks pinned to the core's own Y didn't read as a wall at all once terrain height
      * varied along the perimeter -- some floated well above the ground, others sat underground).
-     * Each {@link BoundaryWallLayout} point now gets a short vertical stack anchored to that
-     * point's own local ground height instead of a single block at a shared Y -- see {@code
-     * SettlemyntsMod#setBoundaryVisible}.
+     * Each point now gets a short vertical stack anchored to that point's own local ground height
+     * instead of a single block at a shared Y -- see {@code SettlemyntsMod#setBoundaryVisible}.
      */
     public static final int WALL_HEIGHT_BLOCKS = 10;
 
@@ -52,13 +54,13 @@ public class GhostBoundaryWallEntity extends Entity {
 
     public GhostBoundaryWallEntity(EntityType<? extends GhostBoundaryWallEntity> type, Level level) {
         super(type, level);
-        this.noPhysics = true;
     }
 
     public static GhostBoundaryWallEntity create(ServerLevel level, double x, double y, double z, UUID ownerCoreId) {
         GhostBoundaryWallEntity wall = new GhostBoundaryWallEntity(ModEntities.GHOST_BOUNDARY_WALL.get(), level);
         wall.setPos(x, y, z);
         wall.ownerCoreId = ownerCoreId;
+        GhostBlockDisplays.setBlockState(level, wall, Blocks.WHITE_WOOL.defaultBlockState());
         level.addFreshEntity(wall);
         return wall;
     }
@@ -99,23 +101,14 @@ public class GhostBoundaryWallEntity extends Entity {
     }
 
     @Override
-    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
-        return false;
-    }
-
-    @Override
-    protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        // No synced data needed -- visibility is entirely server-side, and there's no interactive
-        // state to display beyond the entity's own fixed position.
-    }
-
-    @Override
     protected void readAdditionalSaveData(ValueInput input) {
+        super.readAdditionalSaveData(input);
         ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
     }
 
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
+        super.addAdditionalSaveData(output);
         output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
     }
 }

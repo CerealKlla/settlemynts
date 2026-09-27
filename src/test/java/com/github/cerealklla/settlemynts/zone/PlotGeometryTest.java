@@ -139,7 +139,7 @@ class PlotGeometryTest {
                 new StakePoint(10, 10), new StakePoint(-10, 10));
         Geometry.Polygon plot = PlotGeometry.polygonFromStakes(square);
 
-        Geometry.Polygon buffered = PlotGeometry.paddedBuffer(plot, 0.0, 0.0, 5.0);
+        Geometry.Polygon buffered = PlotGeometry.paddedBuffer(plot, 5.0);
 
         // Every original vertex was distance ~14.14 from center; padding by 5 should push each
         // buffered vertex further out than every original vertex, and the buffer should still
@@ -149,5 +149,30 @@ class PlotGeometryTest {
         }
         assertEquals(false, plot.contains(12, 12));
         assertEquals(true, buffered.contains(12, 12));
+    }
+
+    /**
+     * Regression test (2026-09-27, live playtest: "the plot buffer did NOT correctly follow the
+     * boundary of the plot when we got to the void portion of the C") -- the old radial-scale-from-
+     * centroid buffer cut straight across a concave shape's own notch. Fixed via Cartographyr's
+     * {@code Geometry.Polygon#expandedBy}, which only ever grows from blocks the plot actually
+     * occupies.
+     */
+    @Test
+    void paddedBufferFollowsAConcavePlotInsteadOfCuttingAcrossItsNotch() {
+        List<StakePoint> uShape = List.of(
+                new StakePoint(0.5, 0.5), new StakePoint(20.5, 0.5),
+                new StakePoint(20.5, 20.5), new StakePoint(14.5, 20.5),
+                new StakePoint(14.5, 4.5), new StakePoint(6.5, 4.5),
+                new StakePoint(6.5, 20.5), new StakePoint(0.5, 20.5));
+        Geometry.Polygon plot = PlotGeometry.polygonFromStakes(uShape);
+
+        Geometry.Polygon buffered = PlotGeometry.paddedBuffer(plot, 2.0);
+
+        // Deep in the notch's open mouth -- the buffer must not bridge across it.
+        assertFalse(buffered.contains(9, 10));
+        // The buffer must still contain the plot's own arms.
+        assertTrue(buffered.contains(2, 10));
+        assertTrue(buffered.contains(17, 10));
     }
 }

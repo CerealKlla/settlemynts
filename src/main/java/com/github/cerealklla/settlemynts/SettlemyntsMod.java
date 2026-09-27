@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import com.mojang.logging.LogUtils;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -223,13 +224,12 @@ public class SettlemyntsMod {
                         player.sendSystemMessage(Component.literal("Someone else is already placing this settlement's perimeter stakes."));
                         return;
                     }
+                    // Right-clicking ANY stake removes the actual most-recently-placed one, regardless
+                    // of which one was targeted (2026-09-27, explicit user request -- undo-style, not a
+                    // rejection) -- keeps the placement-index scheme gap-free the same way blocking did.
                     List<GhostPerimeterStakeEntity> siblings = GhostPerimeterStakeEntity.findByOwnerCore(serverLevel, core.getUUID());
-                    int maxIndex = siblings.stream().mapToInt(GhostPerimeterStakeEntity::getPlacementIndex).max().orElse(-1);
-                    if (stake.getPlacementIndex() != maxIndex) {
-                        player.sendSystemMessage(Component.literal("You can only remove the most recently placed stake."));
-                        return;
-                    }
-                    stake.remove(player);
+                    siblings.stream().max(Comparator.comparingInt(GhostPerimeterStakeEntity::getPlacementIndex))
+                            .ifPresent(lastStake -> lastStake.remove(player));
                     if (siblings.size() <= 1) {
                         core.setActivePerimeterPlanner(null); // Back down to zero -- nothing in progress anymore.
                     }
@@ -260,15 +260,14 @@ public class SettlemyntsMod {
                             || !core.isTownPlanner(player.getUUID())) {
                         return;
                     }
-                    List<GhostPlotStakeEntity> siblings = GhostPlotStakeEntity.findBySession(serverLevel, stake.getOwnerCoreId(), stake.getPlotSessionId());
-                    int maxIndex = siblings.stream().mapToInt(GhostPlotStakeEntity::getPlacementIndex).max().orElse(-1);
-                    if (stake.getPlacementIndex() != maxIndex) {
-                        player.sendSystemMessage(Component.literal("You can only remove the most recently placed stake."));
-                        return;
-                    }
+                    // Right-clicking ANY stake removes the actual most-recently-placed one, regardless
+                    // of which one was targeted (2026-09-27, explicit user request -- undo-style, not a
+                    // rejection) -- keeps the placement-index scheme gap-free the same way blocking did.
                     UUID ownerCoreId = stake.getOwnerCoreId();
                     UUID plotSessionId = stake.getPlotSessionId();
-                    stake.remove(player);
+                    List<GhostPlotStakeEntity> siblings = GhostPlotStakeEntity.findBySession(serverLevel, ownerCoreId, plotSessionId);
+                    siblings.stream().max(Comparator.comparingInt(GhostPlotStakeEntity::getPlacementIndex))
+                            .ifPresent(lastStake -> lastStake.remove(player));
                     GhostPlotFencePostEntity.regenerate(serverLevel, ownerCoreId, plotSessionId);
                 });
 
@@ -348,9 +347,7 @@ public class SettlemyntsMod {
             ordered.add(new PlotGeometry.StakePoint(stake.getX(), stake.getZ()));
         }
         Geometry.Polygon plotPolygon = PlotGeometry.polygonFromStakes(ordered);
-        double centerX = PlotGeometry.centroidX(ordered);
-        double centerZ = PlotGeometry.centroidZ(ordered);
-        Geometry.Polygon bufferPolygon = PlotGeometry.paddedBuffer(plotPolygon, centerX, centerZ, PLOT_BUFFER_PADDING_BLOCKS);
+        Geometry.Polygon bufferPolygon = PlotGeometry.paddedBuffer(plotPolygon, PLOT_BUFFER_PADDING_BLOCKS);
 
         GeographicEntity plotEntity = Cartography.createEntity(serverLevel, new EntityDefinition(
                 serverLevel.dimension(), Classification.CONSTRUCTED, PLOT_ENTITY_TYPE, ZONE_LAYER_ID,
@@ -587,35 +584,27 @@ public class SettlemyntsMod {
     /**
      * Registers this settlement's fitted perimeter with Cartographyr as a {@code
      * Classification.CONSTRUCTED}/{@code EntityType.SETTLEMENT} entity -- design doc Section 8. The
-     * polygon sent is padded {@link #CARTOGRAPHYR_PADDING_BLOCKS} outward from the core along each
-     * vertex's own direction (a radial approximation of a uniform buffer, not a true geometric
-     * offset -- adequate for the star-shaped-around-the-core polygons this algorithm always
-     * produces, not a general-purpose polygon buffer). Idempotent: a settlement already registered
-     * (tracked via {@code GhostTownHallCoreEntity#getCartographyrEntityId}) gets its existing
-     * entity's geometry *updated* instead of a duplicate being created, so re-running Finalize
-     * later (e.g. after adjusting stakes) doesn't leave stale entries behind.
+     * polygon sent is the real (unpadded) fitted polygon grown outward by {@link
+     * #CARTOGRAPHYR_PADDING_BLOCKS} via Cartographyr's {@code Geometry.Polygon#expandedBy}, which
+     * follows the settlement's own shape rather than cutting across a concave notch (fixed
+     * 2026-09-27, replacing a radial-scale-from-core version -- see {@code
+     * zone.PlotGeometry#paddedBuffer}'s own doc for the identical bug/fix on the plot side).
+     * Idempotent: a settlement already registered (tracked via {@code
+     * GhostTownHallCoreEntity#getCartographyrEntityId}) gets its existing entity's geometry
+     * *updated* instead of a duplicate being created, so re-running Finalize later (e.g. after
+     * adjusting stakes) doesn't leave stale entries behind.
      */
     private static void registerWithCartographyr(ServerLevel level, GhostTownHallCoreEntity core, List<PerimeterFit.StakeInput> fittedStakes) {
         // fittedStakes is already in placement order (PerimeterFit.fit preserves whatever order its
         // caller passed in, 2026-09-27 -- see decisions.md same date) -- no re-sort needed here.
-        List<Geometry.Polygon.Vertex> vertices = new ArrayList<>(fittedStakes.size());
-        for (PerimeterFit.StakeInput stake : fittedStakes) {
-            double dx = stake.x() - core.getX();
-            double dz = stake.z() - core.getZ();
-            double distance = Math.hypot(dx, dz);
-            double scale = distance > 1.0e-9 ? (distance + CARTOGRAPHYR_PADDING_BLOCKS) / distance : 1.0;
-            vertices.add(new Geometry.Polygon.Vertex(
-                    (int) Math.round(core.getX() + dx * scale),
-                    (int) Math.round(core.getZ() + dz * scale)));
-        }
-        Geometry paddedPolygon = new Geometry.Polygon(vertices);
-
         List<Geometry.Polygon.Vertex> realVertices = new ArrayList<>(fittedStakes.size());
         for (PerimeterFit.StakeInput stake : fittedStakes) {
             realVertices.add(new Geometry.Polygon.Vertex((int) Math.floor(stake.x()), (int) Math.floor(stake.z())));
         }
-        Geometry realPolygon = Geometry.Polygon.coveringBlocks(realVertices);
+        Geometry.Polygon realPolygon = Geometry.Polygon.coveringBlocks(realVertices);
         registerSettlementCore(level, core, realPolygon);
+
+        Geometry paddedPolygon = Geometry.Polygon.expandedBy(realPolygon, (int) Math.round(CARTOGRAPHYR_PADDING_BLOCKS));
 
         Long existingId = core.getCartographyrEntityId();
         if (existingId != null) {

@@ -9,14 +9,13 @@ import com.github.cerealklla.settlemynts.registration.ModEntities;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
@@ -31,20 +30,27 @@ import net.minecraft.world.phys.AABB;
  * finalized yet) every time a stake is placed or removed, and discarded outright (not regenerated)
  * once Finalize succeeds -- see {@code SettlemyntsMod}'s stake-placement/removal/finalize call
  * sites.
+ *
+ * <p>A real block-model {@link Display.BlockDisplay} (switched from a floating held-item icon
+ * 2026-09-27, see decisions.md), with each post's {@code Blocks.OAK_FENCE} state carrying real
+ * connection properties ({@link CrossCollisionBlock#NORTH}/{@code SOUTH}/{@code EAST}/{@code WEST})
+ * computed from which of its own cardinal neighbors are *also* a fence post in the same preview --
+ * this is what makes the preview visually read as one connected line instead of a row of
+ * identically-oriented floating icons.
  */
-public class GhostPerimeterFencePostEntity extends Entity {
+public class GhostPerimeterFencePostEntity extends Display.BlockDisplay {
 
     private UUID ownerCoreId;
 
     public GhostPerimeterFencePostEntity(EntityType<? extends GhostPerimeterFencePostEntity> type, Level level) {
         super(type, level);
-        this.noPhysics = true;
     }
 
-    public static GhostPerimeterFencePostEntity create(ServerLevel level, double x, double y, double z, UUID ownerCoreId) {
+    public static GhostPerimeterFencePostEntity create(ServerLevel level, int x, int y, int z, UUID ownerCoreId, BlockState state) {
         GhostPerimeterFencePostEntity post = new GhostPerimeterFencePostEntity(ModEntities.GHOST_PERIMETER_FENCE_POST.get(), level);
         post.setPos(x, y, z);
         post.ownerCoreId = ownerCoreId;
+        GhostBlockDisplays.setBlockState(level, post, state);
         level.addFreshEntity(post);
         return post;
     }
@@ -87,10 +93,8 @@ public class GhostPerimeterFencePostEntity extends Entity {
             Geometry.Polygon.Vertex b = new Geometry.Polygon.Vertex((int) Math.floor(stakes.get(i + 1).getX()), (int) Math.floor(stakes.get(i + 1).getZ()));
             blockPath.addAll(Geometry.Polygon.supercoverLine(a, b));
         }
-        for (Geometry.Polygon.Vertex block : blockPath) {
-            int groundY = level.getHeight(Heightmap.Types.WORLD_SURFACE, block.x(), block.z());
-            create(level, block.x() + 0.5, groundY, block.z() + 0.5, core.getUUID());
-        }
+        FencePostConnections.spawnConnected(level, blockPath,
+                (lvl, x, y, z, state) -> create(lvl, x, y, z, core.getUUID(), state));
     }
 
     @Override
@@ -112,22 +116,14 @@ public class GhostPerimeterFencePostEntity extends Entity {
     }
 
     @Override
-    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
-        return false;
-    }
-
-    @Override
-    protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        // No synced data needed -- visibility is entirely server-side.
-    }
-
-    @Override
     protected void readAdditionalSaveData(ValueInput input) {
+        super.readAdditionalSaveData(input);
         ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
     }
 
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
+        super.addAdditionalSaveData(output);
         output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
     }
 }
