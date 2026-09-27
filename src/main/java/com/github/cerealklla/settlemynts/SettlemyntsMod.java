@@ -432,6 +432,13 @@ public class SettlemyntsMod {
      * existing wall (in case one was left over from a stale state) and generates a fresh one from
      * the settlement's *current* stake positions -- always live, not a snapshot from whenever it
      * was last toggled on. Turning it off just discards every wall point for this core.
+     *
+     * <p>The wall itself marks the first NOT-permitted ring, same meaning as the plot wall (2026-09-27,
+     * explicit user request to make this consistent) -- traced one block outside the settlement's
+     * real, block-inclusive core boundary ({@link Geometry.Polygon#coveringBlocks}), not the raw
+     * stake positions directly. Computed live from the stakes here (not read back from Cartographyr)
+     * since this toggle works both before and after Finalize, and the core entity only exists once
+     * finalized.
      */
     private static void setBoundaryVisible(SetBoundaryVisiblePayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player)) {
@@ -468,7 +475,22 @@ public class SettlemyntsMod {
         }
         List<PerimeterFit.StakeInput> ordered = PerimeterFit.sortAngularly(inputs, core.getX(), core.getZ());
 
-        for (BoundaryWallLayout.Point point : BoundaryWallLayout.layout(ordered, BoundaryWallLayout.DEFAULT_SPACING_BLOCKS)) {
+        // Same "wall marks the first NOT-permitted ring" fix applied to plots (2026-09-27, user
+        // request to make this wall mean the same thing) -- build the settlement's real (block-
+        // inclusive) core boundary from the live stakes, exactly how registerSettlementCore itself
+        // does, then trace the wall one further block outside it via PlotGeometry.wallVertices, so
+        // the wall never sits on a block the settlement's own core already claims.
+        List<Geometry.Polygon.Vertex> coreVertices = new ArrayList<>(ordered.size());
+        for (PerimeterFit.StakeInput stake : ordered) {
+            coreVertices.add(new Geometry.Polygon.Vertex((int) Math.floor(stake.x()), (int) Math.floor(stake.z())));
+        }
+        Geometry.Polygon corePolygon = Geometry.Polygon.coveringBlocks(coreVertices);
+        List<PerimeterFit.StakeInput> wallInputs = new ArrayList<>(ordered.size());
+        for (Geometry.Polygon.Vertex vertex : PlotGeometry.wallVertices(corePolygon)) {
+            wallInputs.add(new PerimeterFit.StakeInput(vertex.x(), vertex.z(), false));
+        }
+
+        for (BoundaryWallLayout.Point point : BoundaryWallLayout.layout(wallInputs, BoundaryWallLayout.DEFAULT_SPACING_BLOCKS)) {
             // Snapped to the block's own center (fixed 2026-09-26, playtest feedback: the floating
             // icon wasn't centered over a block -- BoundaryWallLayout's raw points are arbitrary
             // fractional positions along each edge, not block-aligned).
