@@ -46,7 +46,7 @@ public class GhostBoundaryWallEntity extends Entity {
      * point's own local ground height instead of a single block at a shared Y -- see {@code
      * SettlemyntsMod#setBoundaryVisible}.
      */
-    public static final int WALL_HEIGHT_BLOCKS = 8;
+    public static final int WALL_HEIGHT_BLOCKS = 10;
 
     private UUID ownerCoreId;
 

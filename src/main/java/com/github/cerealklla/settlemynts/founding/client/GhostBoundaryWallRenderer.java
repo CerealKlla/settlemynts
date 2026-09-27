@@ -15,12 +15,13 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 /**
- * {@link GhostBoundaryWallEntity}'s client renderer. Floats vanilla's {@code Items.GLASS} -- a
- * block-item, so the item-in-world machinery renders it as an actual 3D cube (the same effect a
- * dropped cobblestone shows in vanilla), not a flat sprite -- giving a real "wall of glass blocks"
- * look strung along the perimeter from many of these at once. Same floating-icon technique as
- * every other ghost entity here; see {@code GhostTownHallCoreRenderer}'s doc for why this pattern
- * is used (also what avoids the "no renderer registered" client crash every custom entity needs).
+ * {@link GhostBoundaryWallEntity}'s client renderer. Floats vanilla's {@code Items.WHITE_WOOL} --
+ * a block-item, so the item-in-world machinery renders it as an actual 3D cube (the same effect a
+ * dropped cobblestone shows in vanilla), not a flat sprite -- giving a real "wall of blocks" look
+ * strung along the perimeter from many of these at once. Switched from glass to wool 2026-09-26
+ * per user request (less transparent, reads as more solid). Same floating-icon technique as every
+ * other ghost entity here; see {@code GhostTownHallCoreRenderer}'s doc for why this pattern is
+ * used (also what avoids the "no renderer registered" client crash every custom entity needs).
  */
 public final class GhostBoundaryWallRenderer extends EntityRenderer<GhostBoundaryWallEntity, GhostBoundaryWallRenderState> {
 
@@ -39,7 +40,7 @@ public final class GhostBoundaryWallRenderer extends EntityRenderer<GhostBoundar
     @Override
     public void extractRenderState(GhostBoundaryWallEntity entity, GhostBoundaryWallRenderState state, float partialTicks) {
         super.extractRenderState(entity, state, partialTicks);
-        itemModelResolver.updateForNonLiving(state.icon, new ItemStack(Items.GLASS), ItemDisplayContext.GROUND, entity);
+        itemModelResolver.updateForNonLiving(state.icon, new ItemStack(Items.WHITE_WOOL), ItemDisplayContext.GROUND, entity);
     }
 
     @Override

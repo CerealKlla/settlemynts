@@ -69,6 +69,11 @@ public class GhostTownHallCoreEntity extends Entity {
     // future -- see decisions.md for why Cartographyr is currently a required (not optional)
     // dependency regardless, this is just extra caution for this one persisted field's shape.
     private Long cartographyrEntityId;
+    // The settlement's *real* (unpadded) fitted-polygon entity id (design doc Section 11a-adjacent,
+    // added 2026-09-26) -- separate from cartographyrEntityId (the padded polygon), so Lyfe's HUD
+    // can distinguish "genuinely inside the built town" from "inside the settlement's own outer
+    // padding buffer only." See SettlemyntsMod#registerSettlementCore.
+    private Long cartographyrCoreEntityId;
     // Set true by SettlemyntsMod#finalizeSettlement on success (design doc Section 8). Drives which
     // buttons FoundingScreen shows -- "Get Perimeter Stake"/"Finalize" only make sense pre-finalize,
     // and a finalized settlement's Town Planners should see plot-stake controls instead (Section
@@ -121,6 +126,14 @@ public class GhostTownHallCoreEntity extends Entity {
 
     public void setCartographyrEntityId(long cartographyrEntityId) {
         this.cartographyrEntityId = cartographyrEntityId;
+    }
+
+    public Long getCartographyrCoreEntityId() {
+        return cartographyrCoreEntityId;
+    }
+
+    public void setCartographyrCoreEntityId(long cartographyrCoreEntityId) {
+        this.cartographyrCoreEntityId = cartographyrCoreEntityId;
     }
 
     public boolean isFinalized() {
@@ -245,6 +258,7 @@ public class GhostTownHallCoreEntity extends Entity {
         townPlanners.addAll(input.read("TownPlanners", UUIDUtil.CODEC_SET).orElse(Set.of()));
         boundaryVisible = input.getBooleanOr("BoundaryVisible", false);
         cartographyrEntityId = input.read("CartographyrEntityId", Codec.LONG).orElse(null);
+        cartographyrCoreEntityId = input.read("CartographyrCoreEntityId", Codec.LONG).orElse(null);
         finalized = input.getBooleanOr("Finalized", false);
         showPlotPerimeters = input.getBooleanOr("ShowPlotPerimeters", false);
         plots.clear();
@@ -270,6 +284,7 @@ public class GhostTownHallCoreEntity extends Entity {
         output.store("TownPlanners", UUIDUtil.CODEC_SET, Set.copyOf(townPlanners));
         output.putBoolean("BoundaryVisible", boundaryVisible);
         output.storeNullable("CartographyrEntityId", Codec.LONG, cartographyrEntityId);
+        output.storeNullable("CartographyrCoreEntityId", Codec.LONG, cartographyrCoreEntityId);
         output.putBoolean("Finalized", finalized);
         output.putBoolean("ShowPlotPerimeters", showPlotPerimeters);
         output.store("Plots", Codec.list(PlotRecord.CODEC), List.copyOf(plots));

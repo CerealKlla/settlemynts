@@ -85,11 +85,24 @@ public class SettlemyntsMod {
     public static final EntityType PLOT_ENTITY_TYPE = new EntityType(Identifier.fromNamespaceAndPath(MODID, "plot"));
     public static final EntityType PLOT_BUFFER_ENTITY_TYPE = new EntityType(Identifier.fromNamespaceAndPath(MODID, "plot_buffer"));
 
+    // The settlement's *real* (unpadded) fitted polygon, registered alongside the existing
+    // Classification.CONSTRUCTED/EntityType.SETTLEMENT entity (which keeps its padded geometry
+    // unchanged, so SettlementFounding's distance check is completely unaffected). Added 2026-09-26
+    // so Lyfe's HUD can tell "genuinely inside the built town" apart from "inside the settlement's
+    // own outer padding buffer" -- the exact distinction the user calls "Town Proper" vs "No Man's
+    // Land". Purely additive; nothing that already reads EntityType.SETTLEMENT needs to change.
+    public static final EntityType SETTLEMENT_CORE_ENTITY_TYPE = new EntityType(Identifier.fromNamespaceAndPath(MODID, "settlement_core"));
+
     // Design doc Section 11a: "Town Proper" buffer padding, added outward from each plot's own
     // centroid -- deliberately smaller than the settlement's own CARTOGRAPHYR_PADDING_BLOCKS (10),
     // since a plot's buffer is meant to cover just the narrow gap between adjacent plots, not a
-    // whole "no man's zone" the way a settlement's perimeter buffer is.
-    public static final double PLOT_BUFFER_PADDING_BLOCKS = 3.0;
+    // whole "no man's zone" the way a settlement's perimeter buffer is. Lowered 3.0 -> 1.0
+    // (2026-09-26, playtest feedback -- 3 blocks read as much too wide a gap around every plot).
+    // Radial padding from the centroid scales more at sharper polygon corners than at shallow ones
+    // (an inherent property of this technique, not a bug -- see PlotGeometry's own doc), so a
+    // corner can occasionally land a bit past 1 block out; accepted as-is rather than chasing an
+    // adaptive per-vertex padding scheme for a rare, small overshoot.
+    public static final double PLOT_BUFFER_PADDING_BLOCKS = 1.0;
 
     public SettlemyntsMod(IEventBus modEventBus, ModContainer modContainer) {
         ModItems.ITEMS.register(modEventBus);
@@ -100,12 +113,14 @@ public class SettlemyntsMod {
 
         // Built-in zone types (design doc Section 11a) -- Settlemynts only ships these two; a
         // future Blueprynts mod (and others) is expected to register the rest via
-        // Settlemynts.registerZoneType. Colors chosen to be unique/distinct while stained glass
-        // lasts -- see ZoneType's own doc for the "switch to wool once glass runs out" plan.
+        // Settlemynts.registerZoneType. Wool, not glass (switched 2026-09-26, playtest feedback --
+        // glass read as too see-through/insubstantial for a wall). Colors chosen to be unique/
+        // distinct while the 16 wool colors last -- see ZoneType's own doc for the fallback plan
+        // once they run out.
         Settlemynts.registerZoneType(new ZoneType(
-                Identifier.fromNamespaceAndPath(MODID, "town_hall"), "Town Hall", Blocks.WHITE_STAINED_GLASS));
+                Identifier.fromNamespaceAndPath(MODID, "town_hall"), "Town Hall", Blocks.WHITE_WOOL));
         Settlemynts.registerZoneType(new ZoneType(
-                Identifier.fromNamespaceAndPath(MODID, "private_residence"), "Private Residence", Blocks.LIGHT_BLUE_STAINED_GLASS));
+                Identifier.fromNamespaceAndPath(MODID, "private_residence"), "Private Residence", Blocks.LIGHT_BLUE_WOOL));
 
         NeoForge.EVENT_BUS.register(this);
         modEventBus.addListener(this::commonSetup);
@@ -397,8 +412,15 @@ public class SettlemyntsMod {
                 vertices.add(new PerimeterFit.StakeInput(vertex.x(), vertex.z(), false));
             }
             for (BoundaryWallLayout.Point point : BoundaryWallLayout.layout(vertices, BoundaryWallLayout.DEFAULT_SPACING_BLOCKS)) {
-                int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, (int) Math.floor(point.x()), (int) Math.floor(point.z()));
-                GhostPlotWallEntity.create(serverLevel, point.x(), groundY, point.z(), core.getUUID(), zoneType.wallBlock().defaultBlockState());
+                // Snapped to the block's own center (fixed 2026-09-26, playtest feedback: the
+                // floating icon wasn't centered over a block -- BoundaryWallLayout's raw points are
+                // arbitrary fractional positions along each edge, not block-aligned).
+                int blockX = (int) Math.floor(point.x());
+                int blockZ = (int) Math.floor(point.z());
+                int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, blockX, blockZ);
+                for (int level = 0; level < GhostPlotWallEntity.WALL_HEIGHT_BLOCKS; level++) {
+                    GhostPlotWallEntity.create(serverLevel, blockX + 0.5, groundY + level, blockZ + 0.5, core.getUUID(), zoneType.wallBlock().defaultBlockState());
+                }
             }
         }
     }
@@ -445,13 +467,18 @@ public class SettlemyntsMod {
         List<PerimeterFit.StakeInput> ordered = PerimeterFit.sortAngularly(inputs, core.getX(), core.getZ());
 
         for (BoundaryWallLayout.Point point : BoundaryWallLayout.layout(ordered, BoundaryWallLayout.DEFAULT_SPACING_BLOCKS)) {
+            // Snapped to the block's own center (fixed 2026-09-26, playtest feedback: the floating
+            // icon wasn't centered over a block -- BoundaryWallLayout's raw points are arbitrary
+            // fractional positions along each edge, not block-aligned).
+            int blockX = (int) Math.floor(point.x());
+            int blockZ = (int) Math.floor(point.z());
             // Anchored to this point's own local ground height, not the core's fixed Y (fixed
             // 2026-09-26, playtest feedback -- varying terrain along the perimeter made single
             // fixed-height blocks read as scattered floating icons, not a wall). A short vertical
             // stack per point gives a real "wall" silhouette even where the ground itself slopes.
-            int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, (int) Math.floor(point.x()), (int) Math.floor(point.z()));
+            int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, blockX, blockZ);
             for (int level = 0; level < GhostBoundaryWallEntity.WALL_HEIGHT_BLOCKS; level++) {
-                GhostBoundaryWallEntity.create(serverLevel, point.x(), groundY + level, point.z(), core.getUUID());
+                GhostBoundaryWallEntity.create(serverLevel, blockX + 0.5, groundY + level, blockZ + 0.5, core.getUUID());
             }
         }
         core.setBoundaryVisible(true);
@@ -555,6 +582,13 @@ public class SettlemyntsMod {
         }
         Geometry paddedPolygon = new Geometry.Polygon(vertices);
 
+        List<Geometry.Polygon.Vertex> realVertices = new ArrayList<>(ordered.size());
+        for (PerimeterFit.StakeInput stake : ordered) {
+            realVertices.add(new Geometry.Polygon.Vertex((int) Math.round(stake.x()), (int) Math.round(stake.z())));
+        }
+        Geometry realPolygon = new Geometry.Polygon(realVertices);
+        registerSettlementCore(level, core, realPolygon);
+
         Long existingId = core.getCartographyrEntityId();
         if (existingId != null) {
             // The common case now: every settlement is already registered at LifecycleState.PLANNED
@@ -583,6 +617,36 @@ public class SettlemyntsMod {
                 LifecycleState.REALIZED,
                 Optional.empty()));
         core.setCartographyrEntityId(created.id().value());
+    }
+
+    /**
+     * Registers/updates the settlement's *real* (unpadded) fitted polygon as a separate {@link
+     * #SETTLEMENT_CORE_ENTITY_TYPE} entity, purely so Lyfe's HUD can tell "genuinely inside the
+     * built town" (this entity) apart from "inside the settlement's outer padding buffer only"
+     * (the existing padded `EntityType.SETTLEMENT` entity, unaffected by this method). Mirrors
+     * {@link #registerWithCartographyr}'s own idempotent update-or-create shape.
+     */
+    private static void registerSettlementCore(ServerLevel level, GhostTownHallCoreEntity core, Geometry realPolygon) {
+        Long existingId = core.getCartographyrCoreEntityId();
+        if (existingId != null) {
+            Optional<GeographicEntity> updated = Cartography.updateEntity(level, new EntityId(existingId), e -> e
+                    .withGeometry(realPolygon)
+                    .withName(Optional.of(core.getSettlementName()))
+                    .withLifecycleState(LifecycleState.REALIZED));
+            if (updated.isPresent()) {
+                return;
+            }
+        }
+        GeographicEntity created = Cartography.createEntity(level, new EntityDefinition(
+                level.dimension(),
+                Classification.CONSTRUCTED,
+                SETTLEMENT_CORE_ENTITY_TYPE,
+                Layer.SETTLEMENT_ID,
+                Optional.of(core.getSettlementName()),
+                realPolygon,
+                LifecycleState.REALIZED,
+                Optional.empty()));
+        core.setCartographyrCoreEntityId(created.id().value());
     }
 
     /** Removes every Planned Perimeter Stake item from each of the settlement's currently-online Town Planners' inventories -- no longer needed once staking is done. Offline planners are left alone (nothing to touch); returns the total number of item stacks removed, for the confirmation message. */

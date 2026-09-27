@@ -121,6 +121,7 @@ public final class FoundingScreen extends Screen {
 
     private void finalizeSettlement() {
         send(new FinalizeSettlementPayload(coreEntityId));
+        onClose();
     }
 
     private void setName() {

@@ -38,6 +38,9 @@ import net.minecraft.world.phys.AABB;
  */
 public class GhostPlotWallEntity extends Entity {
 
+    /** Deliberately shorter than {@code founding.GhostBoundaryWallEntity#WALL_HEIGHT_BLOCKS} (10) -- a plot's own perimeter is a finer-grained marker than the settlement's outer wall, not meant to loom as tall. */
+    public static final int WALL_HEIGHT_BLOCKS = 3;
+
     private static final EntityDataAccessor<BlockState> WALL_BLOCK =
             SynchedEntityData.defineId(GhostPlotWallEntity.class, EntityDataSerializers.BLOCK_STATE);
 
@@ -103,7 +106,7 @@ public class GhostPlotWallEntity extends Entity {
 
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        builder.define(WALL_BLOCK, Blocks.GLASS.defaultBlockState());
+        builder.define(WALL_BLOCK, Blocks.WHITE_WOOL.defaultBlockState());
     }
 
     @Override
