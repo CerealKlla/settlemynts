@@ -53,7 +53,9 @@ public class PlotPlacementStakeItem extends Item {
 
         BlockPos placePos = context.getClickedPos().above();
         int placementIndex = GhostPlotStakeEntity.findBySession(serverLevel, session.ownerCoreId(), session.plotSessionId()).size();
-        GhostPlotStakeEntity.create(serverLevel, placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5,
+        // +1 block above the actual placement point -- see founding.PlannedPerimeterStakeItem's own
+        // comment (2026-09-27, same playtest feedback and fix, shared verbatim).
+        GhostPlotStakeEntity.create(serverLevel, placePos.getX() + 0.5, placePos.getY() + 1, placePos.getZ() + 0.5,
                 session.ownerCoreId(), session.plotSessionId(), placementIndex);
         GhostPlotFencePostEntity.regenerate(serverLevel, session.ownerCoreId(), session.plotSessionId());
         return InteractionResult.SUCCESS_SERVER;

@@ -445,18 +445,22 @@ public class SettlemyntsMod {
 
     /**
      * Toggles "View Settlement Boundaries" (design doc Section 9). Turning it on discards any
-     * existing wall (in case one was left over from a stale state) and generates a fresh one from
-     * the settlement's *current* stake positions -- always live, not a snapshot from whenever it
-     * was last toggled on. Turning it off just discards every wall point for this core.
+     * existing wall (in case one was left over from a stale state) and generates a fresh one; turning
+     * it off just discards every wall point for this core.
      *
      * <p>The wall itself marks the first NOT-permitted ring, same meaning as the plot wall (2026-09-27,
      * explicit user request to make this consistent) -- traced via {@link Geometry.Polygon#outerRing}
      * one block outside the settlement's real, block-inclusive core boundary ({@link
-     * Geometry.Polygon#coveringBlocks}), not the raw stake positions directly. Computed live from the
-     * stakes here (not read back from Cartographyr) since this toggle works both before and after
-     * Finalize, and the core entity only exists once finalized. Stakes are read in **placement
-     * order** (2026-09-27, see decisions.md same date), not angularly sorted -- required for
-     * non-star-shaped perimeters to build a valid polygon at all.
+     * Geometry.Polygon#coveringBlocks}).
+     *
+     * <p><b>Source of the core boundary depends on whether this settlement has been finalized</b>
+     * (fixed 2026-09-27, live playtest: this toggle broke entirely post-Finalize once {@code
+     * finalizeSettlement} started discarding the perimeter stake entities, same date -- see
+     * decisions.md). Before Finalize, no Cartographyr entity exists yet, so this builds the polygon
+     * live from the current stakes (in **placement order**, not angularly sorted -- required for
+     * non-star-shaped perimeters to build a valid polygon at all). After Finalize, the stakes are
+     * gone, so this reads the already-registered core polygon back from Cartographyr instead -- the
+     * same pattern {@code setShowPlotPerimeters} already uses for plots.
      */
     private static void setBoundaryVisible(SetBoundaryVisiblePayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player)) {
@@ -481,17 +485,32 @@ public class SettlemyntsMod {
             return;
         }
 
-        List<GhostPerimeterStakeEntity> stakes = GhostPerimeterStakeEntity.findByOwnerCoreInPlacementOrder(serverLevel, core.getUUID());
-        if (stakes.size() < 3) {
-            player.sendSystemMessage(Component.literal("Place at least 3 perimeter stakes before showing the boundary."));
-            return;
+        // Post-Finalize, the perimeter stake entities themselves are gone (finalizeSettlement
+        // discards them, 2026-09-27, matching what finalizePlot already did) -- source the wall from
+        // the already-registered Cartographyr core polygon instead, same pattern
+        // setShowPlotPerimeters already uses for plots. Pre-Finalize, no core polygon exists yet, so
+        // this still has to build one live from the current stakes.
+        Geometry.Polygon corePolygon;
+        Long coreEntityId = core.getCartographyrCoreEntityId();
+        if (coreEntityId != null) {
+            Optional<GeographicEntity> registered = Cartography.getEntity(serverLevel, new EntityId(coreEntityId));
+            if (registered.isEmpty() || !(registered.get().geometry() instanceof Geometry.Polygon registeredPolygon)) {
+                player.sendSystemMessage(Component.literal("This settlement's registered boundary is missing -- try finalizing again."));
+                return;
+            }
+            corePolygon = registeredPolygon;
+        } else {
+            List<GhostPerimeterStakeEntity> stakes = GhostPerimeterStakeEntity.findByOwnerCoreInPlacementOrder(serverLevel, core.getUUID());
+            if (stakes.size() < 3) {
+                player.sendSystemMessage(Component.literal("Place at least 3 perimeter stakes before showing the boundary."));
+                return;
+            }
+            List<Geometry.Polygon.Vertex> coreVertices = new ArrayList<>(stakes.size());
+            for (GhostPerimeterStakeEntity stake : stakes) {
+                coreVertices.add(new Geometry.Polygon.Vertex((int) Math.floor(stake.getX()), (int) Math.floor(stake.getZ())));
+            }
+            corePolygon = Geometry.Polygon.coveringBlocks(coreVertices);
         }
-
-        List<Geometry.Polygon.Vertex> coreVertices = new ArrayList<>(stakes.size());
-        for (GhostPerimeterStakeEntity stake : stakes) {
-            coreVertices.add(new Geometry.Polygon.Vertex((int) Math.floor(stake.getX()), (int) Math.floor(stake.getZ())));
-        }
-        Geometry.Polygon corePolygon = Geometry.Polygon.coveringBlocks(coreVertices);
 
         for (Geometry.Polygon.Vertex block : Geometry.Polygon.outerRing(corePolygon)) {
             // Anchored to this point's own local ground height, not the core's fixed Y (fixed

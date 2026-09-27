@@ -73,7 +73,13 @@ public class PlannedPerimeterStakeItem extends Item {
         }
 
         ownerCore.setActivePerimeterPlanner(player.getUUID());
-        GhostPerimeterStakeEntity.create(serverLevel, placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5, ownerCore.getUUID(), existingStakes);
+        // +1 block above the actual placement point (2026-09-27, playtest feedback) -- the live
+        // fence-post preview (GhostPerimeterFencePostEntity) occupies this same (x,z) at ground
+        // level as a real, solid block, which buried the stake's own marker; standing one block up
+        // keeps it visible on top of the fence. The entity's *actual* position moves here (not just
+        // a render offset), so the click/interact hitbox follows the visual -- a render-only offset
+        // was a real bug (right-clicking where the torch visually appeared did nothing).
+        GhostPerimeterStakeEntity.create(serverLevel, placePos.getX() + 0.5, placePos.getY() + 1, placePos.getZ() + 0.5, ownerCore.getUUID(), existingStakes);
         GhostPerimeterFencePostEntity.regenerate(serverLevel, ownerCore);
         return InteractionResult.SUCCESS_SERVER;
     }

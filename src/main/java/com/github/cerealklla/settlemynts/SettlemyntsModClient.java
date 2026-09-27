@@ -3,12 +3,10 @@ package com.github.cerealklla.settlemynts;
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
 import com.github.cerealklla.settlemynts.founding.client.FoundingScreen;
 import com.github.cerealklla.settlemynts.founding.client.GhostBlockDisplayRenderer;
-import com.github.cerealklla.settlemynts.founding.client.GhostPerimeterStakeRenderer;
 import com.github.cerealklla.settlemynts.founding.client.GhostTownHallCoreRenderer;
 import com.github.cerealklla.settlemynts.founding.client.StakeDistanceOverlay;
 import com.github.cerealklla.settlemynts.founding.client.StakeScreen;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
-import com.github.cerealklla.settlemynts.zone.client.GhostPlotStakeRenderer;
 import com.github.cerealklla.settlemynts.zone.client.PlotStakeScreen;
 
 import net.minecraft.client.Minecraft;
@@ -32,10 +30,11 @@ public class SettlemyntsModClient {
     @SubscribeEvent
     static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(ModEntities.GHOST_TOWN_HALL_CORE.get(), GhostTownHallCoreRenderer::new);
-        event.registerEntityRenderer(ModEntities.GHOST_PERIMETER_STAKE.get(), GhostPerimeterStakeRenderer::new);
-        event.registerEntityRenderer(ModEntities.GHOST_PLOT_STAKE.get(), GhostPlotStakeRenderer::new);
-        // All four ghost boundary/fence-post markers are real Display.BlockDisplay entities now
-        // (2026-09-27, see decisions.md) -- one shared renderer works for all of them.
+        // Every ghost marker in this mod is a real Display.BlockDisplay entity now (2026-09-27, see
+        // decisions.md -- stakes joined the wall/fence-post markers same day) -- one shared renderer
+        // works for all of them.
+        event.registerEntityRenderer(ModEntities.GHOST_PERIMETER_STAKE.get(), GhostBlockDisplayRenderer::new);
+        event.registerEntityRenderer(ModEntities.GHOST_PLOT_STAKE.get(), GhostBlockDisplayRenderer::new);
         event.registerEntityRenderer(ModEntities.GHOST_BOUNDARY_WALL.get(), GhostBlockDisplayRenderer::new);
         event.registerEntityRenderer(ModEntities.GHOST_PLOT_WALL.get(), GhostBlockDisplayRenderer::new);
         event.registerEntityRenderer(ModEntities.GHOST_PERIMETER_FENCE_POST.get(), GhostBlockDisplayRenderer::new);

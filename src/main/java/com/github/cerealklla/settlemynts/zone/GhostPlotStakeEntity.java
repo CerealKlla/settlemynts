@@ -5,21 +5,22 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
+import com.github.cerealklla.settlemynts.founding.GhostBlockDisplays;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
@@ -32,8 +33,15 @@ import net.neoforged.neoforge.network.PacketDistributor;
  * Town Planners, looked up live from the core each time -- but grouped by {@link #plotSessionId}
  * instead of belonging to the settlement as a whole, since multiple Town Planners can each be
  * drawing out their own separate plot at the same time.
+ *
+ * <p>A real block-model {@link Display.BlockDisplay} (switched from a floating held-item icon
+ * 2026-09-27, see {@code founding.GhostPerimeterStakeEntity}'s own doc for the full reasoning,
+ * shared verbatim -- a placed {@code Blocks.LANTERN}, positioned one block above its own
+ * placement point so it stands visibly on top of the live fence-post preview instead of buried
+ * inside it, with the entity's *actual* position moved (not just a render offset) so the
+ * click/interact hitbox follows the visual).
  */
-public class GhostPlotStakeEntity extends Entity {
+public class GhostPlotStakeEntity extends Display.BlockDisplay {
 
     // Generous search radius around the owning core -- a plot is expected to sit well within a
     // settlement's own perimeter, so this doesn't need PerimeterFit's much larger placement-radius
@@ -46,7 +54,6 @@ public class GhostPlotStakeEntity extends Entity {
 
     public GhostPlotStakeEntity(EntityType<? extends GhostPlotStakeEntity> type, Level level) {
         super(type, level);
-        this.noPhysics = true;
     }
 
     /**
@@ -65,6 +72,7 @@ public class GhostPlotStakeEntity extends Entity {
         stake.ownerCoreId = ownerCoreId;
         stake.plotSessionId = plotSessionId;
         stake.placementIndex = placementIndex;
+        GhostBlockDisplays.setBlockState(stake, Blocks.LANTERN.defaultBlockState());
         level.addFreshEntity(stake);
         return stake;
     }
@@ -140,23 +148,14 @@ public class GhostPlotStakeEntity extends Entity {
         return Component.literal("Plot Placement Stake");
     }
 
-    @Override
-    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
-        return false;
-    }
-
     /** Discards this entity -- no item handed back (the stake item is reusable/infinite, same reasoning as {@code founding.GhostPerimeterStakeEntity#remove}). */
     public void remove(Player player) {
         discard();
     }
 
     @Override
-    protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        // No synced data needed -- visibility is entirely server-side, same as GhostPerimeterStakeEntity.
-    }
-
-    @Override
     protected void readAdditionalSaveData(ValueInput input) {
+        super.readAdditionalSaveData(input);
         ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
         plotSessionId = input.read("PlotSessionId", UUIDUtil.CODEC).orElse(null);
         placementIndex = input.getIntOr("PlacementIndex", 0);
@@ -164,6 +163,7 @@ public class GhostPlotStakeEntity extends Entity {
 
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
+        super.addAdditionalSaveData(output);
         output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
         output.storeNullable("PlotSessionId", UUIDUtil.CODEC, plotSessionId);
         output.putInt("PlacementIndex", placementIndex);

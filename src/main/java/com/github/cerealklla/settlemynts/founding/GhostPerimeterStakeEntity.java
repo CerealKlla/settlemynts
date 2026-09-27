@@ -9,16 +9,16 @@ import com.github.cerealklla.settlemynts.registration.ModEntities;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
@@ -32,13 +32,23 @@ import net.neoforged.neoforge.network.PacketDistributor;
  * permissions (e.g. a newly-granted Town Planner immediately sees every existing stake, not just
  * ones placed after they were granted).
  *
+ * <p>A real block-model {@link Display.BlockDisplay} (switched from a floating held-item icon
+ * 2026-09-27, see decisions.md, same day as the wall/fence-post markers -- "a physical torch
+ * placed on the ground, just like the perimeter blocks," not a dropped-item-style icon), floating
+ * {@code Blocks.SOUL_TORCH}, positioned one block above its own placement point so it stands
+ * visibly on top of the live fence-post preview at that same (x,z) rather than being buried inside
+ * it (see {@code PlannedPerimeterStakeItem}). Unlike the wall/fence-post markers, this one still
+ * needs to be genuinely clickable ({@code isPickable}/{@code interact}), which is why the entity's
+ * *actual* position was moved here instead of just nudging the old render offset -- a render-only
+ * offset left the click/interact hitbox at the old (buried) position, a real playtest bug.
+ *
  * <p>"Absolute" (design doc Section 6) pins this stake's position against the perimeter auto-fit
  * step (Section 7a, not built yet -- that's Milestone 3) -- e.g. a Planner deliberately placed it
  * along a riverbank and doesn't want the fit algorithm shrinking or growing that edge away from or
  * into the river. Capped at {@link #MAX_ABSOLUTE_STAKES} per settlement, enforced in {@code
  * SettlemyntsMod}'s {@code SetStakeAbsolutePayload} handler, not here.
  */
-public class GhostPerimeterStakeEntity extends Entity {
+public class GhostPerimeterStakeEntity extends Display.BlockDisplay {
 
     public static final int MAX_ABSOLUTE_STAKES = 5;
 
@@ -60,7 +70,6 @@ public class GhostPerimeterStakeEntity extends Entity {
 
     public GhostPerimeterStakeEntity(EntityType<? extends GhostPerimeterStakeEntity> type, Level level) {
         super(type, level);
-        this.noPhysics = true;
     }
 
     /**
@@ -78,6 +87,7 @@ public class GhostPerimeterStakeEntity extends Entity {
         stake.setPos(x, y, z);
         stake.ownerCoreId = ownerCoreId;
         stake.placementIndex = placementIndex;
+        GhostBlockDisplays.setBlockState(stake, Blocks.SOUL_TORCH.defaultBlockState());
         level.addFreshEntity(stake);
         return stake;
     }
@@ -163,11 +173,6 @@ public class GhostPerimeterStakeEntity extends Entity {
         return Component.literal("Planned Perimeter Stake");
     }
 
-    @Override
-    public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
-        return false;
-    }
-
     /**
      * Discards this entity (design doc Section 6: "remove the stake if they need to move it").
      * Doesn't hand an item back -- the stake item is reusable/infinite (see {@code
@@ -180,14 +185,8 @@ public class GhostPerimeterStakeEntity extends Entity {
     }
 
     @Override
-    protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        // No synced data needed -- visibility is entirely server-side (broadcastToPlayer), and the
-        // per-interaction OpenStakeScreenPayload snapshot covers everything the client needs to
-        // render its own UI.
-    }
-
-    @Override
     protected void readAdditionalSaveData(ValueInput input) {
+        super.readAdditionalSaveData(input);
         ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
         absolute = input.getBooleanOr("Absolute", false);
         placementIndex = input.getIntOr("PlacementIndex", 0);
@@ -195,6 +194,7 @@ public class GhostPerimeterStakeEntity extends Entity {
 
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
+        super.addAdditionalSaveData(output);
         output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
         output.putBoolean("Absolute", absolute);
         output.putInt("PlacementIndex", placementIndex);
