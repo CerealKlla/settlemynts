@@ -90,9 +90,12 @@ class PerimeterFitTest {
         // Ask for an enormous target area, but cap the radius tightly -- growth should stop at the cap.
         FitResult result = PerimeterFit.fit(0, 0, square, 1_000_000.0, 10.0);
 
+        // The whole-block snap (2026-09-27) can shift a stake's distance from the core by up to
+        // sqrt(0.5) blocks past the pre-snap cap -- see PerimeterFit#snapToWholeBlocks's own doc.
+        double snapTolerance = Math.sqrt(0.5);
         for (StakeInput stake : result.fittedStakes()) {
             double distance = Math.hypot(stake.x(), stake.z());
-            assertTrue(distance <= 10.0 + 1e-6, "stake at distance " + distance + " exceeded the max radius");
+            assertTrue(distance <= 10.0 + snapTolerance + 1e-6, "stake at distance " + distance + " exceeded the max radius");
         }
     }
 
@@ -142,6 +145,28 @@ class PerimeterFitTest {
 
         assertEquals(twoStakes, result.fittedStakes());
         assertEquals(0.0, result.achievedArea());
+    }
+
+    /**
+     * Regression test (2026-09-27, live playtest: "you are calculating non-whole numbers for the
+     * expanded stake locations, which is then screwing up everything else") -- the bisection scale
+     * factor is an arbitrary real number, so a non-absolute stake's fitted position almost never
+     * lands on a whole block on its own without an explicit snap step.
+     */
+    @Test
+    void fittedNonAbsoluteStakesLandOnWholeBlocks() {
+        List<StakeInput> square = List.of(
+                new StakeInput(5, 5, false),
+                new StakeInput(-5, 5, false),
+                new StakeInput(-5, -5, false),
+                new StakeInput(5, -5, false));
+
+        FitResult result = PerimeterFit.fit(0, 0, square, 777.0, 1000.0);
+
+        for (StakeInput stake : result.fittedStakes()) {
+            assertEquals(0.5, stake.x() - Math.floor(stake.x()), 1e-9, "x should be block-centered");
+            assertEquals(0.5, stake.z() - Math.floor(stake.z()), 1e-9, "z should be block-centered");
+        }
     }
 
     @Test

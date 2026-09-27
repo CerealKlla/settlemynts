@@ -98,13 +98,13 @@ public class SettlemyntsMod {
     // Design doc Section 11a: "Town Proper" buffer padding, added outward from each plot's own
     // centroid -- deliberately smaller than the settlement's own CARTOGRAPHYR_PADDING_BLOCKS (10),
     // since a plot's buffer is meant to cover just the narrow gap between adjacent plots, not a
-    // whole "no man's zone" the way a settlement's perimeter buffer is. Lowered 3.0 -> 1.0
-    // (2026-09-26 playtest feedback), then set back to 3.0 (2026-09-27, explicit user request
-    // after seeing 1 block in practice). Radial padding from the centroid scales more at sharper
-    // polygon corners than at shallow ones (an inherent property of this technique, not a bug --
-    // see PlotGeometry's own doc), so a corner can occasionally land further out than this exact
-    // value; accepted as-is rather than chasing an adaptive per-vertex padding scheme.
-    public static final double PLOT_BUFFER_PADDING_BLOCKS = 3.0;
+    // whole "no man's zone" the way a settlement's perimeter buffer is. History: 3.0 -> 1.0
+    // (2026-09-26 playtest feedback) -> 3.0 (2026-09-27, after seeing 1 block in practice) -> 6.0
+    // (2026-09-27, later same day, explicit user request). Radial padding from the centroid scales
+    // more at sharper polygon corners than at shallow ones (an inherent property of this technique,
+    // not a bug -- see PlotGeometry's own doc), so a corner can occasionally land further out than
+    // this exact value; accepted as-is rather than chasing an adaptive per-vertex padding scheme.
+    public static final double PLOT_BUFFER_PADDING_BLOCKS = 6.0;
 
     public SettlemyntsMod(IEventBus modEventBus, ModContainer modContainer) {
         ModItems.ITEMS.register(modEventBus);

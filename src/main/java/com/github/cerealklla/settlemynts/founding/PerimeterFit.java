@@ -124,7 +124,7 @@ public final class PerimeterFit {
             }
         }
 
-        List<StakeInput> fittedOrdered = positionsAt(ordered, coreX, coreZ, k);
+        List<StakeInput> fittedOrdered = snapToWholeBlocks(positionsAt(ordered, coreX, coreZ, k));
 
         // Scatter back to the caller's original order (order[j] is the original index of ordered.get(j)).
         StakeInput[] resultArray = new StakeInput[n];
@@ -158,6 +158,34 @@ public final class PerimeterFit {
             }
         }
         return result;
+    }
+
+    /**
+     * Snaps every *non-absolute* stake to a whole block ({@code floor(x) + 0.5}, the same centering
+     * convention every other stake/wall entity in this mod uses) -- fixed 2026-09-27, playtest
+     * feedback: the bisection scale factor {@code k} is an arbitrary real number, so a non-absolute
+     * stake's fitted position ({@code coreX + k * (x - coreX)}) almost never lands on a whole block
+     * on its own, which was silently propagating fractional coordinates into the settlement's
+     * registered polygon, its wall layout, and the actual placed {@code GhostPerimeterStakeEntity}
+     * positions -- "as close to 40,000 blocks^2 as reasonably possible" was never meant to sacrifice
+     * whole-block placement to hit the target more precisely. Absolute stakes are pinned exactly
+     * where a Planner placed them and must never move at all, snap included. {@code achievedArea} is
+     * (and must be) recomputed from these snapped positions, not the pre-snap ones, so the reported
+     * area matches what's actually registered. A side effect worth knowing: since a stake can land
+     * anywhere within its own block before snapping, the snap can shift a non-absolute stake's
+     * distance from the core by up to {@code sqrt(0.5)} (~0.71) blocks either way -- {@code
+     * maxRadiusFromCore} bounds the pre-snap search, not a hard post-snap guarantee.
+     */
+    private static List<StakeInput> snapToWholeBlocks(List<StakeInput> stakes) {
+        List<StakeInput> snapped = new ArrayList<>(stakes.size());
+        for (StakeInput s : stakes) {
+            if (s.absolute()) {
+                snapped.add(s);
+            } else {
+                snapped.add(new StakeInput(Math.floor(s.x()) + 0.5, Math.floor(s.z()) + 0.5, false));
+            }
+        }
+        return snapped;
     }
 
     /** Shoelace formula. */

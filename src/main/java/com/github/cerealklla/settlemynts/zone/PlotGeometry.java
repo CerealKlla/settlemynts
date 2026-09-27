@@ -79,28 +79,27 @@ public final class PlotGeometry {
      * The wall's own trace polygon -- the block ring immediately outside the plot's real, already
      * block-inclusive boundary ({@link #polygonFromStakes}'s output), per the user's spec: the wall
      * marks the first NOT-permitted ring, so it must never sit on a block the plot itself already
-     * claims. {@code plotPolygon}'s vertices are edge coordinates, not block ids -- on the low side
-     * of the shape a vertex already sits at its stake block's own low edge (e.g. block 10 -> edge
-     * 10), so the next block out is {@code edge - 1}; on the high side {@link
-     * Geometry.Polygon#coveringBlocks} already pushed the vertex to the far edge of the outermost
-     * stake block (e.g. stake block 14 -> edge 15), and that edge coordinate *is* the next block out
-     * (block 15), unchanged. Same direction-relative approximation as {@link #paddedBuffer}.
+     * claims. {@code plotPolygon}'s vertices are edge coordinates, not block ids -- on the outward
+     * side of a given axis at a vertex, that vertex already sits at its stake block's own low edge
+     * (e.g. block 10 -> edge 10), so the next block out on that side is {@code edge - 1}; on the
+     * inward-relative-to-that-axis side {@link Geometry.Polygon#coveringBlocks} already pushed the
+     * vertex to the far edge of the outermost stake block (e.g. stake block 14 -> edge 15), and that
+     * edge coordinate *is* the next block out (block 15), unchanged. Which side is "outward" is
+     * decided per axis by {@link Geometry.Polygon#localOutwardNormals}, not by comparing to the
+     * whole polygon's centroid (fixed 2026-09-27, live playtest: a centroid comparison distorted
+     * diagonal runs on a many-vertex settlement shape into a visible lump/hump -- see decisions.md
+     * same date). Same edge-tangent-aware approach {@code coveringBlocks} itself uses.
      */
     public static List<Geometry.Polygon.Vertex> wallVertices(Geometry.Polygon plotPolygon) {
         List<Geometry.Polygon.Vertex> vertices = plotPolygon.vertices();
-        double centerX = 0;
-        double centerZ = 0;
-        for (Geometry.Polygon.Vertex v : vertices) {
-            centerX += v.x();
-            centerZ += v.z();
-        }
-        centerX /= vertices.size();
-        centerZ /= vertices.size();
+        List<Geometry.Polygon.Normal> normals = Geometry.Polygon.localOutwardNormals(vertices);
 
         List<Geometry.Polygon.Vertex> wall = new ArrayList<>(vertices.size());
-        for (Geometry.Polygon.Vertex v : vertices) {
-            int wallX = v.x() >= centerX ? v.x() : v.x() - 1;
-            int wallZ = v.z() >= centerZ ? v.z() : v.z() - 1;
+        for (int i = 0; i < vertices.size(); i++) {
+            Geometry.Polygon.Vertex v = vertices.get(i);
+            Geometry.Polygon.Normal normal = normals.get(i);
+            int wallX = normal.x() >= 0 ? v.x() : v.x() - 1;
+            int wallZ = normal.z() >= 0 ? v.z() : v.z() - 1;
             wall.add(new Geometry.Polygon.Vertex(wallX, wallZ));
         }
         return wall;
