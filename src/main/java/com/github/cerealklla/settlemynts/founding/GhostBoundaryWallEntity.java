@@ -22,11 +22,14 @@ import net.minecraft.world.phys.AABB;
  * One point along a settlement's "View Settlement Boundaries" wall (design doc Section 9) -- a real
  * block-model marker (a vanilla {@link Display.BlockDisplay}, walk-through/non-solid by default,
  * per-player-visible via the usual {@code broadcastToPlayer} mechanism), floating {@code
- * Blocks.WHITE_WOOL}. Positions come from Cartographyr's {@code Geometry.Polygon#outerRing}.
+ * Blocks.WHITE_STAINED_GLASS}. Positions come from Cartographyr's {@code Geometry.Polygon#outerRing}.
  *
  * <p>Switched from a floating held-item icon to a real block display 2026-09-27 (see
  * decisions.md) -- item rendering shows a dropped-item-scale/orientation icon, not a proper
  * full-size block, which read as "strange" and hard to follow along diagonal/vertical runs.
+ * Stained glass, not wool -- wool is a fully opaque, view-blocking real block once rendered at
+ * true size (unlike the old small floating item icon, which never actually obstructed a Planner's
+ * view), and this marker is meant to be seen *through*, not to wall off the settlement's interior.
  *
  * <p><b>Existence-gated, not a separate visibility flag</b> -- these entities are only ever
  * created while a settlement's boundary display is toggled on ({@code
@@ -60,7 +63,7 @@ public class GhostBoundaryWallEntity extends Display.BlockDisplay {
         GhostBoundaryWallEntity wall = new GhostBoundaryWallEntity(ModEntities.GHOST_BOUNDARY_WALL.get(), level);
         wall.setPos(x, y, z);
         wall.ownerCoreId = ownerCoreId;
-        GhostBlockDisplays.setBlockState(wall, Blocks.WHITE_WOOL.defaultBlockState());
+        GhostBlockDisplays.setBlockState(wall, Blocks.WHITE_STAINED_GLASS.defaultBlockState());
         level.addFreshEntity(wall);
         return wall;
     }

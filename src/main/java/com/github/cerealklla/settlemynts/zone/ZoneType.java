@@ -15,11 +15,13 @@ import net.minecraft.world.level.block.Block;
  * @param wallBlock the colored block {@code zone.GhostPlotWallEntity} floats for this type's
  *                   "Show Plot Perimeters" walls -- deliberately supplied by whoever registers the
  *                   type (not auto-assigned), so the registering mod controls its own unique color.
- *                   Expected to be a colored wool block while the 16 colors last (switched from
- *                   stained glass 2026-09-26 -- glass read as too see-through/insubstantial for a
- *                   wall); the registering mod is responsible for picking something else (e.g.
- *                   concrete/terracotta) once they run out, same as any other open registry in
- *                   this suite.
+ *                   Expected to be a colored stained glass block while the 16 colors last (switched
+ *                   back to glass 2026-09-27 -- once walls became real full-size blocks instead of
+ *                   floating item icons, an opaque wool wall genuinely blocked a Planner's own view
+ *                   of their settlement, which glass is meant to avoid); the registering mod is
+ *                   responsible for picking something else (e.g. stained glass panes, or wool/
+ *                   concrete/terracotta if opacity is actually wanted for a given type) once the 16
+ *                   colors run out, same as any other open registry in this suite.
  */
 public record ZoneType(Identifier id, String label, Block wallBlock) {
 }

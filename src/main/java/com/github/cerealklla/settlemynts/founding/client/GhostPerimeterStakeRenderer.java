@@ -45,7 +45,11 @@ public final class GhostPerimeterStakeRenderer extends EntityRenderer<GhostPerim
     @Override
     public void submit(GhostPerimeterStakeRenderState state, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, CameraRenderState camera) {
         poseStack.pushPose();
-        poseStack.translate(0.0, 0.25, 0.0);
+        // Raised a full block above the stake's own ground-level position (2026-09-27, playtest
+        // feedback: the live fence-post preview -- GhostPerimeterFencePostEntity -- now renders a
+        // real, full, solid block at this exact position, which buried the torch inside/behind it).
+        // Sitting on top of that block instead keeps the torch genuinely visible.
+        poseStack.translate(0.0, 1.25, 0.0);
         state.icon.submit(poseStack, submitNodeCollector, state.lightCoords, OverlayTexture.NO_OVERLAY, EntityRenderState.NO_OUTLINE);
         poseStack.popPose();
         super.submit(state, poseStack, submitNodeCollector, camera);

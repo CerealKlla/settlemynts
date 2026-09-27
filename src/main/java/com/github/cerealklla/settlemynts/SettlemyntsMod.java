@@ -117,14 +117,15 @@ public class SettlemyntsMod {
 
         // Built-in zone types (design doc Section 11a) -- Settlemynts only ships these two; a
         // future Blueprynts mod (and others) is expected to register the rest via
-        // Settlemynts.registerZoneType. Wool, not glass (switched 2026-09-26, playtest feedback --
-        // glass read as too see-through/insubstantial for a wall). Colors chosen to be unique/
-        // distinct while the 16 wool colors last -- see ZoneType's own doc for the fallback plan
-        // once they run out.
+        // Settlemynts.registerZoneType. Stained glass, not wool (switched back 2026-09-27, live
+        // playtest -- now that plot/settlement walls render as real full-size blocks, not floating
+        // item icons, an opaque wool wall genuinely blocks a Planner's view of their own settlement;
+        // glass is meant to be seen through). Colors chosen to be unique/distinct while the 16
+        // stained glass colors last -- see ZoneType's own doc for the fallback plan once they run out.
         Settlemynts.registerZoneType(new ZoneType(
-                Identifier.fromNamespaceAndPath(MODID, "town_hall"), "Town Hall", Blocks.WHITE_WOOL));
+                Identifier.fromNamespaceAndPath(MODID, "town_hall"), "Town Hall", Blocks.WHITE_STAINED_GLASS));
         Settlemynts.registerZoneType(new ZoneType(
-                Identifier.fromNamespaceAndPath(MODID, "private_residence"), "Private Residence", Blocks.LIGHT_BLUE_WOOL));
+                Identifier.fromNamespaceAndPath(MODID, "private_residence"), "Private Residence", Blocks.LIGHT_BLUE_STAINED_GLASS));
 
         NeoForge.EVENT_BUS.register(this);
         modEventBus.addListener(this::commonSetup);
@@ -570,6 +571,14 @@ public class SettlemyntsMod {
         int stakesCleared = clearPerimeterStakeItems(serverLevel, core);
         core.setFinalized(true);
         core.setActivePerimeterPlanner(null); // Nothing left in-progress -- release the lock (design doc Section 7a; see decisions.md 2026-09-27).
+        // The stake entities themselves are discarded too (2026-09-27, explicit user request,
+        // matching what finalizePlot already did for plot stakes) -- the fitted shape is already
+        // baked into the registered Cartographyr polygon at this point, so nothing still needs them.
+        // Re-opening perimeter staking later (a fresh RequestPerimeterStakePayload) starts clean,
+        // same as founding a settlement in the first place.
+        for (GhostPerimeterStakeEntity stake : stakes) {
+            stake.discard();
+        }
         for (GhostPerimeterFencePostEntity post : GhostPerimeterFencePostEntity.findByOwnerCore(serverLevel, core.getUUID())) {
             post.discard(); // The preview's job is done -- the real wall/polygon now exists.
         }
