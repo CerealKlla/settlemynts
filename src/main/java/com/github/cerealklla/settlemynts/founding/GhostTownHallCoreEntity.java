@@ -1,14 +1,18 @@
 package com.github.cerealklla.settlemynts.founding;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
 import com.mojang.serialization.Codec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 
 import com.github.cerealklla.settlemynts.registration.ModEntities;
+import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.chat.Component;
@@ -71,6 +75,15 @@ public class GhostTownHallCoreEntity extends Entity {
     // 10-11a). Added 2026-09-26 after a playtest report that those buttons lingered post-finalize.
     private boolean finalized;
 
+    // Plot subdivision (design doc Section 11a, added 2026-09-26). Each Town Planner works on at
+    // most one plot at a time, but different Planners can each be mid-staking their own plot
+    // concurrently -- keyed per-planner rather than one shared "current session" for the whole
+    // settlement. Reset to no entry once that Planner's plot is finalized (see SettlemyntsMod's
+    // FinalizePlotPayload handler), so their next "Get Plot Placement Stake" starts a fresh plot.
+    private final Map<UUID, UUID> activePlotSessionByPlanner = new HashMap<>();
+    private final List<PlotRecord> plots = new ArrayList<>();
+    private boolean showPlotPerimeters;
+
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
         this.noPhysics = true; // Sits exactly where it's created -- no falling/pushing.
@@ -116,6 +129,35 @@ public class GhostTownHallCoreEntity extends Entity {
 
     public void setFinalized(boolean finalized) {
         this.finalized = finalized;
+    }
+
+    /** This planner's currently in-progress plot, if any -- {@code null} means their next "Get Plot Placement Stake" starts a fresh one. */
+    public UUID getActivePlotSession(UUID plannerId) {
+        return activePlotSessionByPlanner.get(plannerId);
+    }
+
+    public void setActivePlotSession(UUID plannerId, UUID plotSessionId) {
+        if (plotSessionId == null) {
+            activePlotSessionByPlanner.remove(plannerId);
+        } else {
+            activePlotSessionByPlanner.put(plannerId, plotSessionId);
+        }
+    }
+
+    public List<PlotRecord> getPlots() {
+        return List.copyOf(plots);
+    }
+
+    public void addPlot(PlotRecord plot) {
+        plots.add(plot);
+    }
+
+    public boolean isShowPlotPerimeters() {
+        return showPlotPerimeters;
+    }
+
+    public void setShowPlotPerimeters(boolean showPlotPerimeters) {
+        this.showPlotPerimeters = showPlotPerimeters;
     }
 
     public boolean isFounder(UUID playerId) {
@@ -174,7 +216,7 @@ public class GhostTownHallCoreEntity extends Entity {
         }
         if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
             PacketDistributor.sendToPlayer(serverPlayer, new OpenFoundingScreenPayload(
-                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized));
+                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters));
         }
         return InteractionResult.SUCCESS;
     }
@@ -204,6 +246,21 @@ public class GhostTownHallCoreEntity extends Entity {
         boundaryVisible = input.getBooleanOr("BoundaryVisible", false);
         cartographyrEntityId = input.read("CartographyrEntityId", Codec.LONG).orElse(null);
         finalized = input.getBooleanOr("Finalized", false);
+        showPlotPerimeters = input.getBooleanOr("ShowPlotPerimeters", false);
+        plots.clear();
+        plots.addAll(input.read("Plots", Codec.list(PlotRecord.CODEC)).orElse(List.of()));
+        activePlotSessionByPlanner.clear();
+        for (ActivePlotSessionEntry entry : input.read("ActivePlotSessions", Codec.list(ActivePlotSessionEntry.CODEC)).orElse(List.of())) {
+            activePlotSessionByPlanner.put(entry.plannerId(), entry.plotSessionId());
+        }
+    }
+
+    /** Persistence-only pairing for {@link #activePlotSessionByPlanner} -- a {@code Map<UUID, UUID>} has no direct Codec, so it round-trips as a list of these instead. */
+    private record ActivePlotSessionEntry(UUID plannerId, UUID plotSessionId) {
+        static final Codec<ActivePlotSessionEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
+                UUIDUtil.CODEC.fieldOf("planner_id").forGetter(ActivePlotSessionEntry::plannerId),
+                UUIDUtil.CODEC.fieldOf("plot_session_id").forGetter(ActivePlotSessionEntry::plotSessionId)
+        ).apply(i, ActivePlotSessionEntry::new));
     }
 
     @Override
@@ -214,5 +271,10 @@ public class GhostTownHallCoreEntity extends Entity {
         output.putBoolean("BoundaryVisible", boundaryVisible);
         output.storeNullable("CartographyrEntityId", Codec.LONG, cartographyrEntityId);
         output.putBoolean("Finalized", finalized);
+        output.putBoolean("ShowPlotPerimeters", showPlotPerimeters);
+        output.store("Plots", Codec.list(PlotRecord.CODEC), List.copyOf(plots));
+        List<ActivePlotSessionEntry> sessionEntries = new ArrayList<>();
+        activePlotSessionByPlanner.forEach((plannerId, plotSessionId) -> sessionEntries.add(new ActivePlotSessionEntry(plannerId, plotSessionId)));
+        output.store("ActivePlotSessions", Codec.list(ActivePlotSessionEntry.CODEC), sessionEntries);
     }
 }

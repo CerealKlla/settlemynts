@@ -18,6 +18,7 @@ import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.cartographyr.geo.Layer;
 import com.github.cerealklla.cartographyr.geo.LifecycleState;
+import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.founding.BoundaryWallLayout;
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
 import com.github.cerealklla.settlemynts.founding.FinalizeSettlementPayload;
@@ -35,13 +36,27 @@ import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
 import com.github.cerealklla.settlemynts.founding.SetStakeAbsolutePayload;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.registration.ModItems;
+import com.github.cerealklla.settlemynts.zone.FinalizePlotPayload;
+import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
+import com.github.cerealklla.settlemynts.zone.GhostPlotWallEntity;
+import com.github.cerealklla.settlemynts.zone.OpenPlotStakeScreenPayload;
+import com.github.cerealklla.settlemynts.zone.PlotGeometry;
+import com.github.cerealklla.settlemynts.zone.PlotRecord;
+import com.github.cerealklla.settlemynts.zone.PlotSessionData;
+import com.github.cerealklla.settlemynts.zone.RemovePlotStakePayload;
+import com.github.cerealklla.settlemynts.zone.RequestPlotStakePayload;
+import com.github.cerealklla.settlemynts.zone.SetShowPlotPerimetersPayload;
+import com.github.cerealklla.settlemynts.zone.ZoneType;
+import com.github.cerealklla.settlemynts.zone.ZoneTypeRegistry;
 
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -59,9 +74,38 @@ public class SettlemyntsMod {
     public static final String MODID = "settlemynts";
     public static final Logger LOGGER = LogUtils.getLogger();
 
+    // Design doc Section 11a: plots live on their own "zone" layer, separate from Cartographyr's
+    // built-in Region/Settlement layers -- placement -1, below both (0/1), matching "more specific
+    // things stack below more general ones" in Lyfe's HUD ordering convention.
+    public static final Identifier ZONE_LAYER_ID = Identifier.fromNamespaceAndPath(MODID, "zone");
+
+    // Open, trust-based (same governance as Cartographyr's own EntityType) -- Settlemynts owns
+    // these two since it's the mod actually creating plot entities; a future Blueprynts (or any
+    // other mod) can define its own EntityType for whatever it registers, no coordination needed.
+    public static final EntityType PLOT_ENTITY_TYPE = new EntityType(Identifier.fromNamespaceAndPath(MODID, "plot"));
+    public static final EntityType PLOT_BUFFER_ENTITY_TYPE = new EntityType(Identifier.fromNamespaceAndPath(MODID, "plot_buffer"));
+
+    // Design doc Section 11a: "Town Proper" buffer padding, added outward from each plot's own
+    // centroid -- deliberately smaller than the settlement's own CARTOGRAPHYR_PADDING_BLOCKS (10),
+    // since a plot's buffer is meant to cover just the narrow gap between adjacent plots, not a
+    // whole "no man's zone" the way a settlement's perimeter buffer is.
+    public static final double PLOT_BUFFER_PADDING_BLOCKS = 3.0;
+
     public SettlemyntsMod(IEventBus modEventBus, ModContainer modContainer) {
         ModItems.ITEMS.register(modEventBus);
+        ModItems.DATA_COMPONENTS.register(modEventBus);
         ModEntities.ENTITIES.register(modEventBus);
+
+        Cartography.registerLayer(new Layer(ZONE_LAYER_ID, "Zone", -1));
+
+        // Built-in zone types (design doc Section 11a) -- Settlemynts only ships these two; a
+        // future Blueprynts mod (and others) is expected to register the rest via
+        // Settlemynts.registerZoneType. Colors chosen to be unique/distinct while stained glass
+        // lasts -- see ZoneType's own doc for the "switch to wool once glass runs out" plan.
+        Settlemynts.registerZoneType(new ZoneType(
+                Identifier.fromNamespaceAndPath(MODID, "town_hall"), "Town Hall", Blocks.WHITE_STAINED_GLASS));
+        Settlemynts.registerZoneType(new ZoneType(
+                Identifier.fromNamespaceAndPath(MODID, "private_residence"), "Private Residence", Blocks.LIGHT_BLUE_STAINED_GLASS));
 
         NeoForge.EVENT_BUS.register(this);
         modEventBus.addListener(this::commonSetup);
@@ -163,6 +207,200 @@ public class SettlemyntsMod {
 
         registrar.playToServer(SetBoundaryVisiblePayload.TYPE, SetBoundaryVisiblePayload.STREAM_CODEC,
                 (payload, context) -> setBoundaryVisible(payload, context));
+
+        // Plot subdivision (design doc Section 11a).
+        registrar.playToClient(OpenPlotStakeScreenPayload.TYPE, OpenPlotStakeScreenPayload.STREAM_CODEC,
+                (payload, context) -> ClientFoundingRequests.requestPlotStakeScreen(payload));
+
+        registrar.playToServer(RequestPlotStakePayload.TYPE, RequestPlotStakePayload.STREAM_CODEC,
+                (payload, context) -> requestPlotStake(payload, context));
+
+        registrar.playToServer(RemovePlotStakePayload.TYPE, RemovePlotStakePayload.STREAM_CODEC,
+                (payload, context) -> {
+                    if (!(context.player() instanceof ServerPlayer player)
+                            || !(player.level() instanceof ServerLevel serverLevel)
+                            || !(serverLevel.getEntity(payload.stakeEntityId()) instanceof GhostPlotStakeEntity stake)) {
+                        return;
+                    }
+                    if (serverLevel.getEntity(stake.getOwnerCoreId()) instanceof GhostTownHallCoreEntity core
+                            && core.isTownPlanner(player.getUUID())) {
+                        stake.remove(player);
+                    }
+                });
+
+        registrar.playToServer(FinalizePlotPayload.TYPE, FinalizePlotPayload.STREAM_CODEC,
+                (payload, context) -> finalizePlot(payload, context));
+
+        registrar.playToServer(SetShowPlotPerimetersPayload.TYPE, SetShowPlotPerimetersPayload.STREAM_CODEC,
+                (payload, context) -> setShowPlotPerimeters(payload, context));
+    }
+
+    /** "Get Plot Placement Stake" -- resolves (or starts) this planner's active plot session for the settlement, then grants a stake item bound to it. */
+    private static void requestPlotStake(RequestPlotStakePayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)
+                || !(player.level() instanceof ServerLevel serverLevel)
+                || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)
+                || !core.isTownPlanner(player.getUUID())) {
+            return;
+        }
+        UUID plotSessionId = core.getActivePlotSession(player.getUUID());
+        if (plotSessionId == null) {
+            plotSessionId = UUID.randomUUID();
+            core.setActivePlotSession(player.getUUID(), plotSessionId);
+        }
+        ItemStack stake = new ItemStack(ModItems.PLOT_PLACEMENT_STAKE.get());
+        stake.set(ModItems.PLOT_SESSION_DATA, new PlotSessionData(core.getUUID(), plotSessionId));
+        if (!player.getInventory().add(stake)) {
+            player.drop(stake, false);
+        }
+    }
+
+    /**
+     * "Finalize Plot" -- computes the plot's real polygon and its "Town Proper" buffer from the
+     * session's placed stakes (design doc Section 11a), registers both with Cartographyr, records
+     * the result on the core, clears the session's stakes/leftover items, and frees this planner's
+     * active-session slot so their next "Get Plot Placement Stake" starts a fresh plot.
+     */
+    private static void finalizePlot(FinalizePlotPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        if (!(player.level() instanceof ServerLevel serverLevel)
+                || !(serverLevel.getEntity(payload.stakeEntityId()) instanceof GhostPlotStakeEntity anchorStake)) {
+            player.sendSystemMessage(Component.literal(
+                    "Couldn't find that plot stake anymore -- try right-clicking one of its stakes again."));
+            return;
+        }
+        UUID ownerCoreId = anchorStake.getOwnerCoreId();
+        UUID plotSessionId = anchorStake.getPlotSessionId();
+        if (!(serverLevel.getEntity(ownerCoreId) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("This plot's settlement is gone."));
+            return;
+        }
+        if (!core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
+            return;
+        }
+        if (payload.name().isBlank()) {
+            player.sendSystemMessage(Component.literal("Set a plot name before finalizing."));
+            return;
+        }
+
+        Identifier zoneTypeId = Identifier.parse(payload.zoneTypeId());
+        Optional<ZoneType> zoneType = ZoneTypeRegistry.get(zoneTypeId);
+        if (zoneType.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Unknown zone type -- try reopening the plot stake screen."));
+            return;
+        }
+
+        List<GhostPlotStakeEntity> stakes = GhostPlotStakeEntity.findBySession(serverLevel, ownerCoreId, plotSessionId);
+        if (stakes.size() < 3) {
+            player.sendSystemMessage(Component.literal("Place at least 3 plot stakes before finalizing."));
+            return;
+        }
+
+        List<PlotGeometry.StakePoint> points = new ArrayList<>(stakes.size());
+        for (GhostPlotStakeEntity stake : stakes) {
+            points.add(new PlotGeometry.StakePoint(stake.getX(), stake.getZ()));
+        }
+        List<PlotGeometry.StakePoint> ordered = PlotGeometry.sortAngularly(points);
+        Geometry.Polygon plotPolygon = PlotGeometry.polygonFromStakes(ordered);
+        double centerX = PlotGeometry.centroidX(points);
+        double centerZ = PlotGeometry.centroidZ(points);
+        Geometry.Polygon bufferPolygon = PlotGeometry.paddedBuffer(plotPolygon, centerX, centerZ, PLOT_BUFFER_PADDING_BLOCKS);
+
+        GeographicEntity plotEntity = Cartography.createEntity(serverLevel, new EntityDefinition(
+                serverLevel.dimension(), Classification.CONSTRUCTED, PLOT_ENTITY_TYPE, ZONE_LAYER_ID,
+                Optional.of(payload.name()), plotPolygon, LifecycleState.REALIZED, Optional.empty()));
+        Cartography.setDesignation(serverLevel, plotEntity.id(), zoneType.get().label());
+
+        // No name/designation on the buffer entity -- it's only ever meant to resolve to "Town
+        // Proper" (design doc Section 11a), never a specific plot's own zone/name.
+        GeographicEntity bufferEntity = Cartography.createEntity(serverLevel, new EntityDefinition(
+                serverLevel.dimension(), Classification.CONSTRUCTED, PLOT_BUFFER_ENTITY_TYPE, ZONE_LAYER_ID,
+                Optional.empty(), bufferPolygon, LifecycleState.REALIZED, Optional.empty()));
+
+        core.addPlot(new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value()));
+        core.setActivePlotSession(player.getUUID(), null);
+
+        for (GhostPlotStakeEntity stake : stakes) {
+            stake.discard();
+        }
+        int cleared = clearPlotStakeItems(serverLevel, core, plotSessionId);
+
+        player.sendSystemMessage(Component.literal(
+                "Plot \"" + payload.name() + "\" (" + zoneType.get().label() + ") finalized and registered with Cartographyr"
+                        + (cleared > 0 ? " -- cleared " + cleared + " leftover Plot Placement Stake item(s)." : ".")));
+    }
+
+    /** Mirrors {@link #clearPerimeterStakeItems} -- removes only stake items bound to this specific finished plot session, not every Plot Placement Stake the planner happens to be carrying (they may be mid-staking a different plot). */
+    private static int clearPlotStakeItems(ServerLevel level, GhostTownHallCoreEntity core, UUID plotSessionId) {
+        int cleared = 0;
+        for (UUID plannerId : core.getTownPlanners()) {
+            ServerPlayer planner = level.getServer().getPlayerList().getPlayer(plannerId);
+            if (planner == null) {
+                continue;
+            }
+            var inventory = planner.getInventory();
+            for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+                ItemStack stack = inventory.getItem(slot);
+                PlotSessionData session = stack.get(ModItems.PLOT_SESSION_DATA);
+                if (session != null && plotSessionId.equals(session.plotSessionId())) {
+                    inventory.setItem(slot, ItemStack.EMPTY);
+                    cleared++;
+                }
+            }
+        }
+        return cleared;
+    }
+
+    /**
+     * "Show Plot Perimeters" toggle -- mirrors {@link #setBoundaryVisible} but draws every
+     * finalized plot's *real* polygon (not the buffer), colorized per its own zone type, sourced
+     * fresh from Cartographyr each time rather than cached locally.
+     */
+    private static void setShowPlotPerimeters(SetShowPlotPerimetersPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        if (!(player.level() instanceof ServerLevel serverLevel) || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal(
+                    "Couldn't find this settlement's Town Hall Core anymore -- try right-clicking it again to reopen this screen."));
+            return;
+        }
+        if (!core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
+            return;
+        }
+
+        for (GhostPlotWallEntity existing : GhostPlotWallEntity.findByOwnerCore(serverLevel, core.getUUID())) {
+            existing.discard();
+        }
+
+        core.setShowPlotPerimeters(payload.visible());
+        if (!payload.visible()) {
+            return;
+        }
+
+        for (PlotRecord plot : core.getPlots()) {
+            Optional<GeographicEntity> plotEntity = Cartography.getEntity(serverLevel, new EntityId(plot.cartographyrPlotEntityId()));
+            if (plotEntity.isEmpty() || !(plotEntity.get().geometry() instanceof Geometry.Polygon polygon)) {
+                continue;
+            }
+            ZoneType zoneType = ZoneTypeRegistry.get(plot.zoneTypeId()).orElse(null);
+            if (zoneType == null) {
+                continue;
+            }
+
+            List<PerimeterFit.StakeInput> vertices = new ArrayList<>(polygon.vertices().size());
+            for (Geometry.Polygon.Vertex vertex : polygon.vertices()) {
+                vertices.add(new PerimeterFit.StakeInput(vertex.x(), vertex.z(), false));
+            }
+            for (BoundaryWallLayout.Point point : BoundaryWallLayout.layout(vertices, BoundaryWallLayout.DEFAULT_SPACING_BLOCKS)) {
+                int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, (int) Math.floor(point.x()), (int) Math.floor(point.z()));
+                GhostPlotWallEntity.create(serverLevel, point.x(), groundY, point.z(), core.getUUID(), zoneType.wallBlock().defaultBlockState());
+            }
+        }
     }
 
     /**

@@ -8,6 +8,8 @@ import com.github.cerealklla.settlemynts.founding.OpenFoundingScreenPayload;
 import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
 import com.github.cerealklla.settlemynts.founding.SetBoundaryVisiblePayload;
 import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
+import com.github.cerealklla.settlemynts.zone.RequestPlotStakePayload;
+import com.github.cerealklla.settlemynts.zone.SetShowPlotPerimetersPayload;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -35,10 +37,12 @@ public final class FoundingScreen extends Screen {
     private final boolean viewerIsFounder;
     private final boolean finalized;
     private boolean boundaryVisible;
+    private boolean showPlotPerimeters;
 
     private EditBox nameBox;
     private EditBox grantBox;
     private Button boundaryToggleButton;
+    private Button plotPerimetersToggleButton;
     private int plannerListY;
 
     public FoundingScreen(OpenFoundingScreenPayload payload) {
@@ -49,6 +53,7 @@ public final class FoundingScreen extends Screen {
         this.viewerIsFounder = payload.viewerIsFounder();
         this.boundaryVisible = payload.boundaryVisible();
         this.finalized = payload.finalized();
+        this.showPlotPerimeters = payload.showPlotPerimeters();
     }
 
     @Override
@@ -76,6 +81,18 @@ public final class FoundingScreen extends Screen {
         boundaryToggleButton = addRenderableWidget(Button.builder(boundaryToggleLabel(), b -> toggleBoundary())
                 .bounds(centerX - 100, y, 245, 20).build());
         y += 30;
+
+        // Plot subdivision (design doc Section 11a) only makes sense once the settlement itself is
+        // finalized -- these replace the pre-finalize "Get Perimeter Stake"/"Finalize" row above.
+        if (finalized) {
+            addRenderableWidget(Button.builder(Component.literal("Get Plot Placement Stake"), b -> getPlotStake())
+                    .bounds(centerX - 100, y, 245, 20).build());
+            y += 30;
+
+            plotPerimetersToggleButton = addRenderableWidget(Button.builder(plotPerimetersToggleLabel(), b -> togglePlotPerimeters())
+                    .bounds(centerX - 100, y, 245, 20).build());
+            y += 30;
+        }
 
         if (viewerIsFounder) {
             grantBox = addRenderableWidget(new EditBox(font, centerX - 100, y, 150, 20, Component.literal("Player name")));
@@ -128,6 +145,20 @@ public final class FoundingScreen extends Screen {
 
     private Component boundaryToggleLabel() {
         return Component.literal("View Settlement Boundaries: " + (boundaryVisible ? "ON" : "OFF"));
+    }
+
+    private void getPlotStake() {
+        send(new RequestPlotStakePayload(coreEntityId));
+    }
+
+    private void togglePlotPerimeters() {
+        showPlotPerimeters = !showPlotPerimeters;
+        send(new SetShowPlotPerimetersPayload(coreEntityId, showPlotPerimeters));
+        plotPerimetersToggleButton.setMessage(plotPerimetersToggleLabel());
+    }
+
+    private Component plotPerimetersToggleLabel() {
+        return Component.literal("Show Plot Perimeters: " + (showPlotPerimeters ? "ON" : "OFF"));
     }
 
     private void send(net.minecraft.network.protocol.common.custom.CustomPacketPayload payload) {

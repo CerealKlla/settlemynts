@@ -8,6 +8,9 @@ import com.github.cerealklla.settlemynts.founding.client.GhostTownHallCoreRender
 import com.github.cerealklla.settlemynts.founding.client.StakeDistanceOverlay;
 import com.github.cerealklla.settlemynts.founding.client.StakeScreen;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
+import com.github.cerealklla.settlemynts.zone.client.GhostPlotStakeRenderer;
+import com.github.cerealklla.settlemynts.zone.client.GhostPlotWallRenderer;
+import com.github.cerealklla.settlemynts.zone.client.PlotStakeScreen;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
@@ -32,6 +35,8 @@ public class SettlemyntsModClient {
         event.registerEntityRenderer(ModEntities.GHOST_TOWN_HALL_CORE.get(), GhostTownHallCoreRenderer::new);
         event.registerEntityRenderer(ModEntities.GHOST_PERIMETER_STAKE.get(), GhostPerimeterStakeRenderer::new);
         event.registerEntityRenderer(ModEntities.GHOST_BOUNDARY_WALL.get(), GhostBoundaryWallRenderer::new);
+        event.registerEntityRenderer(ModEntities.GHOST_PLOT_STAKE.get(), GhostPlotStakeRenderer::new);
+        event.registerEntityRenderer(ModEntities.GHOST_PLOT_WALL.get(), GhostPlotWallRenderer::new);
     }
 
     @SubscribeEvent
@@ -53,6 +58,11 @@ public class SettlemyntsModClient {
         ClientFoundingRequests.takePendingStakeScreen().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
                 Minecraft.getInstance().setScreen(new StakeScreen(request));
+            }
+        });
+        ClientFoundingRequests.takePendingPlotStakeScreen().ifPresent(request -> {
+            if (Minecraft.getInstance().screen == null) {
+                Minecraft.getInstance().setScreen(new PlotStakeScreen(request));
             }
         });
     }

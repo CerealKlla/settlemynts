@@ -3,11 +3,15 @@ package com.github.cerealklla.settlemynts.registration;
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.founding.PlannedPerimeterStakeItem;
 import com.github.cerealklla.settlemynts.founding.SettlementClaimFlagItem;
+import com.github.cerealklla.settlemynts.zone.PlotPlacementStakeItem;
+import com.github.cerealklla.settlemynts.zone.PlotSessionData;
 
+import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.Item;
+import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredItem;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
@@ -36,4 +40,23 @@ public final class ModItems {
             id -> new PlannedPerimeterStakeItem(new Item.Properties()
                     .stacksTo(1)
                     .setId(ResourceKey.create(Registries.ITEM, id))));
+
+    // Design doc Section 11a: obtained from a finalized settlement's Ghost Town Hall Core, tagged
+    // with PlotSessionData at grant time so placement never has to guess which plot it belongs to.
+    public static final DeferredItem<PlotPlacementStakeItem> PLOT_PLACEMENT_STAKE = ITEMS.register(
+            "plot_placement_stake",
+            id -> new PlotPlacementStakeItem(new Item.Properties()
+                    .stacksTo(1)
+                    .setId(ResourceKey.create(Registries.ITEM, id))));
+
+    public static final DeferredRegister.DataComponents DATA_COMPONENTS =
+            DeferredRegister.createDataComponents(Registries.DATA_COMPONENT_TYPE, SettlemyntsMod.MODID);
+
+    // Persisted (survives save/load, e.g. a server restart with a stake item sitting in someone's
+    // inventory) and network-synchronized (not strictly needed client-side yet, but cheap and
+    // consistent with every other data component in this suite).
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<PlotSessionData>> PLOT_SESSION_DATA =
+            DATA_COMPONENTS.registerComponentType("plot_session_data", builder -> builder
+                    .persistent(PlotSessionData.CODEC)
+                    .networkSynchronized(PlotSessionData.STREAM_CODEC));
 }
