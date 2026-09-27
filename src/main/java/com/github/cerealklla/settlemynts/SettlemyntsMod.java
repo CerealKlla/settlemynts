@@ -410,7 +410,7 @@ public class SettlemyntsMod {
             }
 
             List<PerimeterFit.StakeInput> vertices = new ArrayList<>(polygon.vertices().size());
-            for (Geometry.Polygon.Vertex vertex : polygon.vertices()) {
+            for (Geometry.Polygon.Vertex vertex : PlotGeometry.wallVertices(polygon)) {
                 vertices.add(new PerimeterFit.StakeInput(vertex.x(), vertex.z(), false));
             }
             for (BoundaryWallLayout.Point point : BoundaryWallLayout.layout(vertices, BoundaryWallLayout.DEFAULT_SPACING_BLOCKS)) {
@@ -586,9 +586,9 @@ public class SettlemyntsMod {
 
         List<Geometry.Polygon.Vertex> realVertices = new ArrayList<>(ordered.size());
         for (PerimeterFit.StakeInput stake : ordered) {
-            realVertices.add(new Geometry.Polygon.Vertex((int) Math.round(stake.x()), (int) Math.round(stake.z())));
+            realVertices.add(new Geometry.Polygon.Vertex((int) Math.floor(stake.x()), (int) Math.floor(stake.z())));
         }
-        Geometry realPolygon = new Geometry.Polygon(realVertices);
+        Geometry realPolygon = Geometry.Polygon.coveringBlocks(realVertices);
         registerSettlementCore(level, core, realPolygon);
 
         Long existingId = core.getCartographyrEntityId();

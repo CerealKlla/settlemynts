@@ -53,7 +53,11 @@ public final class PlotGeometry {
 
     /**
      * Builds the plot's real Cartographyr polygon from its (angularly-sorted) stakes, taking each
-     * position's own block column ({@code Math.floor}, not {@code Math.round}).
+     * position's own block column ({@code Math.floor}, not {@code Math.round}), then handing the
+     * result to {@link Geometry.Polygon#coveringBlocks} so every stake's own block -- corners
+     * included -- resolves as inside the plot, per the user's exact spec (2026-09-27): a stake block
+     * and a plain interior block must be equally "permitted," only the wall ring one block further
+     * out is not.
      *
      * <p><b>{@code Math.round} was a real, deterministic bug here</b> (fixed 2026-09-27, a live
      * playtest report -- "the entire plot appears shifted by an entire block in one direction"):
@@ -68,7 +72,38 @@ public final class PlotGeometry {
         for (StakePoint p : orderedPoints) {
             vertices.add(new Geometry.Polygon.Vertex((int) Math.floor(p.x()), (int) Math.floor(p.z())));
         }
-        return new Geometry.Polygon(vertices);
+        return Geometry.Polygon.coveringBlocks(vertices);
+    }
+
+    /**
+     * The wall's own trace polygon -- the block ring immediately outside the plot's real, already
+     * block-inclusive boundary ({@link #polygonFromStakes}'s output), per the user's spec: the wall
+     * marks the first NOT-permitted ring, so it must never sit on a block the plot itself already
+     * claims. {@code plotPolygon}'s vertices are edge coordinates, not block ids -- on the low side
+     * of the shape a vertex already sits at its stake block's own low edge (e.g. block 10 -> edge
+     * 10), so the next block out is {@code edge - 1}; on the high side {@link
+     * Geometry.Polygon#coveringBlocks} already pushed the vertex to the far edge of the outermost
+     * stake block (e.g. stake block 14 -> edge 15), and that edge coordinate *is* the next block out
+     * (block 15), unchanged. Same direction-relative approximation as {@link #paddedBuffer}.
+     */
+    public static List<Geometry.Polygon.Vertex> wallVertices(Geometry.Polygon plotPolygon) {
+        List<Geometry.Polygon.Vertex> vertices = plotPolygon.vertices();
+        double centerX = 0;
+        double centerZ = 0;
+        for (Geometry.Polygon.Vertex v : vertices) {
+            centerX += v.x();
+            centerZ += v.z();
+        }
+        centerX /= vertices.size();
+        centerZ /= vertices.size();
+
+        List<Geometry.Polygon.Vertex> wall = new ArrayList<>(vertices.size());
+        for (Geometry.Polygon.Vertex v : vertices) {
+            int wallX = v.x() >= centerX ? v.x() : v.x() - 1;
+            int wallZ = v.z() >= centerZ ? v.z() : v.z() - 1;
+            wall.add(new Geometry.Polygon.Vertex(wallX, wallZ));
+        }
+        return wall;
     }
 
     /**

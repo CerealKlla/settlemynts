@@ -51,7 +51,10 @@ class PlotGeometryTest {
      * {@code block + 0.5} in practice ({@code GhostPlotStakeEntity.create}'s own centering) --
      * {@code Math.round} on a value that's always exactly {@code n + 0.5} rounds up to {@code n + 1}
      * every time, shifting the whole polygon by one block. {@code Math.floor} must recover the
-     * actual block the stake stood in, not the next one over.
+     * actual block the stake stood in, not the next one over. Expected vertices are 10 (the low
+     * side's own block, unchanged) or 16 (the high side's block, 15, pushed to its own far edge by
+     * {@link Geometry.Polygon#coveringBlocks}) -- not 15, since {@link PlotGeometry#polygonFromStakes}
+     * now runs every stake through that block-inclusive correction (2026-09-27, see decisions.md).
      */
     @Test
     void polygonFromStakesDoesNotShiftBlockCenteredStakesByOneBlock() {
@@ -62,8 +65,45 @@ class PlotGeometryTest {
         Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(PlotGeometry.sortAngularly(square));
 
         for (Geometry.Polygon.Vertex vertex : polygon.vertices()) {
-            assertEquals(true, vertex.x() == 10 || vertex.x() == 15);
-            assertEquals(true, vertex.z() == 10 || vertex.z() == 15);
+            assertEquals(true, vertex.x() == 10 || vertex.x() == 16);
+            assertEquals(true, vertex.z() == 10 || vertex.z() == 16);
+        }
+    }
+
+    /**
+     * The user's exact spec (2026-09-27): every stake's own block, and every plain interior block,
+     * must be equally "inside" -- a stake block is not a special, excluded edge case.
+     */
+    @Test
+    void polygonFromStakesIncludesEveryStakeBlockItself() {
+        // A 5x5: stake blocks at 10..14 inclusive on both axes.
+        List<StakePoint> square = List.of(
+                new StakePoint(10.5, 10.5), new StakePoint(14.5, 10.5),
+                new StakePoint(14.5, 14.5), new StakePoint(10.5, 14.5));
+
+        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(PlotGeometry.sortAngularly(square));
+
+        for (int x = 10; x <= 14; x++) {
+            for (int z = 10; z <= 14; z++) {
+                assertEquals(true, polygon.contains(x, z), "Expected block (" + x + "," + z + ") to be contained");
+            }
+        }
+    }
+
+    @Test
+    void wallVerticesSitOneBlockOutsideTheFullyInclusiveBoundary() {
+        List<StakePoint> square = List.of(
+                new StakePoint(10.5, 10.5), new StakePoint(14.5, 10.5),
+                new StakePoint(14.5, 14.5), new StakePoint(10.5, 14.5));
+        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(PlotGeometry.sortAngularly(square));
+
+        for (Geometry.Polygon.Vertex wallVertex : PlotGeometry.wallVertices(polygon)) {
+            // Stake blocks span 10..14 inclusive; the wall ring is the very next block out on each
+            // side: 9 (one below the low stake block) and 15 (one above the high stake block).
+            assertEquals(true, wallVertex.x() == 9 || wallVertex.x() == 15);
+            assertEquals(true, wallVertex.z() == 9 || wallVertex.z() == 15);
+            // The wall must never sit on a block the plot itself claims.
+            assertEquals(false, polygon.contains(wallVertex.x(), wallVertex.z()));
         }
     }
 
