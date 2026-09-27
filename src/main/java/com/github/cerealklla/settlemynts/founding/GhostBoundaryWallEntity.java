@@ -60,7 +60,7 @@ public class GhostBoundaryWallEntity extends Display.BlockDisplay {
         GhostBoundaryWallEntity wall = new GhostBoundaryWallEntity(ModEntities.GHOST_BOUNDARY_WALL.get(), level);
         wall.setPos(x, y, z);
         wall.ownerCoreId = ownerCoreId;
-        GhostBlockDisplays.setBlockState(level, wall, Blocks.WHITE_WOOL.defaultBlockState());
+        GhostBlockDisplays.setBlockState(wall, Blocks.WHITE_WOOL.defaultBlockState());
         level.addFreshEntity(wall);
         return wall;
     }

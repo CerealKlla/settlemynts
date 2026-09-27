@@ -47,7 +47,7 @@ public class GhostPlotWallEntity extends Display.BlockDisplay {
         GhostPlotWallEntity wall = new GhostPlotWallEntity(ModEntities.GHOST_PLOT_WALL.get(), level);
         wall.setPos(x, y, z);
         wall.ownerCoreId = ownerCoreId;
-        GhostBlockDisplays.setBlockState(level, wall, wallBlock);
+        GhostBlockDisplays.setBlockState(wall, wallBlock);
         level.addFreshEntity(wall);
         return wall;
     }

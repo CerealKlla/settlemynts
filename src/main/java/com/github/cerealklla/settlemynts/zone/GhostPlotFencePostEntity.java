@@ -48,7 +48,7 @@ public class GhostPlotFencePostEntity extends Display.BlockDisplay {
         post.setPos(x, y, z);
         post.ownerCoreId = ownerCoreId;
         post.plotSessionId = plotSessionId;
-        GhostBlockDisplays.setBlockState(level, post, state);
+        GhostBlockDisplays.setBlockState(post, state);
         level.addFreshEntity(post);
         return post;
     }

@@ -50,7 +50,7 @@ public class GhostPerimeterFencePostEntity extends Display.BlockDisplay {
         GhostPerimeterFencePostEntity post = new GhostPerimeterFencePostEntity(ModEntities.GHOST_PERIMETER_FENCE_POST.get(), level);
         post.setPos(x, y, z);
         post.ownerCoreId = ownerCoreId;
-        GhostBlockDisplays.setBlockState(level, post, state);
+        GhostBlockDisplays.setBlockState(post, state);
         level.addFreshEntity(post);
         return post;
     }
