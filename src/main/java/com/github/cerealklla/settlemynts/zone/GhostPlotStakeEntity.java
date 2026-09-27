@@ -66,7 +66,7 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay {
      * is what keeps this scheme gap-free without needing a separately persisted ever-incrementing
      * counter.
      */
-    public static GhostPlotStakeEntity create(ServerLevel level, double x, double y, double z, UUID ownerCoreId, UUID plotSessionId, int placementIndex) {
+    public static GhostPlotStakeEntity create(ServerLevel level, int x, int y, int z, UUID ownerCoreId, UUID plotSessionId, int placementIndex) {
         GhostPlotStakeEntity stake = new GhostPlotStakeEntity(ModEntities.GHOST_PLOT_STAKE.get(), level);
         stake.setPos(x, y, z);
         stake.ownerCoreId = ownerCoreId;

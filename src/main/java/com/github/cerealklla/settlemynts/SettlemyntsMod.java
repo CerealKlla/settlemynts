@@ -437,7 +437,12 @@ public class SettlemyntsMod {
             for (Geometry.Polygon.Vertex block : Geometry.Polygon.outerRing(polygon)) {
                 int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, block.x(), block.z());
                 for (int level = 0; level < GhostPlotWallEntity.WALL_HEIGHT_BLOCKS; level++) {
-                    GhostPlotWallEntity.create(serverLevel, block.x() + 0.5, groundY + level, block.z() + 0.5, core.getUUID(), zoneType.wallBlock().defaultBlockState());
+                    // No +0.5 centering here (fixed 2026-09-27, playtest feedback: the glass wasn't
+                    // stacked on the block below it, offset by half a block) -- a Display.BlockDisplay
+                    // renders its block model anchored at the entity's own position as that block's own
+                    // low corner, the same convention a normally placed block uses, not the "centered
+                    // icon" convention the old floating-item entities needed.
+                    GhostPlotWallEntity.create(serverLevel, block.x(), groundY + level, block.z(), core.getUUID(), zoneType.wallBlock().defaultBlockState());
                 }
             }
         }
@@ -519,7 +524,8 @@ public class SettlemyntsMod {
             // stack per point gives a real "wall" silhouette even where the ground itself slopes.
             int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, block.x(), block.z());
             for (int level = 0; level < GhostBoundaryWallEntity.WALL_HEIGHT_BLOCKS; level++) {
-                GhostBoundaryWallEntity.create(serverLevel, block.x() + 0.5, groundY + level, block.z() + 0.5, core.getUUID());
+                // No +0.5 centering -- see the identical fix/comment in setShowPlotPerimeters, same date.
+                GhostBoundaryWallEntity.create(serverLevel, block.x(), groundY + level, block.z(), core.getUUID());
             }
         }
         core.setBoundaryVisible(true);

@@ -82,7 +82,7 @@ public class GhostPerimeterStakeEntity extends Display.BlockDisplay {
      * which is what keeps this scheme gap-free without needing a separately persisted
      * ever-incrementing counter.
      */
-    public static GhostPerimeterStakeEntity create(ServerLevel level, double x, double y, double z, UUID ownerCoreId, int placementIndex) {
+    public static GhostPerimeterStakeEntity create(ServerLevel level, int x, int y, int z, UUID ownerCoreId, int placementIndex) {
         GhostPerimeterStakeEntity stake = new GhostPerimeterStakeEntity(ModEntities.GHOST_PERIMETER_STAKE.get(), level);
         stake.setPos(x, y, z);
         stake.ownerCoreId = ownerCoreId;

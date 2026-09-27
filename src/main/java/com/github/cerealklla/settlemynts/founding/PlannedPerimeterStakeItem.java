@@ -78,8 +78,10 @@ public class PlannedPerimeterStakeItem extends Item {
         // level as a real, solid block, which buried the stake's own marker; standing one block up
         // keeps it visible on top of the fence. The entity's *actual* position moves here (not just
         // a render offset), so the click/interact hitbox follows the visual -- a render-only offset
-        // was a real bug (right-clicking where the torch visually appeared did nothing).
-        GhostPerimeterStakeEntity.create(serverLevel, placePos.getX() + 0.5, placePos.getY() + 1, placePos.getZ() + 0.5, ownerCore.getUUID(), existingStakes);
+        // was a real bug (right-clicking where the torch visually appeared did nothing). No +0.5 on
+        // x/z (fixed 2026-09-27, separate playtest feedback: a Display.BlockDisplay renders its
+        // block anchored at the entity's own position as that block's own low corner, not centered).
+        GhostPerimeterStakeEntity.create(serverLevel, placePos.getX(), placePos.getY() + 1, placePos.getZ(), ownerCore.getUUID(), existingStakes);
         GhostPerimeterFencePostEntity.regenerate(serverLevel, ownerCore);
         return InteractionResult.SUCCESS_SERVER;
     }

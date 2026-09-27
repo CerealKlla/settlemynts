@@ -43,7 +43,7 @@ public class GhostPlotWallEntity extends Display.BlockDisplay {
         super(type, level);
     }
 
-    public static GhostPlotWallEntity create(ServerLevel level, double x, double y, double z, UUID ownerCoreId, BlockState wallBlock) {
+    public static GhostPlotWallEntity create(ServerLevel level, int x, int y, int z, UUID ownerCoreId, BlockState wallBlock) {
         GhostPlotWallEntity wall = new GhostPlotWallEntity(ModEntities.GHOST_PLOT_WALL.get(), level);
         wall.setPos(x, y, z);
         wall.ownerCoreId = ownerCoreId;
