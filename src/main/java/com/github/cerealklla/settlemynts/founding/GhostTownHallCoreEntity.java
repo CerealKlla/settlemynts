@@ -80,6 +80,16 @@ public class GhostTownHallCoreEntity extends Entity {
     // 10-11a). Added 2026-09-26 after a playtest report that those buttons lingered post-finalize.
     private boolean finalized;
 
+    // The Town Planner currently mid-staking this settlement's perimeter (design doc Section 6/7a,
+    // added 2026-09-27) -- null when nobody is. Unlike plot staking (activePlotSessionByPlanner
+    // below), perimeter staking has no per-planner session concept: all of a settlement's perimeter
+    // stakes are one shared, ordered sequence, and now that the polygon is built from that *placement
+    // order* rather than an angular sort (see decisions.md 2026-09-27), two planners placing stakes
+    // at once would corrupt the sequence. Claimed by the first stake placed (see
+    // PlannedPerimeterStakeItem), released on a successful Finalize or when the holder removes their
+    // way back down to zero stakes -- see SettlemyntsMod for both release points.
+    private UUID activePerimeterPlanner;
+
     // Plot subdivision (design doc Section 11a, added 2026-09-26). Each Town Planner works on at
     // most one plot at a time, but different Planners can each be mid-staking their own plot
     // concurrently -- keyed per-planner rather than one shared "current session" for the whole
@@ -142,6 +152,14 @@ public class GhostTownHallCoreEntity extends Entity {
 
     public void setFinalized(boolean finalized) {
         this.finalized = finalized;
+    }
+
+    public UUID getActivePerimeterPlanner() {
+        return activePerimeterPlanner;
+    }
+
+    public void setActivePerimeterPlanner(UUID activePerimeterPlanner) {
+        this.activePerimeterPlanner = activePerimeterPlanner;
     }
 
     /** This planner's currently in-progress plot, if any -- {@code null} means their next "Get Plot Placement Stake" starts a fresh one. */
@@ -260,6 +278,7 @@ public class GhostTownHallCoreEntity extends Entity {
         cartographyrEntityId = input.read("CartographyrEntityId", Codec.LONG).orElse(null);
         cartographyrCoreEntityId = input.read("CartographyrCoreEntityId", Codec.LONG).orElse(null);
         finalized = input.getBooleanOr("Finalized", false);
+        activePerimeterPlanner = input.read("ActivePerimeterPlanner", UUIDUtil.CODEC).orElse(null);
         showPlotPerimeters = input.getBooleanOr("ShowPlotPerimeters", false);
         plots.clear();
         plots.addAll(input.read("Plots", Codec.list(PlotRecord.CODEC)).orElse(List.of()));
@@ -286,6 +305,7 @@ public class GhostTownHallCoreEntity extends Entity {
         output.storeNullable("CartographyrEntityId", Codec.LONG, cartographyrEntityId);
         output.storeNullable("CartographyrCoreEntityId", Codec.LONG, cartographyrCoreEntityId);
         output.putBoolean("Finalized", finalized);
+        output.storeNullable("ActivePerimeterPlanner", UUIDUtil.CODEC, activePerimeterPlanner);
         output.putBoolean("ShowPlotPerimeters", showPlotPerimeters);
         output.store("Plots", Codec.list(PlotRecord.CODEC), List.copyOf(plots));
         List<ActivePlotSessionEntry> sessionEntries = new ArrayList<>();

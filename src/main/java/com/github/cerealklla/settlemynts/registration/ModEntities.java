@@ -2,8 +2,10 @@ package com.github.cerealklla.settlemynts.registration;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.founding.GhostBoundaryWallEntity;
+import com.github.cerealklla.settlemynts.founding.GhostPerimeterFencePostEntity;
 import com.github.cerealklla.settlemynts.founding.GhostPerimeterStakeEntity;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
+import com.github.cerealklla.settlemynts.zone.GhostPlotFencePostEntity;
 import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
 import com.github.cerealklla.settlemynts.zone.GhostPlotWallEntity;
 
@@ -56,4 +58,16 @@ public final class ModEntities {
             GhostPlotWallEntity::new,
             MobCategory.MISC,
             builder -> builder.sized(1.0f, 1.0f));
+
+    public static final DeferredHolder<EntityType<?>, EntityType<GhostPerimeterFencePostEntity>> GHOST_PERIMETER_FENCE_POST = ENTITIES.registerEntityType(
+            "ghost_perimeter_fence_post",
+            GhostPerimeterFencePostEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(0.5f, 1.0f));
+
+    public static final DeferredHolder<EntityType<?>, EntityType<GhostPlotFencePostEntity>> GHOST_PLOT_FENCE_POST = ENTITIES.registerEntityType(
+            "ghost_plot_fence_post",
+            GhostPlotFencePostEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(0.5f, 1.0f));
 }

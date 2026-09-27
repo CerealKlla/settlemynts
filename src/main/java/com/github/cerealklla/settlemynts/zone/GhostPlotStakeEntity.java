@@ -1,5 +1,7 @@
 package com.github.cerealklla.settlemynts.zone;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -40,17 +42,29 @@ public class GhostPlotStakeEntity extends Entity {
 
     private UUID ownerCoreId;
     private UUID plotSessionId;
+    private int placementIndex;
 
     public GhostPlotStakeEntity(EntityType<? extends GhostPlotStakeEntity> type, Level level) {
         super(type, level);
         this.noPhysics = true;
     }
 
-    public static GhostPlotStakeEntity create(ServerLevel level, double x, double y, double z, UUID ownerCoreId, UUID plotSessionId) {
+    /**
+     * {@code placementIndex} is this stake's position in the actual sequence it was placed in --
+     * always {@code findBySession(...).size()} at the moment of creation (see {@code
+     * PlotPlacementStakeItem}). Building the plot's polygon from stakes sorted by this index (not
+     * angularly around a centroid) is what makes non-star-shaped plots -- an L, a C, anything -- work
+     * at all (2026-09-27, see decisions.md same date). Removal is restricted to the highest currently-
+     * alive index (enforced in {@code SettlemyntsMod}'s {@code RemovePlotStakePayload} handler), which
+     * is what keeps this scheme gap-free without needing a separately persisted ever-incrementing
+     * counter.
+     */
+    public static GhostPlotStakeEntity create(ServerLevel level, double x, double y, double z, UUID ownerCoreId, UUID plotSessionId, int placementIndex) {
         GhostPlotStakeEntity stake = new GhostPlotStakeEntity(ModEntities.GHOST_PLOT_STAKE.get(), level);
         stake.setPos(x, y, z);
         stake.ownerCoreId = ownerCoreId;
         stake.plotSessionId = plotSessionId;
+        stake.placementIndex = placementIndex;
         level.addFreshEntity(stake);
         return stake;
     }
@@ -61,6 +75,10 @@ public class GhostPlotStakeEntity extends Entity {
 
     public UUID getPlotSessionId() {
         return plotSessionId;
+    }
+
+    public int getPlacementIndex() {
+        return placementIndex;
     }
 
     /** Every currently-loaded stake belonging to one specific in-progress plot. */
@@ -74,6 +92,13 @@ public class GhostPlotStakeEntity extends Entity {
                 core.getX() + SEARCH_RADIUS_BLOCKS, level.getMaxY(), core.getZ() + SEARCH_RADIUS_BLOCKS);
         return level.getEntities(ModEntities.GHOST_PLOT_STAKE.get(), searchBox,
                 stake -> plotSessionId.equals(stake.getPlotSessionId()));
+    }
+
+    /** {@link #findBySession} sorted by {@link #getPlacementIndex()} -- the actual polygon vertex order. */
+    public static List<GhostPlotStakeEntity> findBySessionInPlacementOrder(ServerLevel level, UUID coreId, UUID plotSessionId) {
+        List<GhostPlotStakeEntity> stakes = new ArrayList<>(findBySession(level, coreId, plotSessionId));
+        stakes.sort(Comparator.comparingInt(GhostPlotStakeEntity::getPlacementIndex));
+        return stakes;
     }
 
     private GhostTownHallCoreEntity findOwnerCore() {
@@ -134,11 +159,13 @@ public class GhostPlotStakeEntity extends Entity {
     protected void readAdditionalSaveData(ValueInput input) {
         ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
         plotSessionId = input.read("PlotSessionId", UUIDUtil.CODEC).orElse(null);
+        placementIndex = input.getIntOr("PlacementIndex", 0);
     }
 
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
         output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
         output.storeNullable("PlotSessionId", UUIDUtil.CODEC, plotSessionId);
+        output.putInt("PlacementIndex", placementIndex);
     }
 }

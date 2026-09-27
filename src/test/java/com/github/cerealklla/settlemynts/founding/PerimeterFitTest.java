@@ -171,13 +171,44 @@ class PerimeterFitTest {
 
     @Test
     void containsPointDetectsTheCoreInsideAndOutsideASimpleSquare() {
-        List<StakeInput> square = PerimeterFit.sortAngularly(List.of(
+        // Already in valid placement order (corner-by-corner) -- containsPoint expects that, not an
+        // angular sort (removed 2026-09-27, see decisions.md same date).
+        List<StakeInput> square = List.of(
                 new StakeInput(5, 5, false),
                 new StakeInput(-5, 5, false),
                 new StakeInput(-5, -5, false),
-                new StakeInput(5, -5, false)), 0, 0);
+                new StakeInput(5, -5, false));
 
         assertTrue(PerimeterFit.containsPoint(square, 0, 0), "the core at the center should be inside");
         assertFalse(PerimeterFit.containsPoint(square, 100, 100), "a far-away point should be outside");
+    }
+
+    /**
+     * Regression test (2026-09-27, see decisions.md same date): {@code fit} used to angularly
+     * re-sort its input before scaling, then scatter the result back to the caller's original order.
+     * That sort is gone -- the caller's order (real placement order) must now be preserved verbatim,
+     * with no re-sort at all, since angular sorting can't build a valid polygon for a non-star-shaped
+     * (e.g. C-shaped) perimeter in the first place.
+     */
+    @Test
+    void fitPreservesADeliberatelyNonConvexPlacementOrderVerbatim() {
+        // A "dart"/concave quad, listed in a genuine (non-angular) placement order.
+        List<StakeInput> dart = List.of(
+                new StakeInput(20, 20, false),
+                new StakeInput(30, 20, false),
+                new StakeInput(23, 23, false), // reflex vertex, pulled in toward the center
+                new StakeInput(20, 30, false));
+
+        FitResult result = PerimeterFit.fit(0, 0, dart, 100.0, 1000.0);
+
+        // Radial scaling can't change a stake's angle from the core (aside from a small whole-block
+        // snap effect) -- if fit still re-sorted internally, stake i's fitted angle would no longer
+        // line up with input stake i's own angle.
+        assertEquals(dart.size(), result.fittedStakes().size());
+        for (int i = 0; i < dart.size(); i++) {
+            double inputAngle = Math.atan2(dart.get(i).z(), dart.get(i).x());
+            double fittedAngle = Math.atan2(result.fittedStakes().get(i).z(), result.fittedStakes().get(i).x());
+            assertEquals(inputAngle, fittedAngle, 0.1, "stake " + i + " should stay in its original list position");
+        }
     }
 }

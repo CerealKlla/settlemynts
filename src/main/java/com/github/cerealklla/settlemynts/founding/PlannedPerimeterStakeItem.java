@@ -59,6 +59,12 @@ public class PlannedPerimeterStakeItem extends Item {
             return InteractionResult.FAIL;
         }
 
+        UUID activePlanner = ownerCore.getActivePerimeterPlanner();
+        if (activePlanner != null && !activePlanner.equals(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("Someone else is already placing this settlement's perimeter stakes."));
+            return InteractionResult.FAIL;
+        }
+
         int existingStakes = GhostPerimeterStakeEntity.findByOwnerCore(serverLevel, ownerCore.getUUID()).size();
         if (existingStakes >= GhostPerimeterStakeEntity.MAX_STAKES_PER_SETTLEMENT) {
             player.sendSystemMessage(Component.literal(
@@ -66,7 +72,9 @@ public class PlannedPerimeterStakeItem extends Item {
             return InteractionResult.FAIL;
         }
 
-        GhostPerimeterStakeEntity.create(serverLevel, placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5, ownerCore.getUUID());
+        ownerCore.setActivePerimeterPlanner(player.getUUID());
+        GhostPerimeterStakeEntity.create(serverLevel, placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5, ownerCore.getUUID(), existingStakes);
+        GhostPerimeterFencePostEntity.regenerate(serverLevel, ownerCore);
         return InteractionResult.SUCCESS_SERVER;
     }
 

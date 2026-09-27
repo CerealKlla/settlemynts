@@ -3,11 +3,13 @@ package com.github.cerealklla.settlemynts;
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
 import com.github.cerealklla.settlemynts.founding.client.FoundingScreen;
 import com.github.cerealklla.settlemynts.founding.client.GhostBoundaryWallRenderer;
+import com.github.cerealklla.settlemynts.founding.client.GhostPerimeterFencePostRenderer;
 import com.github.cerealklla.settlemynts.founding.client.GhostPerimeterStakeRenderer;
 import com.github.cerealklla.settlemynts.founding.client.GhostTownHallCoreRenderer;
 import com.github.cerealklla.settlemynts.founding.client.StakeDistanceOverlay;
 import com.github.cerealklla.settlemynts.founding.client.StakeScreen;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
+import com.github.cerealklla.settlemynts.zone.client.GhostPlotFencePostRenderer;
 import com.github.cerealklla.settlemynts.zone.client.GhostPlotStakeRenderer;
 import com.github.cerealklla.settlemynts.zone.client.GhostPlotWallRenderer;
 import com.github.cerealklla.settlemynts.zone.client.PlotStakeScreen;
@@ -37,6 +39,8 @@ public class SettlemyntsModClient {
         event.registerEntityRenderer(ModEntities.GHOST_BOUNDARY_WALL.get(), GhostBoundaryWallRenderer::new);
         event.registerEntityRenderer(ModEntities.GHOST_PLOT_STAKE.get(), GhostPlotStakeRenderer::new);
         event.registerEntityRenderer(ModEntities.GHOST_PLOT_WALL.get(), GhostPlotWallRenderer::new);
+        event.registerEntityRenderer(ModEntities.GHOST_PERIMETER_FENCE_POST.get(), GhostPerimeterFencePostRenderer::new);
+        event.registerEntityRenderer(ModEntities.GHOST_PLOT_FENCE_POST.get(), GhostPlotFencePostRenderer::new);
     }
 
     @SubscribeEvent

@@ -1,8 +1,6 @@
 package com.github.cerealklla.settlemynts.founding;
 
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -11,6 +9,11 @@ import java.util.List;
  * genuinely unit-testable. Takes the stakes' current positions and absolute/non-absolute flags and
  * resizes the shape (uniformly, around the settlement core) until its area is as close as
  * reasonably achievable to a target, without ever moving an absolute stake.
+ *
+ * <p>{@code stakes} must already be in **placement order** (the actual sequence a Town Planner
+ * placed them in), not angularly sorted -- angular sorting was removed 2026-09-27 (see decisions.md
+ * same date) because it only produces a valid polygon when the shape is star-shaped from the core,
+ * which excludes C-shapes, rings, and anything else the user explicitly wants supported.
  *
  * <p>Deliberately synchronous, not literally running on a background thread -- the design doc
  * calls this an "asynchronous process," but at the scale involved (at most {@code
@@ -75,23 +78,10 @@ public final class PerimeterFit {
             return new FitResult(List.copyOf(stakes), 0.0);
         }
 
-        // Angular order around the core defines the polygon's vertex sequence -- radially scaling
-        // any subset of vertices (what this algorithm does) never changes that order, so sorting
-        // once upfront is valid regardless of the eventual scale factor (design doc Section 7a).
-        // Sorted by index (not by value) so the result can be scattered back to the caller's
-        // original order afterward without any fragile position-matching.
-        Integer[] order = new Integer[n];
-        for (int i = 0; i < n; i++) {
-            order[i] = i;
-        }
-        Arrays.sort(order, Comparator.comparingDouble(i -> Math.atan2(stakes.get(i).z() - coreZ, stakes.get(i).x() - coreX)));
-
-        List<StakeInput> ordered = new ArrayList<>(n);
-        for (int idx : order) {
-            ordered.add(stakes.get(idx));
-        }
-
-        boolean anyNonAbsolute = ordered.stream().anyMatch(s -> !s.absolute());
+        // stakes is already in placement order (see class doc) -- radially scaling any subset of
+        // vertices (what this algorithm does) never changes that order, so no sort/scatter-back step
+        // is needed here at all (removed 2026-09-27 along with the angular-sort approach it went with).
+        boolean anyNonAbsolute = stakes.stream().anyMatch(s -> !s.absolute());
         double k;
         if (!anyNonAbsolute) {
             // No adjustment possible -- accept whatever area the absolute stakes alone enclose,
@@ -99,7 +89,7 @@ public final class PerimeterFit {
             k = 1.0;
         } else {
             double kMax = Double.MAX_VALUE;
-            for (StakeInput s : ordered) {
+            for (StakeInput s : stakes) {
                 if (s.absolute()) {
                     continue;
                 }
@@ -112,26 +102,20 @@ public final class PerimeterFit {
                 kMax = 1.0; // Every non-absolute stake sits exactly on the core -- degenerate, nothing sensible to scale.
             }
 
-            double areaAtMin = polygonArea(positionsAt(ordered, coreX, coreZ, MIN_SCALE));
-            double areaAtMax = polygonArea(positionsAt(ordered, coreX, coreZ, kMax));
+            double areaAtMin = polygonArea(positionsAt(stakes, coreX, coreZ, MIN_SCALE));
+            double areaAtMax = polygonArea(positionsAt(stakes, coreX, coreZ, kMax));
 
             if (targetArea <= areaAtMin) {
                 k = MIN_SCALE;
             } else if (targetArea >= areaAtMax) {
                 k = kMax;
             } else {
-                k = bisect(ordered, coreX, coreZ, targetArea, MIN_SCALE, kMax);
+                k = bisect(stakes, coreX, coreZ, targetArea, MIN_SCALE, kMax);
             }
         }
 
-        List<StakeInput> fittedOrdered = snapToWholeBlocks(positionsAt(ordered, coreX, coreZ, k));
-
-        // Scatter back to the caller's original order (order[j] is the original index of ordered.get(j)).
-        StakeInput[] resultArray = new StakeInput[n];
-        for (int j = 0; j < n; j++) {
-            resultArray[order[j]] = fittedOrdered.get(j);
-        }
-        return new FitResult(Arrays.asList(resultArray), polygonArea(fittedOrdered));
+        List<StakeInput> fitted = snapToWholeBlocks(positionsAt(stakes, coreX, coreZ, k));
+        return new FitResult(fitted, polygonArea(fitted));
     }
 
     private static double bisect(List<StakeInput> ordered, double coreX, double coreZ, double targetArea, double lo, double hi) {
@@ -204,9 +188,9 @@ public final class PerimeterFit {
      * Standard even-odd ray-casting point-in-polygon test, same algorithm Cartographyr's own
      * {@code Geometry.Polygon#contains} uses -- but over a plain stake list rather than that
      * class's own vertex type, since this operates purely on {@link StakeInput}s before any
-     * Cartographyr entity exists. {@code vertices} should be in angular (polygon) order, e.g. the
-     * ordering {@link #fit} itself uses internally -- callers checking "does the shape encapsulate
-     * the core" should sort the same way first.
+     * Cartographyr entity exists. {@code orderedVertices} should be in **placement order** (see
+     * class doc), not angularly sorted -- callers checking "does the shape encapsulate the core"
+     * should sort by placement index the same way {@link #fit} expects.
      */
     public static boolean containsPoint(List<StakeInput> orderedVertices, double x, double z) {
         boolean inside = false;
@@ -221,12 +205,5 @@ public final class PerimeterFit {
             }
         }
         return inside;
-    }
-
-    /** Sorts {@code stakes} into angular order around {@code (centerX, centerZ)} -- the polygon-vertex order {@link #fit} and {@link #containsPoint} both expect. */
-    public static List<StakeInput> sortAngularly(List<StakeInput> stakes, double centerX, double centerZ) {
-        List<StakeInput> sorted = new ArrayList<>(stakes);
-        sorted.sort(Comparator.comparingDouble(s -> Math.atan2(s.z() - centerZ, s.x() - centerX)));
-        return sorted;
     }
 }

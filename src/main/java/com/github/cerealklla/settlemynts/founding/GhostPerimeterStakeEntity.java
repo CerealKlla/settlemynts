@@ -1,5 +1,7 @@
 package com.github.cerealklla.settlemynts.founding;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -54,16 +56,28 @@ public class GhostPerimeterStakeEntity extends Entity {
 
     private UUID ownerCoreId;
     private boolean absolute;
+    private int placementIndex;
 
     public GhostPerimeterStakeEntity(EntityType<? extends GhostPerimeterStakeEntity> type, Level level) {
         super(type, level);
         this.noPhysics = true;
     }
 
-    public static GhostPerimeterStakeEntity create(ServerLevel level, double x, double y, double z, UUID ownerCoreId) {
+    /**
+     * {@code placementIndex} is this stake's position in the actual sequence it was placed in --
+     * always {@code findByOwnerCore(...).size()} at the moment of creation (see {@code
+     * PlannedPerimeterStakeItem}). Building the settlement's polygon from stakes sorted by this index
+     * (not angularly around the core) is what makes non-star-shaped perimeters -- an L, a C, anything
+     * -- work at all (2026-09-27, see decisions.md same date). Removal is restricted to the highest
+     * currently-alive index (enforced in {@code SettlemyntsMod}'s {@code RemoveStakePayload} handler),
+     * which is what keeps this scheme gap-free without needing a separately persisted
+     * ever-incrementing counter.
+     */
+    public static GhostPerimeterStakeEntity create(ServerLevel level, double x, double y, double z, UUID ownerCoreId, int placementIndex) {
         GhostPerimeterStakeEntity stake = new GhostPerimeterStakeEntity(ModEntities.GHOST_PERIMETER_STAKE.get(), level);
         stake.setPos(x, y, z);
         stake.ownerCoreId = ownerCoreId;
+        stake.placementIndex = placementIndex;
         level.addFreshEntity(stake);
         return stake;
     }
@@ -78,6 +92,10 @@ public class GhostPerimeterStakeEntity extends Entity {
 
     public void setAbsolute(boolean absolute) {
         this.absolute = absolute;
+    }
+
+    public int getPlacementIndex() {
+        return placementIndex;
     }
 
     /**
@@ -98,6 +116,13 @@ public class GhostPerimeterStakeEntity extends Entity {
                 core.getX() - radius, level.getMinY(), core.getZ() - radius,
                 core.getX() + radius, level.getMaxY(), core.getZ() + radius);
         return level.getEntities(ModEntities.GHOST_PERIMETER_STAKE.get(), searchBox, stake -> coreId.equals(stake.getOwnerCoreId()));
+    }
+
+    /** {@link #findByOwnerCore} sorted by {@link #getPlacementIndex()} -- the actual polygon vertex order. */
+    public static List<GhostPerimeterStakeEntity> findByOwnerCoreInPlacementOrder(ServerLevel level, UUID coreId) {
+        List<GhostPerimeterStakeEntity> stakes = new ArrayList<>(findByOwnerCore(level, coreId));
+        stakes.sort(Comparator.comparingInt(GhostPerimeterStakeEntity::getPlacementIndex));
+        return stakes;
     }
 
     private GhostTownHallCoreEntity findOwnerCore() {
@@ -165,11 +190,13 @@ public class GhostPerimeterStakeEntity extends Entity {
     protected void readAdditionalSaveData(ValueInput input) {
         ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
         absolute = input.getBooleanOr("Absolute", false);
+        placementIndex = input.getIntOr("PlacementIndex", 0);
     }
 
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
         output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
         output.putBoolean("Absolute", absolute);
+        output.putInt("PlacementIndex", placementIndex);
     }
 }

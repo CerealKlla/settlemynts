@@ -52,8 +52,10 @@ public class PlotPlacementStakeItem extends Item {
         }
 
         BlockPos placePos = context.getClickedPos().above();
+        int placementIndex = GhostPlotStakeEntity.findBySession(serverLevel, session.ownerCoreId(), session.plotSessionId()).size();
         GhostPlotStakeEntity.create(serverLevel, placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5,
-                session.ownerCoreId(), session.plotSessionId());
+                session.ownerCoreId(), session.plotSessionId(), placementIndex);
+        GhostPlotFencePostEntity.regenerate(serverLevel, session.ownerCoreId(), session.plotSessionId());
         return InteractionResult.SUCCESS_SERVER;
     }
 }

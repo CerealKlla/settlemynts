@@ -1,6 +1,8 @@
 package com.github.cerealklla.settlemynts.zone;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
@@ -22,16 +24,16 @@ class PlotGeometryTest {
     }
 
     @Test
-    void sortAngularlyProducesANonSelfIntersectingOrderRegardlessOfInputOrder() {
-        // Same square's corners, deliberately shuffled out of a valid winding order.
-        List<StakePoint> shuffled = List.of(
-                new StakePoint(10, 10), new StakePoint(0, 0),
-                new StakePoint(0, 10), new StakePoint(10, 0));
+    void polygonFromStakesBuildsAValidPolygonFromStakesInPlacementOrder() {
+        // Stakes must already be in placement order (2026-09-27, see decisions.md same date) --
+        // angular re-sorting was removed since it can't build a valid polygon for non-star-shaped
+        // input. A square listed corner-by-corner is already valid placement order.
+        List<StakePoint> square = List.of(
+                new StakePoint(0, 0), new StakePoint(10, 0),
+                new StakePoint(10, 10), new StakePoint(0, 10));
 
-        List<StakePoint> ordered = PlotGeometry.sortAngularly(shuffled);
-
-        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(ordered);
-        // A valid convex quad should contain its own centroid.
+        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(square);
+        // A valid quad should contain its own centroid.
         assertEquals(true, polygon.contains(5, 5));
     }
 
@@ -40,9 +42,12 @@ class PlotGeometryTest {
         List<StakePoint> points = List.of(
                 new StakePoint(0.4, 0.4), new StakePoint(10.6, 0.4), new StakePoint(5.0, 10.0));
 
-        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(PlotGeometry.sortAngularly(points));
+        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(points);
 
-        assertEquals(new Geometry.Polygon.Vertex(0, 0), polygon.vertices().get(0));
+        // Contour-traced output order isn't necessarily the input order -- assert containment of
+        // each stake's own block instead of a specific vertex position (same style as Cartographyr's
+        // own GeometryTest).
+        assertTrue(polygon.contains(0, 0));
     }
 
     /**
@@ -51,10 +56,7 @@ class PlotGeometryTest {
      * {@code block + 0.5} in practice ({@code GhostPlotStakeEntity.create}'s own centering) --
      * {@code Math.round} on a value that's always exactly {@code n + 0.5} rounds up to {@code n + 1}
      * every time, shifting the whole polygon by one block. {@code Math.floor} must recover the
-     * actual block the stake stood in, not the next one over. Expected vertices are 10 (the low
-     * side's own block, unchanged) or 16 (the high side's block, 15, pushed to its own far edge by
-     * {@link Geometry.Polygon#coveringBlocks}) -- not 15, since {@link PlotGeometry#polygonFromStakes}
-     * now runs every stake through that block-inclusive correction (2026-09-27, see decisions.md).
+     * actual block the stake stood in, not the next one over.
      */
     @Test
     void polygonFromStakesDoesNotShiftBlockCenteredStakesByOneBlock() {
@@ -62,12 +64,15 @@ class PlotGeometryTest {
                 new StakePoint(10.5, 10.5), new StakePoint(15.5, 10.5),
                 new StakePoint(15.5, 15.5), new StakePoint(10.5, 15.5));
 
-        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(PlotGeometry.sortAngularly(square));
+        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(square);
 
-        for (Geometry.Polygon.Vertex vertex : polygon.vertices()) {
-            assertEquals(true, vertex.x() == 10 || vertex.x() == 16);
-            assertEquals(true, vertex.z() == 10 || vertex.z() == 16);
+        for (int x = 10; x <= 15; x++) {
+            for (int z = 10; z <= 15; z++) {
+                assertTrue(polygon.contains(x, z), "Expected block (" + x + "," + z + ") to be contained");
+            }
         }
+        assertFalse(polygon.contains(9, 12));
+        assertFalse(polygon.contains(16, 12));
     }
 
     /**
@@ -81,7 +86,7 @@ class PlotGeometryTest {
                 new StakePoint(10.5, 10.5), new StakePoint(14.5, 10.5),
                 new StakePoint(14.5, 14.5), new StakePoint(10.5, 14.5));
 
-        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(PlotGeometry.sortAngularly(square));
+        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(square);
 
         for (int x = 10; x <= 14; x++) {
             for (int z = 10; z <= 14; z++) {
@@ -90,20 +95,40 @@ class PlotGeometryTest {
         }
     }
 
+    /**
+     * A plot shaped like an L, with a reflex (concave) corner -- the exact shape that broke the old
+     * per-vertex outward push (see Cartographyr's decisions.md, 2026-09-27). Proves the fix reaches
+     * plots (not just Cartographyr's own unit tests) end-to-end through {@code polygonFromStakes}.
+     */
     @Test
-    void wallVerticesSitOneBlockOutsideTheFullyInclusiveBoundary() {
+    void polygonFromStakesSupportsAConcaveLShapedPlot() {
+        List<StakePoint> lShape = List.of(
+                new StakePoint(0.5, 0.5), new StakePoint(4.5, 0.5),
+                new StakePoint(4.5, 2.5), new StakePoint(2.5, 2.5),
+                new StakePoint(2.5, 4.5), new StakePoint(0.5, 4.5));
+
+        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(lShape);
+
+        assertTrue(polygon.contains(3, 1)); // bottom strip
+        assertTrue(polygon.contains(1, 3)); // upper-left strip
+        assertTrue(polygon.contains(2, 2)); // the reflex vertex's own stake block
+        assertFalse(polygon.contains(3, 2)); // an un-staked notch block
+    }
+
+    @Test
+    void wallRingSitsOneBlockOutsideTheFullyInclusiveBoundary() {
         List<StakePoint> square = List.of(
                 new StakePoint(10.5, 10.5), new StakePoint(14.5, 10.5),
                 new StakePoint(14.5, 14.5), new StakePoint(10.5, 14.5));
-        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(PlotGeometry.sortAngularly(square));
+        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(square);
 
-        for (Geometry.Polygon.Vertex wallVertex : PlotGeometry.wallVertices(polygon)) {
+        for (Geometry.Polygon.Vertex wallBlock : Geometry.Polygon.outerRing(polygon)) {
             // Stake blocks span 10..14 inclusive; the wall ring is the very next block out on each
             // side: 9 (one below the low stake block) and 15 (one above the high stake block).
-            assertEquals(true, wallVertex.x() == 9 || wallVertex.x() == 15);
-            assertEquals(true, wallVertex.z() == 9 || wallVertex.z() == 15);
+            assertEquals(true, wallBlock.x() == 9 || wallBlock.x() == 15
+                    || wallBlock.z() == 9 || wallBlock.z() == 15);
             // The wall must never sit on a block the plot itself claims.
-            assertEquals(false, polygon.contains(wallVertex.x(), wallVertex.z()));
+            assertEquals(false, polygon.contains(wallBlock.x(), wallBlock.z()));
         }
     }
 
@@ -112,7 +137,7 @@ class PlotGeometryTest {
         List<StakePoint> square = List.of(
                 new StakePoint(-10, -10), new StakePoint(10, -10),
                 new StakePoint(10, 10), new StakePoint(-10, 10));
-        Geometry.Polygon plot = PlotGeometry.polygonFromStakes(PlotGeometry.sortAngularly(square));
+        Geometry.Polygon plot = PlotGeometry.polygonFromStakes(square);
 
         Geometry.Polygon buffered = PlotGeometry.paddedBuffer(plot, 0.0, 0.0, 5.0);
 

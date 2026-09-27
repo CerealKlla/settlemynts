@@ -19,10 +19,10 @@ import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.cartographyr.geo.Layer;
 import com.github.cerealklla.cartographyr.geo.LifecycleState;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
-import com.github.cerealklla.settlemynts.founding.BoundaryWallLayout;
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
 import com.github.cerealklla.settlemynts.founding.FinalizeSettlementPayload;
 import com.github.cerealklla.settlemynts.founding.GhostBoundaryWallEntity;
+import com.github.cerealklla.settlemynts.founding.GhostPerimeterFencePostEntity;
 import com.github.cerealklla.settlemynts.founding.GhostPerimeterStakeEntity;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.founding.GrantTownPlannerPayload;
@@ -37,6 +37,7 @@ import com.github.cerealklla.settlemynts.founding.SetStakeAbsolutePayload;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.registration.ModItems;
 import com.github.cerealklla.settlemynts.zone.FinalizePlotPayload;
+import com.github.cerealklla.settlemynts.zone.GhostPlotFencePostEntity;
 import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
 import com.github.cerealklla.settlemynts.zone.GhostPlotWallEntity;
 import com.github.cerealklla.settlemynts.zone.OpenPlotStakeScreenPayload;
@@ -214,9 +215,25 @@ public class SettlemyntsMod {
                         return;
                     }
                     GhostTownHallCoreEntity core = ownerCoreOf(serverLevel, stake);
-                    if (core != null && core.isTownPlanner(player.getUUID())) {
-                        stake.remove(player);
+                    if (core == null || !core.isTownPlanner(player.getUUID())) {
+                        return;
                     }
+                    UUID activePlanner = core.getActivePerimeterPlanner();
+                    if (activePlanner != null && !activePlanner.equals(player.getUUID())) {
+                        player.sendSystemMessage(Component.literal("Someone else is already placing this settlement's perimeter stakes."));
+                        return;
+                    }
+                    List<GhostPerimeterStakeEntity> siblings = GhostPerimeterStakeEntity.findByOwnerCore(serverLevel, core.getUUID());
+                    int maxIndex = siblings.stream().mapToInt(GhostPerimeterStakeEntity::getPlacementIndex).max().orElse(-1);
+                    if (stake.getPlacementIndex() != maxIndex) {
+                        player.sendSystemMessage(Component.literal("You can only remove the most recently placed stake."));
+                        return;
+                    }
+                    stake.remove(player);
+                    if (siblings.size() <= 1) {
+                        core.setActivePerimeterPlanner(null); // Back down to zero -- nothing in progress anymore.
+                    }
+                    GhostPerimeterFencePostEntity.regenerate(serverLevel, core);
                 });
 
         registrar.playToServer(FinalizeSettlementPayload.TYPE, FinalizeSettlementPayload.STREAM_CODEC,
@@ -239,10 +256,20 @@ public class SettlemyntsMod {
                             || !(serverLevel.getEntity(payload.stakeEntityId()) instanceof GhostPlotStakeEntity stake)) {
                         return;
                     }
-                    if (serverLevel.getEntity(stake.getOwnerCoreId()) instanceof GhostTownHallCoreEntity core
-                            && core.isTownPlanner(player.getUUID())) {
-                        stake.remove(player);
+                    if (!(serverLevel.getEntity(stake.getOwnerCoreId()) instanceof GhostTownHallCoreEntity core)
+                            || !core.isTownPlanner(player.getUUID())) {
+                        return;
                     }
+                    List<GhostPlotStakeEntity> siblings = GhostPlotStakeEntity.findBySession(serverLevel, stake.getOwnerCoreId(), stake.getPlotSessionId());
+                    int maxIndex = siblings.stream().mapToInt(GhostPlotStakeEntity::getPlacementIndex).max().orElse(-1);
+                    if (stake.getPlacementIndex() != maxIndex) {
+                        player.sendSystemMessage(Component.literal("You can only remove the most recently placed stake."));
+                        return;
+                    }
+                    UUID ownerCoreId = stake.getOwnerCoreId();
+                    UUID plotSessionId = stake.getPlotSessionId();
+                    stake.remove(player);
+                    GhostPlotFencePostEntity.regenerate(serverLevel, ownerCoreId, plotSessionId);
                 });
 
         registrar.playToServer(FinalizePlotPayload.TYPE, FinalizePlotPayload.STREAM_CODEC,
@@ -310,20 +337,19 @@ public class SettlemyntsMod {
             return;
         }
 
-        List<GhostPlotStakeEntity> stakes = GhostPlotStakeEntity.findBySession(serverLevel, ownerCoreId, plotSessionId);
+        List<GhostPlotStakeEntity> stakes = GhostPlotStakeEntity.findBySessionInPlacementOrder(serverLevel, ownerCoreId, plotSessionId);
         if (stakes.size() < 3) {
             player.sendSystemMessage(Component.literal("Place at least 3 plot stakes before finalizing."));
             return;
         }
 
-        List<PlotGeometry.StakePoint> points = new ArrayList<>(stakes.size());
+        List<PlotGeometry.StakePoint> ordered = new ArrayList<>(stakes.size());
         for (GhostPlotStakeEntity stake : stakes) {
-            points.add(new PlotGeometry.StakePoint(stake.getX(), stake.getZ()));
+            ordered.add(new PlotGeometry.StakePoint(stake.getX(), stake.getZ()));
         }
-        List<PlotGeometry.StakePoint> ordered = PlotGeometry.sortAngularly(points);
         Geometry.Polygon plotPolygon = PlotGeometry.polygonFromStakes(ordered);
-        double centerX = PlotGeometry.centroidX(points);
-        double centerZ = PlotGeometry.centroidZ(points);
+        double centerX = PlotGeometry.centroidX(ordered);
+        double centerZ = PlotGeometry.centroidZ(ordered);
         Geometry.Polygon bufferPolygon = PlotGeometry.paddedBuffer(plotPolygon, centerX, centerZ, PLOT_BUFFER_PADDING_BLOCKS);
 
         GeographicEntity plotEntity = Cartography.createEntity(serverLevel, new EntityDefinition(
@@ -343,6 +369,7 @@ public class SettlemyntsMod {
         for (GhostPlotStakeEntity stake : stakes) {
             stake.discard();
         }
+        GhostPlotFencePostEntity.regenerate(serverLevel, ownerCoreId, plotSessionId); // No stakes left -- clears the preview.
         int cleared = clearPlotStakeItems(serverLevel, core, plotSessionId);
 
         player.sendSystemMessage(Component.literal(
@@ -409,19 +436,10 @@ public class SettlemyntsMod {
                 continue;
             }
 
-            List<PerimeterFit.StakeInput> vertices = new ArrayList<>(polygon.vertices().size());
-            for (Geometry.Polygon.Vertex vertex : PlotGeometry.wallVertices(polygon)) {
-                vertices.add(new PerimeterFit.StakeInput(vertex.x(), vertex.z(), false));
-            }
-            for (BoundaryWallLayout.Point point : BoundaryWallLayout.layout(vertices, BoundaryWallLayout.DEFAULT_SPACING_BLOCKS)) {
-                // Snapped to the block's own center (fixed 2026-09-26, playtest feedback: the
-                // floating icon wasn't centered over a block -- BoundaryWallLayout's raw points are
-                // arbitrary fractional positions along each edge, not block-aligned).
-                int blockX = (int) Math.floor(point.x());
-                int blockZ = (int) Math.floor(point.z());
-                int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, blockX, blockZ);
+            for (Geometry.Polygon.Vertex block : Geometry.Polygon.outerRing(polygon)) {
+                int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, block.x(), block.z());
                 for (int level = 0; level < GhostPlotWallEntity.WALL_HEIGHT_BLOCKS; level++) {
-                    GhostPlotWallEntity.create(serverLevel, blockX + 0.5, groundY + level, blockZ + 0.5, core.getUUID(), zoneType.wallBlock().defaultBlockState());
+                    GhostPlotWallEntity.create(serverLevel, block.x() + 0.5, groundY + level, block.z() + 0.5, core.getUUID(), zoneType.wallBlock().defaultBlockState());
                 }
             }
         }
@@ -434,11 +452,13 @@ public class SettlemyntsMod {
      * was last toggled on. Turning it off just discards every wall point for this core.
      *
      * <p>The wall itself marks the first NOT-permitted ring, same meaning as the plot wall (2026-09-27,
-     * explicit user request to make this consistent) -- traced one block outside the settlement's
-     * real, block-inclusive core boundary ({@link Geometry.Polygon#coveringBlocks}), not the raw
-     * stake positions directly. Computed live from the stakes here (not read back from Cartographyr)
-     * since this toggle works both before and after Finalize, and the core entity only exists once
-     * finalized.
+     * explicit user request to make this consistent) -- traced via {@link Geometry.Polygon#outerRing}
+     * one block outside the settlement's real, block-inclusive core boundary ({@link
+     * Geometry.Polygon#coveringBlocks}), not the raw stake positions directly. Computed live from the
+     * stakes here (not read back from Cartographyr) since this toggle works both before and after
+     * Finalize, and the core entity only exists once finalized. Stakes are read in **placement
+     * order** (2026-09-27, see decisions.md same date), not angularly sorted -- required for
+     * non-star-shaped perimeters to build a valid polygon at all.
      */
     private static void setBoundaryVisible(SetBoundaryVisiblePayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player)) {
@@ -463,46 +483,26 @@ public class SettlemyntsMod {
             return;
         }
 
-        List<GhostPerimeterStakeEntity> stakes = GhostPerimeterStakeEntity.findByOwnerCore(serverLevel, core.getUUID());
+        List<GhostPerimeterStakeEntity> stakes = GhostPerimeterStakeEntity.findByOwnerCoreInPlacementOrder(serverLevel, core.getUUID());
         if (stakes.size() < 3) {
             player.sendSystemMessage(Component.literal("Place at least 3 perimeter stakes before showing the boundary."));
             return;
         }
 
-        List<PerimeterFit.StakeInput> inputs = new ArrayList<>(stakes.size());
+        List<Geometry.Polygon.Vertex> coreVertices = new ArrayList<>(stakes.size());
         for (GhostPerimeterStakeEntity stake : stakes) {
-            inputs.add(new PerimeterFit.StakeInput(stake.getX(), stake.getZ(), stake.isAbsolute()));
-        }
-        List<PerimeterFit.StakeInput> ordered = PerimeterFit.sortAngularly(inputs, core.getX(), core.getZ());
-
-        // Same "wall marks the first NOT-permitted ring" fix applied to plots (2026-09-27, user
-        // request to make this wall mean the same thing) -- build the settlement's real (block-
-        // inclusive) core boundary from the live stakes, exactly how registerSettlementCore itself
-        // does, then trace the wall one further block outside it via PlotGeometry.wallVertices, so
-        // the wall never sits on a block the settlement's own core already claims.
-        List<Geometry.Polygon.Vertex> coreVertices = new ArrayList<>(ordered.size());
-        for (PerimeterFit.StakeInput stake : ordered) {
-            coreVertices.add(new Geometry.Polygon.Vertex((int) Math.floor(stake.x()), (int) Math.floor(stake.z())));
+            coreVertices.add(new Geometry.Polygon.Vertex((int) Math.floor(stake.getX()), (int) Math.floor(stake.getZ())));
         }
         Geometry.Polygon corePolygon = Geometry.Polygon.coveringBlocks(coreVertices);
-        List<PerimeterFit.StakeInput> wallInputs = new ArrayList<>(ordered.size());
-        for (Geometry.Polygon.Vertex vertex : PlotGeometry.wallVertices(corePolygon)) {
-            wallInputs.add(new PerimeterFit.StakeInput(vertex.x(), vertex.z(), false));
-        }
 
-        for (BoundaryWallLayout.Point point : BoundaryWallLayout.layout(wallInputs, BoundaryWallLayout.DEFAULT_SPACING_BLOCKS)) {
-            // Snapped to the block's own center (fixed 2026-09-26, playtest feedback: the floating
-            // icon wasn't centered over a block -- BoundaryWallLayout's raw points are arbitrary
-            // fractional positions along each edge, not block-aligned).
-            int blockX = (int) Math.floor(point.x());
-            int blockZ = (int) Math.floor(point.z());
+        for (Geometry.Polygon.Vertex block : Geometry.Polygon.outerRing(corePolygon)) {
             // Anchored to this point's own local ground height, not the core's fixed Y (fixed
             // 2026-09-26, playtest feedback -- varying terrain along the perimeter made single
             // fixed-height blocks read as scattered floating icons, not a wall). A short vertical
             // stack per point gives a real "wall" silhouette even where the ground itself slopes.
-            int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, blockX, blockZ);
+            int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, block.x(), block.z());
             for (int level = 0; level < GhostBoundaryWallEntity.WALL_HEIGHT_BLOCKS; level++) {
-                GhostBoundaryWallEntity.create(serverLevel, blockX + 0.5, groundY + level, blockZ + 0.5, core.getUUID());
+                GhostBoundaryWallEntity.create(serverLevel, block.x() + 0.5, groundY + level, block.z() + 0.5, core.getUUID());
             }
         }
         core.setBoundaryVisible(true);
@@ -543,7 +543,7 @@ public class SettlemyntsMod {
             return;
         }
 
-        List<GhostPerimeterStakeEntity> stakes = GhostPerimeterStakeEntity.findByOwnerCore(serverLevel, core.getUUID());
+        List<GhostPerimeterStakeEntity> stakes = GhostPerimeterStakeEntity.findByOwnerCoreInPlacementOrder(serverLevel, core.getUUID());
         if (stakes.size() < 3) {
             player.sendSystemMessage(Component.literal("Place at least 3 perimeter stakes before finalizing."));
             return;
@@ -554,8 +554,7 @@ public class SettlemyntsMod {
             inputs.add(new PerimeterFit.StakeInput(stake.getX(), stake.getZ(), stake.isAbsolute()));
         }
 
-        List<PerimeterFit.StakeInput> orderedForContainment = PerimeterFit.sortAngularly(inputs, core.getX(), core.getZ());
-        if (!PerimeterFit.containsPoint(orderedForContainment, core.getX(), core.getZ())) {
+        if (!PerimeterFit.containsPoint(inputs, core.getX(), core.getZ())) {
             player.sendSystemMessage(Component.literal(
                     "The perimeter stakes don't fully encompass the Town Hall Core yet."));
             return;
@@ -573,6 +572,10 @@ public class SettlemyntsMod {
         registerWithCartographyr(serverLevel, core, result.fittedStakes());
         int stakesCleared = clearPerimeterStakeItems(serverLevel, core);
         core.setFinalized(true);
+        core.setActivePerimeterPlanner(null); // Nothing left in-progress -- release the lock (design doc Section 7a; see decisions.md 2026-09-27).
+        for (GhostPerimeterFencePostEntity post : GhostPerimeterFencePostEntity.findByOwnerCore(serverLevel, core.getUUID())) {
+            post.discard(); // The preview's job is done -- the real wall/polygon now exists.
+        }
 
         player.sendSystemMessage(Component.literal(
                 "Perimeter fitted to " + Math.round(result.achievedArea()) + " blocks^2 (target "
@@ -593,9 +596,10 @@ public class SettlemyntsMod {
      * later (e.g. after adjusting stakes) doesn't leave stale entries behind.
      */
     private static void registerWithCartographyr(ServerLevel level, GhostTownHallCoreEntity core, List<PerimeterFit.StakeInput> fittedStakes) {
-        List<PerimeterFit.StakeInput> ordered = PerimeterFit.sortAngularly(fittedStakes, core.getX(), core.getZ());
-        List<Geometry.Polygon.Vertex> vertices = new ArrayList<>(ordered.size());
-        for (PerimeterFit.StakeInput stake : ordered) {
+        // fittedStakes is already in placement order (PerimeterFit.fit preserves whatever order its
+        // caller passed in, 2026-09-27 -- see decisions.md same date) -- no re-sort needed here.
+        List<Geometry.Polygon.Vertex> vertices = new ArrayList<>(fittedStakes.size());
+        for (PerimeterFit.StakeInput stake : fittedStakes) {
             double dx = stake.x() - core.getX();
             double dz = stake.z() - core.getZ();
             double distance = Math.hypot(dx, dz);
@@ -606,8 +610,8 @@ public class SettlemyntsMod {
         }
         Geometry paddedPolygon = new Geometry.Polygon(vertices);
 
-        List<Geometry.Polygon.Vertex> realVertices = new ArrayList<>(ordered.size());
-        for (PerimeterFit.StakeInput stake : ordered) {
+        List<Geometry.Polygon.Vertex> realVertices = new ArrayList<>(fittedStakes.size());
+        for (PerimeterFit.StakeInput stake : fittedStakes) {
             realVertices.add(new Geometry.Polygon.Vertex((int) Math.floor(stake.x()), (int) Math.floor(stake.z())));
         }
         Geometry realPolygon = Geometry.Polygon.coveringBlocks(realVertices);
