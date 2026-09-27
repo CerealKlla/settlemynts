@@ -33,6 +33,7 @@ public final class FoundingScreen extends Screen {
     private final String initialName;
     private final List<String> townPlannerNames;
     private final boolean viewerIsFounder;
+    private final boolean finalized;
     private boolean boundaryVisible;
 
     private EditBox nameBox;
@@ -47,6 +48,7 @@ public final class FoundingScreen extends Screen {
         this.townPlannerNames = payload.townPlannerNames();
         this.viewerIsFounder = payload.viewerIsFounder();
         this.boundaryVisible = payload.boundaryVisible();
+        this.finalized = payload.finalized();
     }
 
     @Override
@@ -61,9 +63,15 @@ public final class FoundingScreen extends Screen {
                 .bounds(centerX + 55, y, 90, 20).build());
         y += 30;
 
-        addRenderableWidget(Button.builder(Component.literal("Get Perimeter Stake"), b -> getStake())
-                .bounds(centerX - 100, y, 245, 20).build());
-        y += 30;
+        // "Get Perimeter Stake" and "Finalize" only make sense pre-finalize -- fixed 2026-09-26
+        // (a real playtest bug: both used to linger after a settlement was already finalized, with
+        // no effect other than confusing re-finalize prompts). Plot-stake controls (design doc
+        // Section 10-11a) are the finalized-settlement replacement, not yet built here.
+        if (!finalized) {
+            addRenderableWidget(Button.builder(Component.literal("Get Perimeter Stake"), b -> getStake())
+                    .bounds(centerX - 100, y, 245, 20).build());
+            y += 30;
+        }
 
         boundaryToggleButton = addRenderableWidget(Button.builder(boundaryToggleLabel(), b -> toggleBoundary())
                 .bounds(centerX - 100, y, 245, 20).build());
@@ -77,9 +85,11 @@ public final class FoundingScreen extends Screen {
             y += 30;
         }
 
-        addRenderableWidget(Button.builder(Component.literal("Finalize"), b -> finalizeSettlement())
-                .bounds(centerX - 100, y, 245, 20).build());
-        y += 30;
+        if (!finalized) {
+            addRenderableWidget(Button.builder(Component.literal("Finalize"), b -> finalizeSettlement())
+                    .bounds(centerX - 100, y, 245, 20).build());
+            y += 30;
+        }
 
         // Rendered below every button (see extractRenderState) -- computed here, not a fixed
         // constant, so it never overlaps the button stack above regardless of whether the

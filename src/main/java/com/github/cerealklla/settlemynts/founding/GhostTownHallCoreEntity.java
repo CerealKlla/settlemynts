@@ -65,6 +65,11 @@ public class GhostTownHallCoreEntity extends Entity {
     // future -- see decisions.md for why Cartographyr is currently a required (not optional)
     // dependency regardless, this is just extra caution for this one persisted field's shape.
     private Long cartographyrEntityId;
+    // Set true by SettlemyntsMod#finalizeSettlement on success (design doc Section 8). Drives which
+    // buttons FoundingScreen shows -- "Get Perimeter Stake"/"Finalize" only make sense pre-finalize,
+    // and a finalized settlement's Town Planners should see plot-stake controls instead (Section
+    // 10-11a). Added 2026-09-26 after a playtest report that those buttons lingered post-finalize.
+    private boolean finalized;
 
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
@@ -103,6 +108,14 @@ public class GhostTownHallCoreEntity extends Entity {
 
     public void setCartographyrEntityId(long cartographyrEntityId) {
         this.cartographyrEntityId = cartographyrEntityId;
+    }
+
+    public boolean isFinalized() {
+        return finalized;
+    }
+
+    public void setFinalized(boolean finalized) {
+        this.finalized = finalized;
     }
 
     public boolean isFounder(UUID playerId) {
@@ -161,7 +174,7 @@ public class GhostTownHallCoreEntity extends Entity {
         }
         if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
             PacketDistributor.sendToPlayer(serverPlayer, new OpenFoundingScreenPayload(
-                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible));
+                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized));
         }
         return InteractionResult.SUCCESS;
     }
@@ -190,6 +203,7 @@ public class GhostTownHallCoreEntity extends Entity {
         townPlanners.addAll(input.read("TownPlanners", UUIDUtil.CODEC_SET).orElse(Set.of()));
         boundaryVisible = input.getBooleanOr("BoundaryVisible", false);
         cartographyrEntityId = input.read("CartographyrEntityId", Codec.LONG).orElse(null);
+        finalized = input.getBooleanOr("Finalized", false);
     }
 
     @Override
@@ -199,5 +213,6 @@ public class GhostTownHallCoreEntity extends Entity {
         output.store("TownPlanners", UUIDUtil.CODEC_SET, Set.copyOf(townPlanners));
         output.putBoolean("BoundaryVisible", boundaryVisible);
         output.storeNullable("CartographyrEntityId", Codec.LONG, cartographyrEntityId);
+        output.putBoolean("Finalized", finalized);
     }
 }

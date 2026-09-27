@@ -154,7 +154,7 @@ public class SettlemyntsMod {
                     }
                     GhostTownHallCoreEntity core = ownerCoreOf(serverLevel, stake);
                     if (core != null && core.isTownPlanner(player.getUUID())) {
-                        stake.removeAndReturnItem(player);
+                        stake.remove(player);
                     }
                 });
 
@@ -283,6 +283,7 @@ public class SettlemyntsMod {
 
         registerWithCartographyr(serverLevel, core, result.fittedStakes());
         int stakesCleared = clearPerimeterStakeItems(serverLevel, core);
+        core.setFinalized(true);
 
         player.sendSystemMessage(Component.literal(
                 "Perimeter fitted to " + Math.round(result.achievedArea()) + " blocks^2 (target "

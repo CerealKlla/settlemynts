@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.registration.ModEntities;
-import com.github.cerealklla.settlemynts.registration.ModItems;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.chat.Component;
@@ -17,7 +16,6 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
@@ -145,12 +143,14 @@ public class GhostPerimeterStakeEntity extends Entity {
         return false;
     }
 
-    /** Hands the stake item back to {@code player} (design doc Section 6: "remove the stake if they need to move it") and discards this entity. */
-    public void removeAndReturnItem(Player player) {
-        ItemStack item = new ItemStack(ModItems.PLANNED_PERIMETER_STAKE.get());
-        if (!player.getInventory().add(item)) {
-            player.drop(item, false);
-        }
+    /**
+     * Discards this entity (design doc Section 6: "remove the stake if they need to move it").
+     * Doesn't hand an item back -- the stake item is reusable/infinite (see {@code
+     * founding.PlannedPerimeterStakeItem}, "Get Perimeter Stake" is always available again), so
+     * returning one on removal would just duplicate it (fixed 2026-09-26, a real playtest bug --
+     * see decisions.md).
+     */
+    public void remove(Player player) {
         discard();
     }
 
