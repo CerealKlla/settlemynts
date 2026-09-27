@@ -36,13 +36,35 @@ class PlotGeometryTest {
     }
 
     @Test
-    void polygonFromStakesRoundsToNearestBlock() {
+    void polygonFromStakesTakesTheBlockAStakeIsStandingIn() {
         List<StakePoint> points = List.of(
                 new StakePoint(0.4, 0.4), new StakePoint(10.6, 0.4), new StakePoint(5.0, 10.0));
 
         Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(PlotGeometry.sortAngularly(points));
 
         assertEquals(new Geometry.Polygon.Vertex(0, 0), polygon.vertices().get(0));
+    }
+
+    /**
+     * Regression test for a real, deterministic bug (2026-09-27, live playtest report: "the entire
+     * plot appears shifted by an entire block in one direction"). Every stake is placed at exactly
+     * {@code block + 0.5} in practice ({@code GhostPlotStakeEntity.create}'s own centering) --
+     * {@code Math.round} on a value that's always exactly {@code n + 0.5} rounds up to {@code n + 1}
+     * every time, shifting the whole polygon by one block. {@code Math.floor} must recover the
+     * actual block the stake stood in, not the next one over.
+     */
+    @Test
+    void polygonFromStakesDoesNotShiftBlockCenteredStakesByOneBlock() {
+        List<StakePoint> square = List.of(
+                new StakePoint(10.5, 10.5), new StakePoint(15.5, 10.5),
+                new StakePoint(15.5, 15.5), new StakePoint(10.5, 15.5));
+
+        Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(PlotGeometry.sortAngularly(square));
+
+        for (Geometry.Polygon.Vertex vertex : polygon.vertices()) {
+            assertEquals(true, vertex.x() == 10 || vertex.x() == 15);
+            assertEquals(true, vertex.z() == 10 || vertex.z() == 15);
+        }
     }
 
     @Test

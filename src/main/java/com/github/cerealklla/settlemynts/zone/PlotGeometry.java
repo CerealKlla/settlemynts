@@ -51,11 +51,22 @@ public final class PlotGeometry {
         return sorted;
     }
 
-    /** Builds the plot's real Cartographyr polygon from its (angularly-sorted) stakes, rounding each position to the nearest block. */
+    /**
+     * Builds the plot's real Cartographyr polygon from its (angularly-sorted) stakes, taking each
+     * position's own block column ({@code Math.floor}, not {@code Math.round}).
+     *
+     * <p><b>{@code Math.round} was a real, deterministic bug here</b> (fixed 2026-09-27, a live
+     * playtest report -- "the entire plot appears shifted by an entire block in one direction"):
+     * every stake is placed at exactly {@code block + 0.5} ({@code GhostPlotStakeEntity.create}'s
+     * own `+0.5` centering), and {@code Math.round} on a value that's always exactly `n + 0.5`
+     * rounds up to `n + 1` *every single time*, for every stake, in both X and Z -- not an
+     * occasional off-by-one, a guaranteed whole-polygon shift by one block. {@code Math.floor}
+     * correctly recovers the block the stake was actually standing in.
+     */
     public static Geometry.Polygon polygonFromStakes(List<StakePoint> orderedPoints) {
         List<Geometry.Polygon.Vertex> vertices = new ArrayList<>(orderedPoints.size());
         for (StakePoint p : orderedPoints) {
-            vertices.add(new Geometry.Polygon.Vertex((int) Math.round(p.x()), (int) Math.round(p.z())));
+            vertices.add(new Geometry.Polygon.Vertex((int) Math.floor(p.x()), (int) Math.floor(p.z())));
         }
         return new Geometry.Polygon(vertices);
     }

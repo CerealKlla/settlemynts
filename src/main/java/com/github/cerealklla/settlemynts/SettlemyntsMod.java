@@ -88,21 +88,23 @@ public class SettlemyntsMod {
     // The settlement's *real* (unpadded) fitted polygon, registered alongside the existing
     // Classification.CONSTRUCTED/EntityType.SETTLEMENT entity (which keeps its padded geometry
     // unchanged, so SettlementFounding's distance check is completely unaffected). Added 2026-09-26
-    // so Lyfe's HUD can tell "genuinely inside the built town" apart from "inside the settlement's
-    // own outer padding buffer" -- the exact distinction the user calls "Town Proper" vs "No Man's
-    // Land". Purely additive; nothing that already reads EntityType.SETTLEMENT needs to change.
+    // so Lyfe's HUD can tell "genuinely inside the built town" (this entity, resolves to
+    // "Outskirts" unless also in a plot/plot-buffer) apart from "inside the settlement's own ~10-
+    // block outer padding buffer only" (the existing padded entity, resolves to "No Man's Land") --
+    // see Lyfe's LocationTracker for the corrected 2026-09-27 label mapping. Purely additive;
+    // nothing that already reads EntityType.SETTLEMENT needs to change.
     public static final EntityType SETTLEMENT_CORE_ENTITY_TYPE = new EntityType(Identifier.fromNamespaceAndPath(MODID, "settlement_core"));
 
     // Design doc Section 11a: "Town Proper" buffer padding, added outward from each plot's own
     // centroid -- deliberately smaller than the settlement's own CARTOGRAPHYR_PADDING_BLOCKS (10),
     // since a plot's buffer is meant to cover just the narrow gap between adjacent plots, not a
     // whole "no man's zone" the way a settlement's perimeter buffer is. Lowered 3.0 -> 1.0
-    // (2026-09-26, playtest feedback -- 3 blocks read as much too wide a gap around every plot).
-    // Radial padding from the centroid scales more at sharper polygon corners than at shallow ones
-    // (an inherent property of this technique, not a bug -- see PlotGeometry's own doc), so a
-    // corner can occasionally land a bit past 1 block out; accepted as-is rather than chasing an
-    // adaptive per-vertex padding scheme for a rare, small overshoot.
-    public static final double PLOT_BUFFER_PADDING_BLOCKS = 1.0;
+    // (2026-09-26 playtest feedback), then set back to 3.0 (2026-09-27, explicit user request
+    // after seeing 1 block in practice). Radial padding from the centroid scales more at sharper
+    // polygon corners than at shallow ones (an inherent property of this technique, not a bug --
+    // see PlotGeometry's own doc), so a corner can occasionally land further out than this exact
+    // value; accepted as-is rather than chasing an adaptive per-vertex padding scheme.
+    public static final double PLOT_BUFFER_PADDING_BLOCKS = 3.0;
 
     public SettlemyntsMod(IEventBus modEventBus, ModContainer modContainer) {
         ModItems.ITEMS.register(modEventBus);
