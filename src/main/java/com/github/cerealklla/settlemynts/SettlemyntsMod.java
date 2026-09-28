@@ -577,14 +577,28 @@ public class SettlemyntsMod {
             inputs.add(new PerimeterFit.StakeInput(stake.getX(), stake.getZ(), stake.isAbsolute()));
         }
 
-        if (!PerimeterFit.containsPoint(inputs, core.getX(), core.getZ())) {
+        // The core entity is always created at a block's CENTER (sitePos + 0.5, see
+        // SettlementClaimFlagItem), but stakes sit at a block's CORNER (no +0.5, see
+        // PlannedPerimeterStakeItem's 2026-09-27 fix) -- the two conventions don't match. Scaling
+        // radially from the core's raw (center) coordinate against corner-coordinate stakes silently
+        // introduces up to a 0.5-block pivot error, which the fit's own scale factor then amplifies
+        // (a real playtest bug, 2026-09-27: a small symmetric diamond finalized into a wildly
+        // lopsided square once scaled ~100x to hit the target area). PlannedPerimeterStakeItem's own
+        // distance check already converts the other direction (adding 0.5 to a stake's corner
+        // position) for exactly this reason -- this converts the core's center position down to the
+        // matching corner coordinate instead, so both the containment check and the fit itself pivot
+        // around the same point the stakes are actually measured in.
+        double coreCornerX = core.getX() - 0.5;
+        double coreCornerZ = core.getZ() - 0.5;
+
+        if (!PerimeterFit.containsPoint(inputs, coreCornerX, coreCornerZ)) {
             player.sendSystemMessage(Component.literal(
                     "The perimeter stakes don't fully encompass the Town Hall Core yet."));
             return;
         }
 
         PerimeterFit.FitResult result = PerimeterFit.fit(
-                core.getX(), core.getZ(), inputs, PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS, PerimeterFit.DEFAULT_MAX_FIT_RADIUS_BLOCKS);
+                coreCornerX, coreCornerZ, inputs, PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS, PerimeterFit.DEFAULT_MAX_FIT_RADIUS_BLOCKS);
 
         for (int i = 0; i < stakes.size(); i++) {
             PerimeterFit.StakeInput fitted = result.fittedStakes().get(i);
@@ -739,7 +753,7 @@ public class SettlemyntsMod {
         if (player.level().isClientSide()) {
             return;
         }
-        player.addItem(new ItemStack(ModItems.SETTLEMENT_CLAIM_FLAG.get(), 4));
+        player.addItem(new ItemStack(ModItems.SETTLEMENT_CLAIM_FLAG.get(), 2));
         LOGGER.info("Granted debug Settlement Claim Flag(s) to {}", player.getName().getString());
     }
 }
