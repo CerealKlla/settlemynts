@@ -15,7 +15,7 @@ import net.minecraft.resources.Identifier;
  * ZoneTypeRegistry} is populated identically on both sides at mod construction, so the client
  * reads it directly rather than the server pushing a redundant copy over the wire.
  */
-public record OpenPlotStakeScreenPayload(int stakeEntityId, int stakeCount) implements CustomPacketPayload {
+public record OpenPlotStakeScreenPayload(int stakeEntityId, int stakeCount, boolean valid, boolean hasRoadAccessFlag) implements CustomPacketPayload {
 
     public static final Type<OpenPlotStakeScreenPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_plot_stake_screen"));
@@ -23,6 +23,8 @@ public record OpenPlotStakeScreenPayload(int stakeEntityId, int stakeCount) impl
     public static final StreamCodec<ByteBuf, OpenPlotStakeScreenPayload> STREAM_CODEC = StreamCodec.composite(
             ByteBufCodecs.VAR_INT, OpenPlotStakeScreenPayload::stakeEntityId,
             ByteBufCodecs.VAR_INT, OpenPlotStakeScreenPayload::stakeCount,
+            ByteBufCodecs.BOOL, OpenPlotStakeScreenPayload::valid,
+            ByteBufCodecs.BOOL, OpenPlotStakeScreenPayload::hasRoadAccessFlag,
             OpenPlotStakeScreenPayload::new);
 
     @Override

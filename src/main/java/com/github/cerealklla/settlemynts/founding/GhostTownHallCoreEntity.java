@@ -1,20 +1,20 @@
 package com.github.cerealklla.settlemynts.founding;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
 import com.mojang.serialization.Codec;
-import com.mojang.serialization.codecs.RecordCodecBuilder;
 
+import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
+import com.github.cerealklla.settlemynts.zone.PlotGeometry;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.UUIDUtil;
+import net.minecraft.resources.Identifier;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.MinecraftServer;
@@ -57,6 +57,11 @@ import net.neoforged.neoforge.network.PacketDistributor;
  */
 public class GhostTownHallCoreEntity extends Entity {
 
+    // Shared with SettlemyntsMod's built-in ZoneType registration (was an inline literal there) and
+    // with findTownHallPlot below, added 2026-09-30 for "Reposition Town Hall Core" -- a single named
+    // constant instead of two independent copies of the same string.
+    public static final Identifier TOWN_HALL_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "town_hall");
+
     private UUID founderId;
     private String settlementName = "";
     private final Set<UUID> townPlanners = new HashSet<>();
@@ -81,23 +86,26 @@ public class GhostTownHallCoreEntity extends Entity {
     private boolean finalized;
 
     // The Town Planner currently mid-staking this settlement's perimeter (design doc Section 6/7a,
-    // added 2026-09-27) -- null when nobody is. Unlike plot staking (activePlotSessionByPlanner
-    // below), perimeter staking has no per-planner session concept: all of a settlement's perimeter
-    // stakes are one shared, ordered sequence, and now that the polygon is built from that *placement
-    // order* rather than an angular sort (see decisions.md 2026-09-27), two planners placing stakes
-    // at once would corrupt the sequence. Claimed by the first stake placed (see
-    // PlannedPerimeterStakeItem), released on a successful Finalize or when the holder removes their
-    // way back down to zero stakes -- see SettlemyntsMod for both release points.
+    // added 2026-09-27) -- null when nobody is. Perimeter staking has no per-planner session concept:
+    // all of a settlement's perimeter stakes are one shared, ordered sequence, and now that the
+    // polygon is built from that *placement order* rather than an angular sort (see decisions.md
+    // 2026-09-27), two planners placing stakes at once would corrupt the sequence. Claimed by the
+    // first stake placed (see PlannedPerimeterStakeItem), released on a successful Finalize or when
+    // the holder removes their way back down to zero stakes -- see SettlemyntsMod for both release
+    // points.
     private UUID activePerimeterPlanner;
 
-    // Plot subdivision (design doc Section 11a, added 2026-09-26). Each Town Planner works on at
-    // most one plot at a time, but different Planners can each be mid-staking their own plot
-    // concurrently -- keyed per-planner rather than one shared "current session" for the whole
-    // settlement. Reset to no entry once that Planner's plot is finalized (see SettlemyntsMod's
-    // FinalizePlotPayload handler), so their next "Get Plot Placement Stake" starts a fresh plot.
-    private final Map<UUID, UUID> activePlotSessionByPlanner = new HashMap<>();
+    // Plot subdivision (design doc Section 11a, added 2026-09-26). Note: this core no longer tracks
+    // a per-planner "active plot session" itself (removed in the Plot Stakes rework, 2026-09-30) --
+    // which plot a planner is currently extending now lives entirely on their own "Plot Stakes" item
+    // (its mutable CurrentPlotID, see zone.PlotSessionData/PlotPlacementStakeItem), not here.
     private final List<PlotRecord> plots = new ArrayList<>();
     private boolean showPlotPerimeters;
+    // Roadways Milestone 1 (added 2026-10-06) -- mirrors showPlotPerimeters exactly, but a Roadway
+    // Stake entity is never discarded/regenerated on toggle the way a plot wall is: the stakes
+    // themselves ARE the road graph's permanent record, so this only changes broadcastToPlayer
+    // visibility gating (see roadway.RoadwayStakeEntity), not existence.
+    private boolean showRoadwayStakes;
 
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
@@ -110,7 +118,26 @@ public class GhostTownHallCoreEntity extends Entity {
         core.founderId = founderId;
         core.townPlanners.add(founderId); // The founder is always a Town Planner (design doc Section 6).
         level.addFreshEntity(core);
+        core.spawnBellMarker(level);
         return core;
+    }
+
+    /**
+     * Discards this Core's currently-spawned Bell marker (if any), searching around this Core's
+     * *current* position -- callers that are about to relocate the Core (see {@code
+     * TownHallCoreRelocatorItem#useOn}) must call this *before* {@code setPos}, then call {@link
+     * #spawnBellMarker} again afterward, so the search actually finds the old marker near the old
+     * position rather than the new one.
+     */
+    public void discardBellMarker(ServerLevel level) {
+        for (GhostTownHallBellEntity old : GhostTownHallBellEntity.findByOwnerCore(level, getUUID(), getX(), getZ())) {
+            old.discard();
+        }
+    }
+
+    /** Spawns a fresh Bell marker at this Core's *current* position -- see {@link #discardBellMarker}'s own doc for the relocation ordering this depends on. */
+    public void spawnBellMarker(ServerLevel level) {
+        GhostTownHallBellEntity.create(level, (int) Math.floor(getX()), (int) Math.floor(getY()), (int) Math.floor(getZ()), getUUID());
     }
 
     public String getSettlementName() {
@@ -162,25 +189,35 @@ public class GhostTownHallCoreEntity extends Entity {
         this.activePerimeterPlanner = activePerimeterPlanner;
     }
 
-    /** This planner's currently in-progress plot, if any -- {@code null} means their next "Get Plot Placement Stake" starts a fresh one. */
-    public UUID getActivePlotSession(UUID plannerId) {
-        return activePlotSessionByPlanner.get(plannerId);
-    }
-
-    public void setActivePlotSession(UUID plannerId, UUID plotSessionId) {
-        if (plotSessionId == null) {
-            activePlotSessionByPlanner.remove(plannerId);
-        } else {
-            activePlotSessionByPlanner.put(plannerId, plotSessionId);
-        }
-    }
-
     public List<PlotRecord> getPlots() {
         return List.copyOf(plots);
     }
 
     public void addPlot(PlotRecord plot) {
         plots.add(plot);
+    }
+
+    /** Replaces an existing plot record (matched by {@code plotId}) in place -- e.g. {@code bridge.YconomicsShopBridge} stamping in a freshly-registered {@code shopId}. No-op if no plot with that id is found. */
+    public void updatePlot(PlotRecord updated) {
+        for (int i = 0; i < plots.size(); i++) {
+            if (plots.get(i).plotId().equals(updated.plotId())) {
+                plots.set(i, updated);
+                return;
+            }
+        }
+    }
+
+    /**
+     * The one already-finalized plot (if any) that is both Town-Hall-typed and whose real
+     * Cartographyr polygon contains this Core's own current position -- "Reposition Town Hall Core"
+     * (added 2026-09-30) only ever offers itself when this resolves to something, and constrains the
+     * move to that same plot's bounds. Re-resolved fresh on every call (not cached) -- cheap (one
+     * scan of this settlement's own plots, usually a handful) and always correct even as plots are
+     * added/removed or the Core itself moves.
+     */
+    public java.util.Optional<PlotRecord> findTownHallPlot(ServerLevel level) {
+        return PlotGeometry.findContainingPlot(level, this, (int) Math.floor(getX()), (int) Math.floor(getZ()))
+                .filter(plot -> TOWN_HALL_ZONE_TYPE_ID.equals(plot.zoneTypeId()));
     }
 
     public boolean isShowPlotPerimeters() {
@@ -191,8 +228,21 @@ public class GhostTownHallCoreEntity extends Entity {
         this.showPlotPerimeters = showPlotPerimeters;
     }
 
+    public boolean isShowRoadwayStakes() {
+        return showRoadwayStakes;
+    }
+
+    public void setShowRoadwayStakes(boolean showRoadwayStakes) {
+        this.showRoadwayStakes = showRoadwayStakes;
+    }
+
     public boolean isFounder(UUID playerId) {
         return founderId != null && founderId.equals(playerId);
+    }
+
+    /** The settlement's Mayor (the founder, see class doc) -- null only for a core that somehow never had one (shouldn't happen post-{@link #create}). */
+    public UUID getFounderId() {
+        return founderId;
     }
 
     public boolean isTownPlanner(UUID playerId) {
@@ -232,6 +282,28 @@ public class GhostTownHallCoreEntity extends Entity {
         return isTownPlanner(player.getUUID());
     }
 
+    // Not persisted -- just a one-time-per-load guard, see tick() below.
+    private boolean bellMarkerVerified;
+
+    /**
+     * Lazily backfills the Bell marker for a Core that was saved before 2026-10-05 (when it was
+     * still just a floating Bell *item icon* with no spawned child entity at all) -- checked once
+     * per server-load rather than only at {@link #create}, so an already-founded settlement on an
+     * existing world (including Production) picks up the new real block marker automatically
+     * instead of silently rendering nothing once {@code GhostTownHallCoreRenderer} stopped drawing
+     * the old icon.
+     */
+    @Override
+    public void tick() {
+        super.tick();
+        if (!bellMarkerVerified && level() instanceof ServerLevel serverLevel) {
+            bellMarkerVerified = true;
+            if (GhostTownHallBellEntity.findByOwnerCore(serverLevel, getUUID(), getX(), getZ()).isEmpty()) {
+                spawnBellMarker(serverLevel);
+            }
+        }
+    }
+
     // Entity#isPickable() defaults to false -- without this override this entity would be
     // invisible to the game's own crosshair/interaction raycast even for a player who CAN see it
     // (the same real bug Yconomics' LootBagEntity hit first, see that mod's decisions.md).
@@ -245,9 +317,9 @@ public class GhostTownHallCoreEntity extends Entity {
         if (hand != InteractionHand.MAIN_HAND) {
             return InteractionResult.PASS;
         }
-        if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+        if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer && level() instanceof ServerLevel serverLevel) {
             PacketDistributor.sendToPlayer(serverPlayer, new OpenFoundingScreenPayload(
-                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters));
+                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters, finalized && findTownHallPlot(serverLevel).isPresent(), showRoadwayStakes));
         }
         return InteractionResult.SUCCESS;
     }
@@ -280,20 +352,9 @@ public class GhostTownHallCoreEntity extends Entity {
         finalized = input.getBooleanOr("Finalized", false);
         activePerimeterPlanner = input.read("ActivePerimeterPlanner", UUIDUtil.CODEC).orElse(null);
         showPlotPerimeters = input.getBooleanOr("ShowPlotPerimeters", false);
+        showRoadwayStakes = input.getBooleanOr("ShowRoadwayStakes", false);
         plots.clear();
         plots.addAll(input.read("Plots", Codec.list(PlotRecord.CODEC)).orElse(List.of()));
-        activePlotSessionByPlanner.clear();
-        for (ActivePlotSessionEntry entry : input.read("ActivePlotSessions", Codec.list(ActivePlotSessionEntry.CODEC)).orElse(List.of())) {
-            activePlotSessionByPlanner.put(entry.plannerId(), entry.plotSessionId());
-        }
-    }
-
-    /** Persistence-only pairing for {@link #activePlotSessionByPlanner} -- a {@code Map<UUID, UUID>} has no direct Codec, so it round-trips as a list of these instead. */
-    private record ActivePlotSessionEntry(UUID plannerId, UUID plotSessionId) {
-        static final Codec<ActivePlotSessionEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
-                UUIDUtil.CODEC.fieldOf("planner_id").forGetter(ActivePlotSessionEntry::plannerId),
-                UUIDUtil.CODEC.fieldOf("plot_session_id").forGetter(ActivePlotSessionEntry::plotSessionId)
-        ).apply(i, ActivePlotSessionEntry::new));
     }
 
     @Override
@@ -307,9 +368,7 @@ public class GhostTownHallCoreEntity extends Entity {
         output.putBoolean("Finalized", finalized);
         output.storeNullable("ActivePerimeterPlanner", UUIDUtil.CODEC, activePerimeterPlanner);
         output.putBoolean("ShowPlotPerimeters", showPlotPerimeters);
+        output.putBoolean("ShowRoadwayStakes", showRoadwayStakes);
         output.store("Plots", Codec.list(PlotRecord.CODEC), List.copyOf(plots));
-        List<ActivePlotSessionEntry> sessionEntries = new ArrayList<>();
-        activePlotSessionByPlanner.forEach((plannerId, plotSessionId) -> sessionEntries.add(new ActivePlotSessionEntry(plannerId, plotSessionId)));
-        output.store("ActivePlotSessions", Codec.list(ActivePlotSessionEntry.CODEC), sessionEntries);
     }
 }

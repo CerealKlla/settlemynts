@@ -1,10 +1,12 @@
 package com.github.cerealklla.settlemynts.zone;
 
+import java.util.Optional;
 import java.util.UUID;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.resources.Identifier;
 
@@ -19,14 +21,55 @@ import net.minecraft.resources.Identifier;
  * requirement flagged in Cartographyr's own decisions.md, 2026-09-26 ("bake in an ID so we can say
  * 'plot X is being removed, remove it from the Settlement layer, and also remove it from the
  * settlement buffer layer'"). Destruction itself isn't implemented yet.
+ *
+ * <p>{@code boxPos}/{@code constructionBoxId} (added 2026-09-29, revised same day) are this plot's
+ * auto-placed Blueprynts **Building Supply Box** (not the unrelated Construction Site block a first
+ * attempt mistakenly placed -- see decisions.md 2026-09-29 for the mix-up and correction), present
+ * only if Blueprynts was loaded at Finalize time. {@code constructionBoxId} is the box's own
+ * persistent Construction ID (minted by {@code api.Blueprynts#createConstructionBox}) -- the real
+ * addressing key for any future cross-mod funding API, resolvable via {@code
+ * Blueprynts#getConstructionBoxPos} independent of chunk-load state. {@code boxPos} is kept
+ * alongside it purely for cheap display/HUD use (Lyfe, a future Settlemynts screen) without needing
+ * a Blueprynts round-trip just to know where it visually is.
+ *
+ * <p>{@code owner} (added 2026-09-30, closing the gap flagged since 2026-09-29) -- design doc Section
+ * 10's "Owner -- a player name, or an NPC (defaults to NPC)," captured on {@code PlotStakeScreen} at
+ * Finalize and resolved server-side via the vanilla profile cache. {@code Optional.empty()} means
+ * NPC-owned (the default, and also what a pre-2026-09-30 plot record backfills to). See {@code
+ * zone.PlotPermissions#canManage} for the permission check this unlocks.
+ *
+ * <p>{@code billId} (added 2026-10-05) -- a player-owned plot's recurring rent bill, registered
+ * against Yconomics at Finalize via {@code bridge.YconomicsBillBridge}; {@code Optional.empty()}
+ * for an NPC-owned plot (design decision, same date: "NPC Owned plots will not have a recurring
+ * rent") or if Yconomics wasn't loaded at Finalize time. See {@code bills.PlotRentTicker}, which
+ * keeps this bill's source/destination boxes in sync with whatever's actually placed in-world.
+ *
+ * <p>{@code shopId} (added 2026-10-05) -- this plot's real Yconomics Shop, registered lazily by
+ * {@code bridge.YconomicsShopBridge} the first time this plot's "Manage Shop" is ever opened, not
+ * at Finalize (unlike {@code constructionBoxId}/{@code billId} -- a plot may never become a shop at
+ * all, so there's nothing to eagerly create). {@code Optional.empty()} until then, or permanently
+ * if Yconomics isn't loaded.
  */
-public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long cartographyrPlotEntityId, long cartographyrBufferEntityId) {
+public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long cartographyrPlotEntityId,
+                          long cartographyrBufferEntityId, Optional<BlockPos> boxPos, Optional<UUID> constructionBoxId,
+                          Optional<UUID> owner, Optional<UUID> billId, Optional<UUID> shopId) {
 
     public static final Codec<PlotRecord> CODEC = RecordCodecBuilder.create(i -> i.group(
             UUIDUtil.CODEC.fieldOf("plot_id").forGetter(PlotRecord::plotId),
             Codec.STRING.fieldOf("name").forGetter(PlotRecord::name),
             Identifier.CODEC.fieldOf("zone_type_id").forGetter(PlotRecord::zoneTypeId),
             Codec.LONG.fieldOf("cartographyr_plot_entity_id").forGetter(PlotRecord::cartographyrPlotEntityId),
-            Codec.LONG.fieldOf("cartographyr_buffer_entity_id").forGetter(PlotRecord::cartographyrBufferEntityId)
+            Codec.LONG.fieldOf("cartographyr_buffer_entity_id").forGetter(PlotRecord::cartographyrBufferEntityId),
+            BlockPos.CODEC.optionalFieldOf("box_pos").forGetter(PlotRecord::boxPos),
+            UUIDUtil.CODEC.optionalFieldOf("construction_box_id").forGetter(PlotRecord::constructionBoxId),
+            UUIDUtil.CODEC.optionalFieldOf("owner").forGetter(PlotRecord::owner),
+            UUIDUtil.CODEC.optionalFieldOf("bill_id").forGetter(PlotRecord::billId),
+            UUIDUtil.CODEC.optionalFieldOf("shop_id").forGetter(PlotRecord::shopId)
     ).apply(i, PlotRecord::new));
+
+    /** Stamps in a freshly-registered Shop id -- see this record's own class doc on when this happens. */
+    public PlotRecord withShopId(UUID shopId) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, Optional.of(shopId));
+    }
 }

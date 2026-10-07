@@ -49,7 +49,10 @@ public final class FencePostConnections {
                     .setValue(CrossCollisionBlock.SOUTH, present.contains(pack(v.x(), v.z() + 1)))
                     .setValue(CrossCollisionBlock.WEST, present.contains(pack(v.x() - 1, v.z())))
                     .setValue(CrossCollisionBlock.EAST, present.contains(pack(v.x() + 1, v.z())));
-            int groundY = level.getHeight(Heightmap.Types.WORLD_SURFACE, v.x(), v.z());
+            // MOTION_BLOCKING_NO_LEAVES, not WORLD_SURFACE -- WORLD_SURFACE lands on leaves/non-solid
+            // plants, floating this preview post above the real ground under a tree (2026-09-30 fix,
+            // same root cause as PlotSitePlacement's own comment).
+            int groundY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, v.x(), v.z());
             spawner.spawn(level, v.x(), groundY, v.z(), state);
         }
     }

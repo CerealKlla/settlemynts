@@ -50,14 +50,17 @@ import net.neoforged.neoforge.network.PacketDistributor;
  */
 public class GhostPerimeterStakeEntity extends Display.BlockDisplay {
 
-    public static final int MAX_ABSOLUTE_STAKES = 5;
+    // Raised 5 -> 10, 2026-09-28, per explicit user request (no bug/playtest report behind it).
+    public static final int MAX_ABSOLUTE_STAKES = 10;
 
     // Not part of the original design doc -- added 2026-09-26 alongside making the Planned
     // Perimeter Stake item reusable (no longer consumed on placement). Without some cap, multiple
     // Town Planners freely re-placing the same item could pile up an unbounded number of stakes
     // for one settlement; enforced server-side in PlannedPerimeterStakeItem regardless of how many
-    // stake items exist.
-    public static final int MAX_STAKES_PER_SETTLEMENT = 20;
+    // stake items exist. Raised 20 -> 30, 2026-09-28, per explicit user request (no bug/playtest
+    // report behind it) -- alongside MAX_ABSOLUTE_STAKES above so the absolute cap stays well below
+    // the total cap.
+    public static final int MAX_STAKES_PER_SETTLEMENT = 30;
 
     // Design doc Section 6: "within a 500 foot radius from the Town Hall Core," converted to
     // blocks at the suite's 1 block ~= 1 meter ~= 3.28 ft rate (see SettlementFounding).
@@ -84,10 +87,20 @@ public class GhostPerimeterStakeEntity extends Display.BlockDisplay {
      */
     public static GhostPerimeterStakeEntity create(ServerLevel level, int x, int y, int z, UUID ownerCoreId, int placementIndex) {
         GhostPerimeterStakeEntity stake = new GhostPerimeterStakeEntity(ModEntities.GHOST_PERIMETER_STAKE.get(), level);
-        stake.setPos(x, y, z);
+        // +0.5 X/Z (compensated back by an equal -0.5 render translation) centers the entity's
+        // interaction hitbox within its own visual block cell -- Display's own corner-anchored
+        // render convention vs. Entity's always-X/Z-centered bounding box otherwise leaves the old
+        // 0.5-wide hitbox covering only the visual's near quarter. Same fix, same reasoning, as
+        // GhostPlotStakeEntity's own (2026-09-29, "It's very difficult to right click on the Plot
+        // Perimeter Stakes") -- applied here on user request to match. Y is deliberately left as
+        // plain {@code y} (not floored/centered) -- this stake's own one-block float above its
+        // placement point is an intentional visual choice (see class doc), not the leftover bug
+        // GhostPlotStakeEntity's own Y offset was.
+        stake.setPos(x + 0.5, y, z + 0.5);
         stake.ownerCoreId = ownerCoreId;
         stake.placementIndex = placementIndex;
         GhostBlockDisplays.setBlockState(stake, Blocks.SOUL_TORCH.defaultBlockState());
+        GhostBlockDisplays.setTranslation(stake, -0.5f, 0f, -0.5f);
         level.addFreshEntity(stake);
         return stake;
     }

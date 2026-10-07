@@ -1,7 +1,15 @@
 {
   "item.settlemynts.settlement_claim_flag": "Settlement Claim Flag",
   "item.settlemynts.planned_perimeter_stake": "Planned Perimeter Stake",
+  "item.settlemynts.plot_placement_stake": "Plot Stakes",
+  "item.settlemynts.road_access_flag": "Road Access Flag",
+  "item.settlemynts.plot_config_sign_locator": "Plot Config Sign Locator",
+  "item.settlemynts.town_hall_core_relocator": "Town Hall Core Relocator",
+  "item.settlemynts.roadway_stake": "Roadway Stakes",
+  "block.settlemynts.plot_config_sign": "Plot Config Sign",
+  "block.settlemynts.roadway": "Roadway",
   "entity.settlemynts.ghost_town_hall_core": "Ghost Town Hall Core",
   "entity.settlemynts.ghost_perimeter_stake": "Planned Perimeter Stake",
-  "entity.settlemynts.ghost_boundary_wall": "Settlement Boundary"
+  "entity.settlemynts.ghost_boundary_wall": "Settlement Boundary",
+  "entity.settlemynts.roadway_stake": "Roadway Stake"
 }

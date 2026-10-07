@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "settlemynts:block/guardhouse" },
+    "facing=south": { "model": "settlemynts:block/guardhouse", "y": 180 },
+    "facing=west": { "model": "settlemynts:block/guardhouse", "y": 270 },
+    "facing=east": { "model": "settlemynts:block/guardhouse", "y": 90 }
+  }
+}

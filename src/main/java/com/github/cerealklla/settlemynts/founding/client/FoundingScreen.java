@@ -8,8 +8,6 @@ import com.github.cerealklla.settlemynts.founding.OpenFoundingScreenPayload;
 import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
 import com.github.cerealklla.settlemynts.founding.SetBoundaryVisiblePayload;
 import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
-import com.github.cerealklla.settlemynts.zone.RequestPlotStakePayload;
-import com.github.cerealklla.settlemynts.zone.SetShowPlotPerimetersPayload;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -21,13 +19,19 @@ import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 
 /**
  * The Ghost Town Hall Core's permissions/naming UI (design doc Section 6) -- opened via {@link
- * OpenFoundingScreenPayload}. A deliberately minimal first pass: name entry, granting Town Planner
- * by online player name (founder-only, enforced server-side regardless of what this screen shows),
- * a plain list of current planners, retrieving a Planned Perimeter Stake, and Finalize (runs the
- * perimeter auto-fit -- design doc Section 7 -- but not yet the rest of finalization: solidifying
- * stakes/core, Cartographyr registration, or protection, design doc Section 8, a later milestone).
- * All server-side validation (name set, enough stakes, shape encapsulates the core) happens on
- * click rather than being precomputed here, since this screen has no live view of the stakes.
+ * OpenFoundingScreenPayload}. Core identity/permission controls only: name entry, granting Town
+ * Planner by online player name (founder-only, enforced server-side regardless of what this screen
+ * shows), a plain list of current planners, retrieving a Planned Perimeter Stake, the settlement
+ * boundary toggle, and Finalize (runs the perimeter auto-fit -- design doc Section 7 -- but not yet
+ * the rest of finalization: solidifying stakes/core, Cartographyr registration, or protection,
+ * design doc Section 8, a later milestone). All server-side validation (name set, enough stakes,
+ * shape encapsulates the core) happens on click rather than being precomputed here, since this
+ * screen has no live view of the stakes.
+ *
+ * <p><b>Split into submenus, 2026-10-06</b> (explicit user request: "the Town Hall Core UI now has
+ * too many items in it") -- plot-subdivision controls moved to {@link PlotManagementScreen},
+ * Roadways controls to {@link RoadwayManagementScreen}, both opened via a single button each,
+ * only once the settlement is finalized (same gating those controls already had inline here).
  */
 public final class FoundingScreen extends Screen {
 
@@ -36,13 +40,14 @@ public final class FoundingScreen extends Screen {
     private final List<String> townPlannerNames;
     private final boolean viewerIsFounder;
     private final boolean finalized;
-    private boolean boundaryVisible;
+    private final boolean hasTownHallPlot;
     private boolean showPlotPerimeters;
+    private boolean showRoadwayStakes;
+    private boolean boundaryVisible;
 
     private EditBox nameBox;
     private EditBox grantBox;
     private Button boundaryToggleButton;
-    private Button plotPerimetersToggleButton;
     private int plannerListY;
 
     public FoundingScreen(OpenFoundingScreenPayload payload) {
@@ -54,6 +59,8 @@ public final class FoundingScreen extends Screen {
         this.boundaryVisible = payload.boundaryVisible();
         this.finalized = payload.finalized();
         this.showPlotPerimeters = payload.showPlotPerimeters();
+        this.hasTownHallPlot = payload.hasTownHallPlot();
+        this.showRoadwayStakes = payload.showRoadwayStakes();
     }
 
     @Override
@@ -82,14 +89,15 @@ public final class FoundingScreen extends Screen {
                 .bounds(centerX - 100, y, 245, 20).build());
         y += 30;
 
-        // Plot subdivision (design doc Section 11a) only makes sense once the settlement itself is
-        // finalized -- these replace the pre-finalize "Get Perimeter Stake"/"Finalize" row above.
+        // Plot subdivision and Roadways controls only make sense once the settlement itself is
+        // finalized -- these two submenu buttons replace the pre-finalize "Get Perimeter Stake"/
+        // "Finalize" row above. Split into separate screens 2026-10-06 (see class doc).
         if (finalized) {
-            addRenderableWidget(Button.builder(Component.literal("Get Plot Placement Stake"), b -> getPlotStake())
+            addRenderableWidget(Button.builder(Component.literal("Plots..."), b -> openPlotManagement())
                     .bounds(centerX - 100, y, 245, 20).build());
             y += 30;
 
-            plotPerimetersToggleButton = addRenderableWidget(Button.builder(plotPerimetersToggleLabel(), b -> togglePlotPerimeters())
+            addRenderableWidget(Button.builder(Component.literal("Roadways..."), b -> openRoadwayManagement())
                     .bounds(centerX - 100, y, 245, 20).build());
             y += 30;
         }
@@ -148,18 +156,21 @@ public final class FoundingScreen extends Screen {
         return Component.literal("View Settlement Boundaries: " + (boundaryVisible ? "ON" : "OFF"));
     }
 
-    private void getPlotStake() {
-        send(new RequestPlotStakePayload(coreEntityId));
+    private void openPlotManagement() {
+        Minecraft.getInstance().setScreen(new PlotManagementScreen(this, coreEntityId, showPlotPerimeters, hasTownHallPlot));
     }
 
-    private void togglePlotPerimeters() {
-        showPlotPerimeters = !showPlotPerimeters;
-        send(new SetShowPlotPerimetersPayload(coreEntityId, showPlotPerimeters));
-        plotPerimetersToggleButton.setMessage(plotPerimetersToggleLabel());
+    private void openRoadwayManagement() {
+        Minecraft.getInstance().setScreen(new RoadwayManagementScreen(this, coreEntityId, showRoadwayStakes));
     }
 
-    private Component plotPerimetersToggleLabel() {
-        return Component.literal("Show Plot Perimeters: " + (showPlotPerimeters ? "ON" : "OFF"));
+    /** Keeps this screen's own copy in sync so re-opening "Plots..." after a toggle shows the current state, not whatever it was when this screen was first built. */
+    public void updateShowPlotPerimeters(boolean showPlotPerimeters) {
+        this.showPlotPerimeters = showPlotPerimeters;
+    }
+
+    public void updateShowRoadwayStakes(boolean showRoadwayStakes) {
+        this.showRoadwayStakes = showRoadwayStakes;
     }
 
     private void send(net.minecraft.network.protocol.common.custom.CustomPacketPayload payload) {

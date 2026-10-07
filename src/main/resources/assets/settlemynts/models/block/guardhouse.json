@@ -1,0 +1,12 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "down": "minecraft:block/stone_bricks",
+    "up": "minecraft:block/stone_bricks",
+    "north": "minecraft:block/cobblestone",
+    "south": "minecraft:block/cobblestone",
+    "east": "minecraft:block/cobblestone",
+    "west": "minecraft:block/cobblestone",
+    "particle": "minecraft:block/cobblestone"
+  }
+}

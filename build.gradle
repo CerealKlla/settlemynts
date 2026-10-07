@@ -153,6 +153,33 @@ dependencies {
     testCompileOnly files("../Cartographyr/build/libs/cartographyr-${cartographyr_version}.jar")
     testRuntimeOnly files("../Cartographyr/build/libs/cartographyr-${cartographyr_version}.jar")
 
+    // Blueprynts is an optional soft dependency (see neoforge.mods.toml) -- the reverse direction of
+    // Blueprynts' own existing optional dependency on Settlemynts (bridge.SettlemyntsZoneBridge
+    // there). Finalize auto-places a Blueprynts Construction Site block on a newly-valid plot (see
+    // bridge.BlueprintsConstructionBridge here), gated behind ModList.get().isLoaded("blueprynts")
+    // at runtime -- same isolation pattern as every other optional sibling-mod dependency in this
+    // suite. compileOnly only, same reasoning as Cartographyr above.
+    compileOnly files("../Blueprynts/build/libs/blueprynts-${blueprynts_version}.jar")
+
+    // Protectyons is an optional soft dependency (see neoforge.mods.toml) -- Finalize registers a
+    // Plot's polygon + permitted players (Mayor/Town Planners/Owner) with Protectyons' own
+    // permission registry (see bridge.ProtectyonsPlotBridge), gated behind
+    // ModList.get().isLoaded("protectyons") at runtime, same isolation pattern as Blueprynts above.
+    compileOnly files("../Protectyons/build/libs/protectyons-${protectyons_version}.jar")
+
+    // Kyt is an optional soft dependency (see neoforge.mods.toml) -- "Select Kyt" on the Guardhouse's
+    // Configure Garrison screen binds a saved Kyt loadout name to a GarrisonSlot (see
+    // bridge.KytGuardhouseBridge), gated behind ModList.get().isLoaded("kyt") at runtime, same
+    // isolation pattern as Blueprynts/Protectyons above. compileOnly only, same reasoning.
+    compileOnly files("../Kyt/build/libs/kyt-${kyt_version}.jar")
+
+    // Yconomics is an optional soft dependency (see neoforge.mods.toml) -- a debug command
+    // registers a recurring-bill (plot rent) against Yconomics' bill engine for a finalized plot
+    // (see bridge.YconomicsBillBridge), gated behind ModList.get().isLoaded("yconomics") at
+    // runtime, same isolation pattern as Blueprynts/Protectyons/Kyt above. compileOnly only, same
+    // reasoning.
+    compileOnly files("../Yconomics/build/libs/yconomics-${yconomics_version}.jar")
+
     // Plain JUnit 5 for pure Codec round-trip tests (no live server/registry needed, so
     // ModDevGradle's neoForge { unitTest {} } FML-bootstrap machinery isn't required here).
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'

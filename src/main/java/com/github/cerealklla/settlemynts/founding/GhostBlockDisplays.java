@@ -2,6 +2,9 @@ package com.github.cerealklla.settlemynts.founding;
 
 import java.lang.reflect.Field;
 
+import org.joml.Vector3f;
+import org.joml.Vector3fc;
+
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.entity.Display;
@@ -36,12 +39,30 @@ import net.minecraft.world.level.block.state.BlockState;
 public final class GhostBlockDisplays {
 
     private static volatile EntityDataAccessor<BlockState> blockStateAccessor;
+    private static volatile EntityDataAccessor<Vector3fc> translationAccessor;
 
     private GhostBlockDisplays() {
     }
 
     public static void setBlockState(Display.BlockDisplay entity, BlockState state) {
         entity.getEntityData().set(blockStateAccessor(), state);
+    }
+
+    /**
+     * Shifts where the block model visually renders, independent of the entity's own actual
+     * position -- used by {@code zone.GhostPlotStakeEntity} (2026-09-29, live report: "very difficult
+     * to right click") to reconcile a real, unavoidable mismatch: a plain block-aligned entity
+     * position (e.g. matching a real placed block's own corner, the convention every other marker in
+     * this class already uses) renders the visual spanning {@code [pos, pos+1]} on every axis, but
+     * {@link net.minecraft.world.entity.Entity}'s own interaction bounding box is always *centered*
+     * on the entity's X/Z position -- there's no vanilla way to make that box corner-anchored
+     * instead. Storing the entity's position offset by +0.5 on X/Z (so its centered hitbox exactly
+     * covers the intended block cell) and then compensating here with a -0.5 render translation
+     * keeps the *visual* exactly where it always was, while finally giving the hitbox a correct,
+     * non-lopsided footprint.
+     */
+    public static void setTranslation(Display entity, float x, float y, float z) {
+        entity.getEntityData().set(translationAccessor(), new Vector3f(x, y, z));
     }
 
     @SuppressWarnings("unchecked")
@@ -58,6 +79,27 @@ public final class GhostBlockDisplays {
                         blockStateAccessor = accessor;
                     } catch (ReflectiveOperationException e) {
                         throw new IllegalStateException("Could not resolve Display.BlockDisplay's block state accessor", e);
+                    }
+                }
+            }
+        }
+        return accessor;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static EntityDataAccessor<Vector3fc> translationAccessor() {
+        EntityDataAccessor<Vector3fc> accessor = translationAccessor;
+        if (accessor == null) {
+            synchronized (GhostBlockDisplays.class) {
+                accessor = translationAccessor;
+                if (accessor == null) {
+                    try {
+                        Field field = Display.class.getDeclaredField("DATA_TRANSLATION_ID");
+                        field.setAccessible(true);
+                        accessor = (EntityDataAccessor<Vector3fc>) field.get(null);
+                        translationAccessor = accessor;
+                    } catch (ReflectiveOperationException e) {
+                        throw new IllegalStateException("Could not resolve Display's translation accessor", e);
                     }
                 }
             }

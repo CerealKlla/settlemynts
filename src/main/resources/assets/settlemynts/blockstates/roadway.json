@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "settlemynts:block/roadway" }
+  }
+}

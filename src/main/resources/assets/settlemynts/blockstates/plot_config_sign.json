@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "settlemynts:block/plot_config_sign" },
+    "facing=south": { "model": "settlemynts:block/plot_config_sign", "y": 180 },
+    "facing=west": { "model": "settlemynts:block/plot_config_sign", "y": 270 },
+    "facing=east": { "model": "settlemynts:block/plot_config_sign", "y": 90 }
+  }
+}

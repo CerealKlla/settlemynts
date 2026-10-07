@@ -7,7 +7,9 @@ import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import com.github.cerealklla.cartographyr.api.Cartography;
@@ -19,7 +21,12 @@ import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.cartographyr.geo.Layer;
 import com.github.cerealklla.cartographyr.geo.LifecycleState;
+import com.github.cerealklla.cartographyr.geo.PlotValidity;
+import com.github.cerealklla.cartographyr.geo.ProtectionLevel;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
+import com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge;
+import com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge;
+import com.github.cerealklla.settlemynts.bridge.YconomicsBillBridge;
 import com.github.cerealklla.settlemynts.founding.ClientFoundingRequests;
 import com.github.cerealklla.settlemynts.founding.FinalizeSettlementPayload;
 import com.github.cerealklla.settlemynts.founding.GhostBoundaryWallEntity;
@@ -35,38 +42,49 @@ import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
 import com.github.cerealklla.settlemynts.founding.SetBoundaryVisiblePayload;
 import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
 import com.github.cerealklla.settlemynts.founding.SetStakeAbsolutePayload;
+import com.github.cerealklla.settlemynts.registration.ModBlockEntities;
+import com.github.cerealklla.settlemynts.registration.ModBlocks;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.registration.ModItems;
+import com.github.cerealklla.settlemynts.rope.RopeFenceLeash;
 import com.github.cerealklla.settlemynts.zone.FinalizePlotPayload;
 import com.github.cerealklla.settlemynts.zone.GhostPlotFencePostEntity;
 import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
 import com.github.cerealklla.settlemynts.zone.GhostPlotWallEntity;
 import com.github.cerealklla.settlemynts.zone.OpenPlotStakeScreenPayload;
 import com.github.cerealklla.settlemynts.zone.PlotGeometry;
+import com.github.cerealklla.settlemynts.zone.PlotPermissions;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 import com.github.cerealklla.settlemynts.zone.PlotSessionData;
+import com.github.cerealklla.settlemynts.zone.GhostRoadAccessFlagEntity;
+import com.github.cerealklla.settlemynts.zone.GhostRoadAccessPreviewEntity;
 import com.github.cerealklla.settlemynts.zone.RemovePlotStakePayload;
 import com.github.cerealklla.settlemynts.zone.RequestPlotStakePayload;
+import com.github.cerealklla.settlemynts.zone.RequestRoadAccessFlagPayload;
 import com.github.cerealklla.settlemynts.zone.SetShowPlotPerimetersPayload;
 import com.github.cerealklla.settlemynts.zone.ZoneType;
 import com.github.cerealklla.settlemynts.zone.ZoneTypeRegistry;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
@@ -112,28 +130,87 @@ public class SettlemyntsMod {
         ModItems.ITEMS.register(modEventBus);
         ModItems.DATA_COMPONENTS.register(modEventBus);
         ModEntities.ENTITIES.register(modEventBus);
+        ModBlocks.BLOCKS.register(modEventBus);
+        ModBlocks.ITEMS.register(modEventBus);
+        ModBlockEntities.BLOCK_ENTITIES.register(modEventBus);
+        com.github.cerealklla.settlemynts.registration.ModMenus.MENU_TYPES.register(modEventBus);
 
         Cartography.registerLayer(new Layer(ZONE_LAYER_ID, "Zone", -1));
+        // 2026-10-06 fix (real report: a creeper destroyed part of a building) -- this layer never
+        // had a default ProtectionLevel set, so every Plot/Plot-buffer entity (both registered under
+        // ZONE_LAYER_ID with no explicit protectionLevel -- see finalizePlot) silently resolved to
+        // ProtectionLevel.UNPROTECTED on its own (GeographicEntity#create's fallback chain), only
+        // ever covered incidentally when a plot happened to also sit inside the broader settlement's
+        // own protected polygon. Matches Layer.SETTLEMENT_ID's own default -- a plot is never less
+        // protected than the settlement around it.
+        Cartography.setDefaultProtectionLevel(ZONE_LAYER_ID, ProtectionLevel.NO_VOXEL_CHANGE_ALONG_SURFACE_AND_UP);
 
-        // Built-in zone types (design doc Section 11a) -- Settlemynts only ships these two; a
-        // future Blueprynts mod (and others) is expected to register the rest via
-        // Settlemynts.registerZoneType. Stained glass, not wool (switched back 2026-09-27, live
-        // playtest -- now that plot/settlement walls render as real full-size blocks, not floating
-        // item icons, an opaque wool wall genuinely blocks a Planner's view of their own settlement;
-        // glass is meant to be seen through). Colors chosen to be unique/distinct while the 16
-        // stained glass colors last -- see ZoneType's own doc for the fallback plan once they run out.
+        // Built-in zone type (design doc Section 11a) -- Settlemynts only ships this one natively;
+        // Blueprynts (and others) are expected to register the rest via Settlemynts.registerZoneType.
+        // Town Hall stays native/Settlemynts-only on purpose -- it's tied directly to the Ghost Town
+        // Hall Core mechanic, not a generic buildable type a player picks a Blueprint for.
+        //
+        // "Private Residence" used to also be registered natively here, under
+        // settlemynts:private_residence -- removed 2026-10-01 per explicit user request: it's now
+        // purely the Blueprynts-bridged blueprynts:private_residence BlueprintType (see
+        // BluepryntsMod#commonSetup / bridge.SettlemyntsZoneBridge there), the same "a plot of this
+        // type picks a real Blueprint" treatment Farm/Lumberyard/Blacksmith/Guardhouse already get.
+        // Having both registered at once (same label, different Identifier) meant a Planner could
+        // pick the native one and never see any of the Blueprints actually saved under the Blueprynts
+        // type -- that duplicate is exactly what this removal fixes. Like those other four, "Private
+        // Residence" is now simply absent from the zone-type list entirely on a Blueprynts-less
+        // server, rather than falling back to a non-Blueprint-backed native version.
+        // npcOwnedOnly=true (2026-10-05, real report: "Town hall should also be an NPC own building
+        // only... Mayor being allowed full access as they do for every plot, just like Guardhouse") --
+        // Town Hall is civic infrastructure, never a player-assignable Owner; Mayor+Town Planner
+        // access already works for every plot regardless of owner (PlotPermissions), so no further
+        // change was needed beyond this flag once hasShop/resident-spawning were already excluded.
         Settlemynts.registerZoneType(new ZoneType(
-                Identifier.fromNamespaceAndPath(MODID, "town_hall"), "Town Hall", Blocks.WHITE_STAINED_GLASS));
-        Settlemynts.registerZoneType(new ZoneType(
-                Identifier.fromNamespaceAndPath(MODID, "private_residence"), "Private Residence", Blocks.LIGHT_BLUE_STAINED_GLASS));
+                Identifier.fromNamespaceAndPath(MODID, "town_hall"), "Town Hall", Blocks.WHITE_STAINED_GLASS, true));
 
         NeoForge.EVENT_BUS.register(this);
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.plotsign.PlotConfigSignLocatorTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.plotsign.LocatorCancelListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.construction.NpcAutoFundingTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.bills.PlotRentTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardSpawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.plotsign.PlotShopProximityTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.ResidentSpawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.ResidentConversionGuard());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.ShopMidnightRestockTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.lumberyard.LumberjackSpawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.farm.FarmerSpawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.TownHallCoreLocatorTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.LocatorCancelListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotStakeTossGuard());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.roadway.RoadwayClearanceListener());
+        NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.RegisterCommandsEvent event) ->
+                com.github.cerealklla.settlemynts.debug.DebugCommands.register(event.getDispatcher()));
+
+        // Replaces the old unconditional-on-login debug item grant (removed 2026-10-02, see
+        // decisions.md) -- the Settlement Claim Flag is now only ever handed out via Kyt's
+        // mod-managed "Dev" Kyt (/kyt getDev). Same soft-dependency gate as KytGuardhouseBridge's
+        // own usage below.
+        if (ModList.get().isLoaded("kyt")) {
+            com.github.cerealklla.kyt.api.Kyt.registerDevKytContribution(() ->
+                    java.util.List.of(new ItemStack(ModItems.SETTLEMENT_CLAIM_FLAG.get(), 2)));
+        }
+
         modEventBus.addListener(this::commonSetup);
         modEventBus.addListener(this::registerPayloads);
+        modEventBus.addListener(this::registerAttributes);
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
         LOGGER.info("Settlemynts common setup");
+    }
+
+    /** {@code GuardEntity} is this mod's first real {@code Mob} -- every other registered entity is a non-physical ghost marker needing no attributes at all. */
+    private void registerAttributes(net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent event) {
+        event.put(ModEntities.GUARD.get(), com.github.cerealklla.settlemynts.guardhouse.GuardEntity.createAttributes().build());
+        event.put(ModEntities.RESIDENT_VILLAGER.get(), com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity.createAttributes().build());
+        event.put(ModEntities.LUMBERJACK_WORKER.get(), com.github.cerealklla.settlemynts.lumberyard.LumberjackWorkerEntity.createAttributes().build());
+        event.put(ModEntities.FARMER_WORKER.get(), com.github.cerealklla.settlemynts.farm.FarmerWorkerEntity.createAttributes().build());
     }
 
     /** Payload registrations for the staking mechanic (design doc Section 6) -- see founding.* payload classes' own docs. */
@@ -171,6 +248,26 @@ public class SettlemyntsMod {
                     if (!core.grantTownPlanner(player.getUUID(), target.getUUID())) {
                         player.sendSystemMessage(Component.literal(
                                 "Only the settlement's founder can grant Town Planner permission."));
+                        return;
+                    }
+                    // Keep every already-finalized plot's Protectyons permission set in sync with the
+                    // settlement's own Town Planner roster, 2026-09-29 -- see ProtectyonsPlotBridge's
+                    // own doc for why this is a separate registration from Cartographyr's. Recomputed
+                    // per-plot via PlotPermissions (reworked 2026-10-05) rather than just passing
+                    // core.getTownPlanners() -- a privately-owned plot's permitted set must stay
+                    // Mayor+Owner only, not gain every Town Planner just because the roster changed.
+                    if (player.level() instanceof ServerLevel serverLevel && ModList.get().isLoaded("protectyons")) {
+                        for (PlotRecord plot : core.getPlots()) {
+                            ProtectyonsPlotBridge.updatePermittedPlayers(serverLevel, plot.plotId(),
+                                    PlotPermissions.computeProtectionPermittedPlayers(plot, core));
+                        }
+                        // Settlement-wide area (2026-10-05) -- unlike a plot's permitted set, this one
+                        // IS just the full Town Planner roster, no per-plot Owner-only narrowing.
+                        // Only registered once Finalize has run (registerSettlement); updatePermittedPlayers
+                        // is a safe no-op against an unregistered areaId otherwise.
+                        if (core.isFinalized()) {
+                            ProtectyonsPlotBridge.updateSettlementPermittedPlayers(serverLevel, core.getUUID(), core.getTownPlanners());
+                        }
                     }
                 });
 
@@ -268,8 +365,22 @@ public class SettlemyntsMod {
                     UUID plotSessionId = stake.getPlotSessionId();
                     List<GhostPlotStakeEntity> siblings = GhostPlotStakeEntity.findBySession(serverLevel, ownerCoreId, plotSessionId);
                     siblings.stream().max(Comparator.comparingInt(GhostPlotStakeEntity::getPlacementIndex))
-                            .ifPresent(lastStake -> lastStake.remove(player));
-                    GhostPlotFencePostEntity.regenerate(serverLevel, ownerCoreId, plotSessionId);
+                            .ifPresent(lastStake -> {
+                                // Rope Fence rework: this stake may hold a rope to a sibling -- clear
+                                // that sibling's own reciprocal link so its slot re-opens, before discarding.
+                                for (UUID linkedId : lastStake.getLinkIds()) {
+                                    siblings.stream().filter(s -> s.getUUID().equals(linkedId)).findFirst()
+                                            .ifPresent(other -> other.clearLink(lastStake.getUUID()));
+                                }
+                                // The live carry-preview marker (if any) is leashed TO this stake -- if it's
+                                // left alive, its next tick finds its holder gone and vanilla auto-drops a
+                                // Lead item (Leashable#tickLeash -> dropLeash). Discard it first so that
+                                // never fires; RopeFenceLeash.clearGhostAnchor below only clears the
+                                // tracking map, it doesn't touch the marker entity itself.
+                                GhostPlotFencePostEntity.regenerateCarryPreview(serverLevel, ownerCoreId, plotSessionId, null, null);
+                                lastStake.remove(player);
+                            });
+                    RopeFenceLeash.clearGhostAnchor(player.getUUID());
                 });
 
         registrar.playToServer(FinalizePlotPayload.TYPE, FinalizePlotPayload.STREAM_CODEC,
@@ -277,9 +388,494 @@ public class SettlemyntsMod {
 
         registrar.playToServer(SetShowPlotPerimetersPayload.TYPE, SetShowPlotPerimetersPayload.STREAM_CODEC,
                 (payload, context) -> setShowPlotPerimeters(payload, context));
+
+        // Roadways Milestone 1 (added 2026-10-06).
+        registrar.playToServer(com.github.cerealklla.settlemynts.roadway.RequestRoadwayStakePayload.TYPE,
+                com.github.cerealklla.settlemynts.roadway.RequestRoadwayStakePayload.STREAM_CODEC,
+                (payload, context) -> requestRoadwayStake(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.roadway.SetShowRoadwayStakesPayload.TYPE,
+                com.github.cerealklla.settlemynts.roadway.SetShowRoadwayStakesPayload.STREAM_CODEC,
+                (payload, context) -> setShowRoadwayStakes(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.founding.RepositionTownHallCorePayload.TYPE,
+                com.github.cerealklla.settlemynts.founding.RepositionTownHallCorePayload.STREAM_CODEC,
+                (payload, context) -> repositionTownHallCore(payload, context));
+
+        registrar.playToServer(RequestRoadAccessFlagPayload.TYPE, RequestRoadAccessFlagPayload.STREAM_CODEC,
+                (payload, context) -> {
+                    if (!(context.player() instanceof ServerPlayer player)
+                            || !(player.level() instanceof ServerLevel serverLevel)
+                            || !(serverLevel.getEntity(payload.stakeEntityId()) instanceof GhostPlotStakeEntity stake)) {
+                        return;
+                    }
+                    if (!(serverLevel.getEntity(stake.getOwnerCoreId()) instanceof GhostTownHallCoreEntity core)
+                            || !core.isTownPlanner(player.getUUID())) {
+                        return;
+                    }
+                    ItemStack flag = new ItemStack(ModItems.ROAD_ACCESS_FLAG.get());
+                    flag.set(ModItems.PLOT_SESSION_DATA, new PlotSessionData(stake.getOwnerCoreId(), stake.getPlotSessionId()));
+                    if (!player.getInventory().add(flag)) {
+                        player.drop(flag, false);
+                    }
+                });
+
+        // Plot Config Sign (design doc Section 14a).
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestMenu(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RelocatePlotSignPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RelocatePlotSignPayload.STREAM_CODEC,
+                (payload, context) -> relocatePlotSign(payload, context));
+
+        // Real Shop system (2026-10-05, replacing the old inert placeholder) -- see
+        // bridge.YconomicsShopBridge and api.Settlemynts' Shop methods' own docs.
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestShopPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestShopPayload.STREAM_CODEC,
+                (payload, context) -> requestShop(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenShopPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenShopPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestShop(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload.STREAM_CODEC,
+                (payload, context) -> buyFromShop(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload.STREAM_CODEC,
+                (payload, context) -> adjustListing(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AddListingFromHeldItemPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.AddListingFromHeldItemPayload.STREAM_CODEC,
+                (payload, context) -> addListingFromHeldItem(payload, context));
+
+        // "Press G to open shop" proximity prompt (2026-10-05) -- see PlotShopProximityTicker's own doc.
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState.set(payload.present(), payload.signPos()));
+
+        // "Plot Details" (any plot's own sign) / "Plot Management" (Town Hall sign only) -- 2026-10-05.
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestPlotDetailsPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestPlotDetailsPayload.STREAM_CODEC,
+                (payload, context) -> requestPlotDetails(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenPlotDetailsPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenPlotDetailsPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestPlotDetails(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestPlotManagementPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestPlotManagementPayload.STREAM_CODEC,
+                (payload, context) -> requestPlotManagement(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestPlotManagement(payload));
+
+        // Guardhouse Plot Type (design doc Section 14a) -- "Configure Garrison."
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.RequestConfigureGarrisonPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.RequestConfigureGarrisonPayload.STREAM_CODEC,
+                (payload, context) -> requestConfigureGarrison(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.guardhouse.OpenConfigureGarrisonPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.OpenConfigureGarrisonPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.guardhouse.ClientGuardhouseRequests.requestMenu(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.SetGarrisonSlotPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.SetGarrisonSlotPayload.STREAM_CODEC,
+                (payload, context) -> setGarrisonSlot(payload, context));
+
+        // "Select Kyt" (optional Kyt soft dependency -- see bridge.KytGuardhouseBridge).
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.RequestGarrisonKytNamesPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.RequestGarrisonKytNamesPayload.STREAM_CODEC,
+                (payload, context) -> requestGarrisonKytNames(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.guardhouse.OpenGarrisonKytPickerPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.OpenGarrisonKytPickerPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.guardhouse.ClientGuardhouseRequests.requestKytPicker(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.SetGarrisonKytPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.SetGarrisonKytPayload.STREAM_CODEC,
+                (payload, context) -> setGarrisonKyt(payload, context));
     }
 
-    /** "Get Plot Placement Stake" -- resolves (or starts) this planner's active plot session for the settlement, then grants a stake item bound to it. */
+    /** "Select Kyt" button on {@code client.ConfigureGarrisonScreen} -- re-checks {@code zone.PlotPermissions#canManage} the same way {@link #setGarrisonSlot} does, then replies with the server's real Kyt name list (see {@code bridge.KytGuardhouseBridge}). A Kyt-less server never reaches this handler at all in practice (the screen's own "Select Kyt" row is hidden client-side via {@code OpenConfigureGarrisonPayload#kytAvailable}), but this still guards {@link com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge#isLoaded} itself before touching the bridge, same isolation convention as every other optional dependency here. */
+    private static void requestGarrisonKytNames(com.github.cerealklla.settlemynts.guardhouse.RequestGarrisonKytNamesPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!canManageGuardhouseSlot(serverLevel, player, payload.guardhousePos(), payload.slotIndex())) {
+            return;
+        }
+        if (!com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.isLoaded()) {
+            return;
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.guardhouse.OpenGarrisonKytPickerPayload(
+                payload.guardhousePos(), payload.slotIndex(), com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.listKytNames()));
+    }
+
+    /** "Select"/"Clear" on {@code client.SelectKytScreen} -- re-checks permission the same way, never trusts the client's own name. */
+    private static void setGarrisonKyt(com.github.cerealklla.settlemynts.guardhouse.SetGarrisonKytPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!canManageGuardhouseSlot(serverLevel, player, payload.guardhousePos(), payload.slotIndex())) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.guardhousePos()) instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse)) {
+            return;
+        }
+        guardhouse.setGarrisonKyt(payload.slotIndex(), payload.kytName());
+    }
+
+    /** Shared permission + slot-index re-check for the "Select Kyt" flow, same shape as {@link #setGarrisonSlot}'s own inline checks. */
+    private static boolean canManageGuardhouseSlot(ServerLevel serverLevel, ServerPlayer player, net.minecraft.core.BlockPos guardhousePos, int slotIndex) {
+        if (!(serverLevel.getBlockEntity(guardhousePos) instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse)
+                || guardhouse.settlementCoreId() == null
+                || !(serverLevel.getEntity(guardhouse.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            return false;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(guardhouse.plotId())).findFirst().orElse(null);
+        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            return false;
+        }
+        return slotIndex >= 0 && slotIndex < com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.MAX_GARRISON_SIZE;
+    }
+
+    /** "Plot Details" button click -- any plot's own sign, read-only, no permission check needed. */
+    private static void requestPlotDetails(com.github.cerealklla.settlemynts.plotsign.RequestPlotDetailsPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        com.github.cerealklla.settlemynts.bills.PlotBillingSummary summary = com.github.cerealklla.settlemynts.bills.PlotBillingSummary.summarize(serverLevel, plot);
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenPlotDetailsPayload(
+                new com.github.cerealklla.settlemynts.plotsign.PlotSummaryEntry(summary.plotName(), summary.ownerDisplay(), summary.billingStanding(), summary.issue())));
+    }
+
+    /** "Enter Shop"/"Manage Shop" click -- lazily registers a Shop for the plot on the first "Manage Shop" (2026-10-05). */
+    private static void requestShop(com.github.cerealklla.settlemynts.plotsign.RequestShopPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.isAvailable()) {
+            player.sendSystemMessage(Component.literal("Shop system not available (Yconomics isn't loaded)."));
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlock.hasShop(serverLevel, sign)) {
+            player.sendSystemMessage(Component.literal("This plot doesn't have a Shop."));
+            return;
+        }
+        boolean canManage = com.github.cerealklla.settlemynts.zone.PlotPermissions.canManage(plot, core, player.getUUID());
+        if (payload.manage() && !canManage) {
+            player.sendSystemMessage(Component.literal("You don't have permission to manage this Shop."));
+            return;
+        }
+        if (payload.manage() && plot.shopId().isEmpty()) {
+            java.util.UUID shopId = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.registerShop(serverLevel, plot.plotId());
+            plot = plot.withShopId(shopId);
+            core.updatePlot(plot);
+        }
+        // Idempotent catalog catch-up (2026-10-05) -- adds any Zone-Type-appropriate listings not
+        // yet present (including the first ones, for a plot finalized before this feature existed,
+        // or a plot whose Tier has risen since it was last seeded) and tops up low stock. No-op if
+        // this Zone Type has no registered catalog. See ShopSeeding's own doc.
+        com.github.cerealklla.settlemynts.zone.ShopSeeding.syncToCatalog(serverLevel, plot, core, payload.signPos());
+        plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(plot);
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = plot.shopId()
+                .map(shopId -> com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(serverLevel, shopId).stream()
+                        .map(l -> new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(
+                                l.resource().tag().map(t -> t.location()).orElseGet(() -> l.resource().itemId().get()),
+                                l.resource().tag().isPresent(), l.pricePerUnit()))
+                        .toList())
+                .orElse(java.util.List.of());
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(payload.signPos(), plot.plotId(), payload.manage(), listings));
+    }
+
+    /** "Buy N" click on the real Shop screen -- charges the buyer only for whatever was actually filled. */
+    private static void buyFromShop(com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<UUID> plotId = resolvePlotIdForSign(serverLevel, payload.signPos());
+        if (plotId.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
+                ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
+                : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
+        java.util.List<net.minecraft.world.Container> boxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, plotId.get());
+        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.PurchaseResult result =
+                com.github.cerealklla.settlemynts.api.Settlemynts.purchaseFromSettlementShop(serverLevel, plotId.get(), resource, payload.quantity(), boxes);
+        if (result.filled() <= 0) {
+            player.sendSystemMessage(Component.literal("Out of stock."));
+            return;
+        }
+        if (!com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.withdrawNuggets(player, result.nuggetsCharged())) {
+            // Stock was already drained/paid into the shop's own boxes above -- this shouldn't
+            // normally happen since the buyer presumably has the nuggets to click "Buy" at all, but
+            // if it does, refund isn't attempted here (a known, flagged simplification -- see
+            // decisions.md) since under-stocked/under-funded purchases are expected to be rare.
+            player.sendSystemMessage(Component.literal("You don't have enough Gold Nuggets."));
+            return;
+        }
+        // 2026-10-06 fix (real report: "bought items from a Settlement shop, it took my gold but
+        // never gave me the item") -- the stock drained from the shop's boxes was never actually
+        // delivered anywhere. Give every drained stack to the buyer now, falling back to dropping it
+        // at their feet if their inventory is full (same `add`-then-`placeItemBackInInventory`
+        // fallback Blueprynts' own FootprintSlabGuard already uses).
+        for (net.minecraft.world.item.ItemStack stack : result.itemsReceived()) {
+            if (!player.getInventory().add(stack)) {
+                player.getInventory().placeItemBackInInventory(stack);
+            }
+        }
+        player.sendSystemMessage(Component.literal("Bought " + result.filled() + " for " + result.nuggetsCharged() + " nuggets."));
+    }
+
+    /** A price +/- or Remove click on the Manage Shop screen. */
+    private static void adjustListing(com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        if (plot.shopId().isEmpty()) {
+            return;
+        }
+        com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
+                ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
+                : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
+        if (payload.remove()) {
+            com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.removeListing(serverLevel, plot.shopId().get(), resource);
+            return;
+        }
+        int currentPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(serverLevel, plot.shopId().get()).stream()
+                .filter(l -> l.resource().equals(resource))
+                .map(com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView::pricePerUnit)
+                .findFirst().orElse(1);
+        int newPrice = Math.max(1, currentPrice + payload.priceDelta());
+        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.setListingPrice(serverLevel, plot.shopId().get(), resource, newPrice);
+    }
+
+    /** "Add Listing (Held Item)" click -- the resource is whatever's in the player's main hand. */
+    private static void addListingFromHeldItem(com.github.cerealklla.settlemynts.plotsign.AddListingFromHeldItemPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        if (plot.shopId().isEmpty()) {
+            player.sendSystemMessage(Component.literal("This Shop isn't registered yet -- reopen the menu first."));
+            return;
+        }
+        net.minecraft.world.item.ItemStack held = player.getMainHandItem();
+        if (held.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Hold the item you want to sell first."));
+            return;
+        }
+        net.minecraft.resources.Identifier itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(held.getItem());
+        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.setListingPrice(serverLevel, plot.shopId().get(),
+                com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(itemId), 1);
+        player.sendSystemMessage(Component.literal("Listed " + itemId + " at 1 nugget/unit -- reopen Manage Shop to adjust the price."));
+    }
+
+    private record PlotRecordAndCore(PlotRecord plot, GhostTownHallCoreEntity core) {
+    }
+
+    private static java.util.Optional<UUID> resolvePlotIdForSign(ServerLevel level, net.minecraft.core.BlockPos signPos) {
+        if (!(level.getBlockEntity(signPos) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign) || sign.plotId() == null) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(sign.plotId());
+    }
+
+    private static java.util.Optional<PlotRecordAndCore> resolvePlotForManage(ServerLevel level, net.minecraft.core.BlockPos signPos, UUID playerId) {
+        if (!(level.getBlockEntity(signPos) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(level.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            return java.util.Optional.empty();
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !com.github.cerealklla.settlemynts.zone.PlotPermissions.canManage(plot, core, playerId)) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(new PlotRecordAndCore(plot, core));
+    }
+
+    /** "Plot Management" button click -- Town Hall sign only, re-checks both {@code canManage} and the zone type itself server-side. */
+    private static void requestPlotManagement(com.github.cerealklla.settlemynts.plotsign.RequestPlotManagementPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        if (!plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)) {
+            player.sendSystemMessage(Component.literal("Plot Management is only available on the Town Hall plot."));
+            return;
+        }
+        List<com.github.cerealklla.settlemynts.plotsign.PlotSummaryEntry> entries = new ArrayList<>();
+        for (PlotRecord p : core.getPlots()) {
+            com.github.cerealklla.settlemynts.bills.PlotBillingSummary summary = com.github.cerealklla.settlemynts.bills.PlotBillingSummary.summarize(serverLevel, p);
+            entries.add(new com.github.cerealklla.settlemynts.plotsign.PlotSummaryEntry(summary.plotName(), summary.ownerDisplay(), summary.billingStanding(), summary.issue()));
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload(entries));
+    }
+
+    /** "Configure Garrison" button click -- re-resolves the plot/Guardhouse and re-checks {@code zone.PlotPermissions#canManage} server-side rather than trusting the client's earlier flag, same precedent as {@code relocatePlotSign}. */
+    private static void requestConfigureGarrison(com.github.cerealklla.settlemynts.guardhouse.RequestConfigureGarrisonPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        if (!plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
+            player.sendSystemMessage(Component.literal("This plot has no garrison."));
+            return;
+        }
+        var guardhousePos = com.github.cerealklla.settlemynts.guardhouse.GuardhouseIndex.get(serverLevel.getServer()).get(plot.plotId());
+        if (guardhousePos.isEmpty() || !(serverLevel.getBlockEntity(guardhousePos.get().pos()) instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse)) {
+            player.sendSystemMessage(Component.literal("This plot's Guardhouse isn't loaded right now."));
+            return;
+        }
+        int tier = plot.boxPos().isPresent() && ModList.get().isLoaded("blueprynts")
+                ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(serverLevel, plot.boxPos().get()).orElse(0)
+                : 0;
+        int capacity = com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.capacityForTier(tier);
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.guardhouse.OpenConfigureGarrisonPayload(
+                guardhousePos.get().pos(), tier, capacity, guardhouse.garrisonSlots(),
+                com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.isLoaded()));
+    }
+
+    /** One garrison slot row changed on {@code client.ConfigureGarrisonScreen} -- re-checks permission the same way, and re-derives the current Tier server-side so the clamp in {@code GuardhouseBlockEntity#setGarrisonSlot} is never trusting a stale client-held Tier. */
+    private static void setGarrisonSlot(com.github.cerealklla.settlemynts.guardhouse.SetGarrisonSlotPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.guardhousePos()) instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse)
+                || guardhouse.settlementCoreId() == null
+                || !(serverLevel.getEntity(guardhouse.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(guardhouse.plotId())).findFirst().orElse(null);
+        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            return;
+        }
+        if (payload.slotIndex() < 0 || payload.slotIndex() >= com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.MAX_GARRISON_SIZE) {
+            return;
+        }
+        int tier = plot.boxPos().isPresent() && ModList.get().isLoaded("blueprynts")
+                ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(serverLevel, plot.boxPos().get()).orElse(0)
+                : 0;
+        guardhouse.setGarrisonSlot(payload.slotIndex(),
+                new com.github.cerealklla.settlemynts.guardhouse.GarrisonSlot(payload.maxGearTier(), payload.allowNeighborPurchase(),
+                        guardhouse.garrisonSlot(payload.slotIndex()).kytLoadoutName()),
+                tier);
+    }
+
+    /**
+     * "Relocate Plot Sign" (design doc Section 14a) -- mirrors {@code BluepryntsMod}'s own
+     * "Reposition Supply Box" handler shape. Re-checks {@link
+     * com.github.cerealklla.settlemynts.zone.PlotPermissions#canManage} server-side rather than
+     * trusting the client's earlier {@code canManage} flag.
+     */
+    private static void relocatePlotSign(com.github.cerealklla.settlemynts.plotsign.RelocatePlotSignPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        // Every branch below sends a real message on failure now (real playtest report, 2026-09-30:
+        // "Relocate Plot sign initially didn't do anything" -- the original version silently
+        // `return`ed on any of these, giving the player nothing to go on).
+        if (!(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)) {
+            player.sendSystemMessage(Component.literal("That Plot Config Sign isn't there anymore -- try right-clicking it again."));
+            return;
+        }
+        if (sign.settlementCoreId() == null || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("This sign's settlement is gone."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null) {
+            player.sendSystemMessage(Component.literal("This sign's plot record is gone."));
+            return;
+        }
+        if (!com.github.cerealklla.settlemynts.zone.PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+
+        Direction facing = serverLevel.getBlockState(payload.signPos()).getValue(net.minecraft.world.level.block.HorizontalDirectionalBlock.FACING);
+        com.github.cerealklla.blueprynts.api.PlotArea plotArea = null;
+        if (plot.constructionBoxId().isPresent() && ModList.get().isLoaded("blueprynts")) {
+            plotArea = BlueprintsConstructionBridge.resolveStatus(serverLevel, plot.constructionBoxId().get())
+                    .map(com.github.cerealklla.blueprynts.api.Blueprynts.ConstructionBoxStatus::plotArea)
+                    .orElse(null);
+        }
+
+        BlockPos originalPos = payload.signPos();
+        serverLevel.removeBlock(originalPos, false);
+        com.github.cerealklla.settlemynts.plotsign.PlotConfigSignIndex.get(serverLevel.getServer()).remove(plot.plotId());
+        com.github.cerealklla.settlemynts.plotsign.PendingPlotConfigSignRelocation.store(plot.plotId(), sign.settlementCoreId(), facing, plotArea, originalPos);
+        ItemStack locator = com.github.cerealklla.settlemynts.plotsign.PlotConfigSignRelocatorItem.grantFor(plot.plotId(), serverLevel.getGameTime());
+        if (!player.getInventory().add(locator)) {
+            player.drop(locator, false);
+        }
+        player.sendSystemMessage(Component.literal("Plot Config Sign removed -- right-click a spot within the plot to place it."));
+    }
+
+    /**
+     * "Get Plot Placement Stake" -- grants a "Plot Stakes" item bound to this settlement, with a
+     * blank CurrentPlotID (Plot Stakes rework, 2026-09-30: the item is infinite-use and reusable
+     * across many plots, not single-plot-bound, so there's no "active session" to resolve or reuse
+     * here anymore -- see {@code PlotPlacementStakeItem}'s own doc).
+     */
     private static void requestPlotStake(RequestPlotStakePayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player)
                 || !(player.level() instanceof ServerLevel serverLevel)
@@ -287,23 +883,50 @@ public class SettlemyntsMod {
                 || !core.isTownPlanner(player.getUUID())) {
             return;
         }
-        UUID plotSessionId = core.getActivePlotSession(player.getUUID());
-        if (plotSessionId == null) {
-            plotSessionId = UUID.randomUUID();
-            core.setActivePlotSession(player.getUUID(), plotSessionId);
-        }
         ItemStack stake = new ItemStack(ModItems.PLOT_PLACEMENT_STAKE.get());
-        stake.set(ModItems.PLOT_SESSION_DATA, new PlotSessionData(core.getUUID(), plotSessionId));
+        stake.set(ModItems.PLOT_SESSION_DATA, new PlotSessionData(core.getUUID(), null));
         if (!player.getInventory().add(stake)) {
             player.drop(stake, false);
         }
     }
 
+    /** "Get Roadway Stake" (Roadways Milestone 1, added 2026-10-06) -- mirrors {@link #requestPlotStake}. */
+    private static void requestRoadwayStake(com.github.cerealklla.settlemynts.roadway.RequestRoadwayStakePayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)
+                || !(player.level() instanceof ServerLevel serverLevel)
+                || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)
+                || !core.isTownPlanner(player.getUUID())) {
+            return;
+        }
+        ItemStack stake = new ItemStack(ModItems.ROADWAY_STAKE.get());
+        stake.set(ModItems.ROADWAY_STAKE_OWNER_CORE_ID, core.getUUID());
+        if (!player.getInventory().add(stake)) {
+            player.drop(stake, false);
+        }
+    }
+
+    /** "Show Roadway Stakes" toggle (Roadways Milestone 1) -- mirrors {@link #setShowPlotPerimeters}, but no wall regeneration needed: the stake entities themselves persist permanently, this only flips {@code broadcastToPlayer} visibility. */
+    private static void setShowRoadwayStakes(com.github.cerealklla.settlemynts.roadway.SetShowRoadwayStakesPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        if (!(player.level() instanceof ServerLevel serverLevel) || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal(
+                    "Couldn't find this settlement's Town Hall Core anymore -- try right-clicking it again to reopen this screen."));
+            return;
+        }
+        if (!core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
+            return;
+        }
+        core.setShowRoadwayStakes(payload.visible());
+    }
+
     /**
      * "Finalize Plot" -- computes the plot's real polygon and its "Town Proper" buffer from the
      * session's placed stakes (design doc Section 11a), registers both with Cartographyr, records
-     * the result on the core, clears the session's stakes/leftover items, and frees this planner's
-     * active-session slot so their next "Get Plot Placement Stake" starts a fresh plot.
+     * the result on the core, clears the session's stakes, and resets any Plot Stakes item still
+     * carrying this plot's CurrentPlotID back to blank (see {@link #clearPlotStakeItems}).
      */
     private static void finalizePlot(FinalizePlotPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player)) {
@@ -348,6 +971,44 @@ public class SettlemyntsMod {
             ordered.add(new PlotGeometry.StakePoint(stake.getX(), stake.getZ()));
         }
         Geometry.Polygon plotPolygon = PlotGeometry.polygonFromStakes(ordered);
+
+        // Hard-blocked, not just a warning -- a plot that can never fit a 15x15 Blueprynts
+        // Construction Site can never receive the auto-placed Construction Box below, so there's no
+        // valid state for it to finalize into. The live actionbar warning (see
+        // sendPlotValidityFeedback, called on every stake add/remove) is meant to mean a Planner
+        // never has to discover this by walking over and trying anyway.
+        if (!PlotValidity.hasValidArea(plotPolygon)) {
+            player.sendSystemMessage(Component.literal(
+                    "This plot doesn't have a clear 15x15 area anywhere inside it yet -- add or adjust stakes before finalizing."));
+            return;
+        }
+
+        // Redundant safety net, added 2026-09-30 per explicit user request: PlotPlacementStakeItem
+        // already blocks placing a *new* stake inside an already-finalized plot, but two Town
+        // Planners could still stake out overlapping plots concurrently (neither sees the other's
+        // in-progress session) and both attempt to finalize -- the second one through must be
+        // rejected here. core.getPlots() at this point still only holds the *other*, already
+        // finalized plots -- this plot's own PlotRecord isn't added until core.addPlot(...) below.
+        for (PlotRecord other : core.getPlots()) {
+            Optional<GeographicEntity> otherEntity = Cartography.getEntity(serverLevel, new EntityId(other.cartographyrPlotEntityId()));
+            if (otherEntity.isPresent() && otherEntity.get().geometry() instanceof Geometry.Polygon otherPolygon
+                    && PlotGeometry.overlaps(plotPolygon, otherPolygon)) {
+                player.sendSystemMessage(Component.literal(
+                        "This plot overlaps plot \"" + other.name() + "\" -- adjust your stakes and try again."));
+                return;
+            }
+        }
+
+        // Design doc Section 10: "Finalize... is only clickable once... a roadway flag has been
+        // placed" -- hard-blocked, same reasoning as the area check above.
+        GhostRoadAccessFlagEntity roadFlag = GhostRoadAccessFlagEntity.findBySession(serverLevel, ownerCoreId, plotSessionId);
+        if (roadFlag == null) {
+            player.sendSystemMessage(Component.literal(
+                    "Place the Road Access Flag on the plot's perimeter before finalizing."));
+            return;
+        }
+        BlockPos roadFlagPos = new BlockPos((int) Math.floor(roadFlag.getX()), (int) Math.floor(roadFlag.getY()), (int) Math.floor(roadFlag.getZ()));
+
         Geometry.Polygon bufferPolygon = PlotGeometry.paddedBuffer(plotPolygon, PLOT_BUFFER_PADDING_BLOCKS);
 
         GeographicEntity plotEntity = Cartography.createEntity(serverLevel, new EntityDefinition(
@@ -361,21 +1022,114 @@ public class SettlemyntsMod {
                 serverLevel.dimension(), Classification.CONSTRUCTED, PLOT_BUFFER_ENTITY_TYPE, ZONE_LAYER_ID,
                 Optional.empty(), bufferPolygon, LifecycleState.REALIZED, Optional.empty()));
 
-        core.addPlot(new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value()));
-        core.setActivePlotSession(player.getUUID(), null);
+        // Blueprynts-free site finding (extracted 2026-09-30, see PlotSitePlacement's own doc) --
+        // computed once regardless of whether Blueprynts is loaded, so the Plot Config Sign below
+        // always has somewhere sensible to anchor next to, even on a server with no Building Supply
+        // Box (and so no structure at all) for this plot.
+        com.github.cerealklla.settlemynts.zone.PlotSitePlacement.Site site =
+                com.github.cerealklla.settlemynts.zone.PlotSitePlacement.find(serverLevel, plotPolygon, roadFlagPos);
 
+        // New optional dependency direction (2026-09-29): the reverse of Blueprynts' own existing
+        // optional dependency on Settlemynts. Guarded so a Blueprynts-less server never force-loads
+        // its classes -- see bridge.BlueprintsConstructionBridge's own doc.
+        Optional<BlockPos> boxPos = Optional.empty();
+        Optional<UUID> constructionBoxId = Optional.empty();
+        if (site != null && ModList.get().isLoaded("blueprynts")) {
+            BlueprintsConstructionBridge.Placement placement = BlueprintsConstructionBridge.placeConstructionBox(serverLevel, site, zoneTypeId);
+            if (placement != null) {
+                boxPos = Optional.of(placement.pos());
+                constructionBoxId = Optional.of(placement.constructionId());
+            }
+        }
+
+        // Design doc Section 10: "Owner -- a player name, or an NPC (defaults to NPC)" -- added
+        // 2026-09-30, closing the gap this whole flow previously left flagged. Resolved the same way
+        // GrantTownPlannerPayload's own handler already resolves a typed player name (getPlayerByName
+        // -- online players only, a known v1 limitation shared with that handler, not a new one) --
+        // a blank or unresolvable name both fall back to NPC-owned rather than hard-blocking Finalize,
+        // since an owner is never a required field per the design doc.
+        Optional<UUID> owner = Optional.empty();
+        if (!payload.ownerName().isBlank()) {
+            if (zoneType.get().npcOwnedOnly()) {
+                player.sendSystemMessage(Component.literal(
+                        zoneType.get().label() + " plots are always NPC-owned -- ignoring the Owner field."));
+            } else {
+                ServerPlayer ownerPlayer = serverLevel.getServer().getPlayerList().getPlayerByName(payload.ownerName());
+                if (ownerPlayer != null) {
+                    owner = Optional.of(ownerPlayer.getUUID());
+                } else {
+                    player.sendSystemMessage(Component.literal(
+                            "No online player named \"" + payload.ownerName() + "\" (assigning an offline owner isn't supported yet) -- plot will be NPC-owned instead."));
+                }
+            }
+        }
+
+        // Recurring rent bill (2026-10-05, see decisions.md) -- player-owned plots only ("NPC Owned
+        // plots will not have a recurring rent," explicit user decision). Registered with empty box
+        // lists; both the plot's own source box and the settlement's Town Hall destination box(es)
+        // are discovered live and kept in sync by bills.PlotRentTicker, not resolved here -- neither
+        // is guaranteed to exist yet at Finalize time (both are player-placed, whenever that happens).
+        Optional<UUID> billId = Optional.empty();
+        if (owner.isPresent() && YconomicsBillBridge.isAvailable()) {
+            billId = Optional.of(YconomicsBillBridge.registerPlotBill(serverLevel, plotSessionId, List.of(), List.of(),
+                    Map.of(Identifier.withDefaultNamespace("gold_nugget"), 1), 1L));
+        }
+
+        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty());
+        core.addPlot(plotRecord);
+
+        // Plot Config Sign (design doc Section 14a) -- spawned unconditionally, next to the same
+        // site the Building Supply Box anchors to (not on top of it), regardless of whether
+        // Blueprynts is loaded/a box was actually placed -- see PlotConfigSignSpawner's own doc.
+        if (site != null) {
+            com.github.cerealklla.settlemynts.plotsign.PlotConfigSignSpawner.spawn(serverLevel, core.getUUID(), plotSessionId, site);
+            // Shop auto-seeding (design doc Section 14a, 2026-10-05) -- eager, Tier-1-only (a
+            // Construction Box's own Tier isn't chosen until after Finalize); see ShopSeeding's own
+            // doc for the idempotent Tier-catch-up that happens later on every Shop-menu open.
+            com.github.cerealklla.settlemynts.zone.ShopSeeding.seedNewPlot(serverLevel, plotRecord, core, site.pos());
+        }
+
+        // Guardhouse Plot Type (design doc Section 14a) -- its own structure, only for a
+        // Guardhouse-typed plot, spawned alongside the Plot Config Sign above.
+        if (site != null && zoneTypeId.equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
+            com.github.cerealklla.settlemynts.guardhouse.GuardhouseSpawner.spawn(serverLevel, core.getUUID(), plotSessionId, site);
+        }
+
+        // Optional dependency, 2026-09-29 (design discussion): Cartographyr's own registration above
+        // is purely spatial -- it has no permission concept. Protectyons owns "who can edit blocks
+        // here," registered separately with the same polygon and the plotSessionId as the shared area
+        // id. Permitted players computed via PlotPermissions#computeProtectionPermittedPlayers
+        // (reworked 2026-10-05): Mayor always, Town Planners only on non-privately-owned plots, plus
+        // this plot's own assigned Owner -- see that method's own doc and ProtectyonsPlotBridge's.
+        if (ModList.get().isLoaded("protectyons")) {
+            Set<UUID> permitted = PlotPermissions.computeProtectionPermittedPlayers(plotRecord, core);
+            ProtectyonsPlotBridge.registerPlot(serverLevel, plotSessionId, plotPolygon, permitted);
+        }
         for (GhostPlotStakeEntity stake : stakes) {
             stake.discard();
         }
-        GhostPlotFencePostEntity.regenerate(serverLevel, ownerCoreId, plotSessionId); // No stakes left -- clears the preview.
+        roadFlag.discard();
+        RopeFenceLeash.clearGhostAnchor(player.getUUID());
+        GhostPlotFencePostEntity.regenerateCarryPreview(serverLevel, ownerCoreId, plotSessionId, null, null); // Clears any leftover carry preview.
         int cleared = clearPlotStakeItems(serverLevel, core, plotSessionId);
 
         player.sendSystemMessage(Component.literal(
                 "Plot \"" + payload.name() + "\" (" + zoneType.get().label() + ") finalized and registered with Cartographyr"
-                        + (cleared > 0 ? " -- cleared " + cleared + " leftover Plot Placement Stake item(s)." : ".")));
+                        + (cleared > 0 ? " -- reset " + cleared + " Plot Stakes/Road Access Flag item(s) back to unbound." : ".")
+                        + (boxPos.isPresent() ? " A Construction Box has been placed for it." : "")));
     }
 
-    /** Mirrors {@link #clearPerimeterStakeItems} -- removes only stake items bound to this specific finished plot session, not every Plot Placement Stake the planner happens to be carrying (they may be mid-staking a different plot). */
+
+    /**
+     * Mirrors {@link #clearPerimeterStakeItems} in spirit, but no longer deletes anything (Plot
+     * Stakes rework, 2026-09-30, extended to the Road Access Flag the same day) -- both items are
+     * reusable, infinite-use tools now, not single-plot-bound one-shots, so finalizing a plot just
+     * resets any stack still carrying this specific finished plot's CurrentPlotID back to blank
+     * (ready to start/resume or bind to a different plot), the same reset a hand-swap already does.
+     * Deliberately doesn't filter by item type -- both {@code PLOT_PLACEMENT_STAKE} and {@code
+     * ROAD_ACCESS_FLAG} carry the same {@code PLOT_SESSION_DATA} component, and any stack carrying
+     * it that matches this plot's id should be reset regardless of which of the two it is.
+     */
     private static int clearPlotStakeItems(ServerLevel level, GhostTownHallCoreEntity core, UUID plotSessionId) {
         int cleared = 0;
         for (UUID plannerId : core.getTownPlanners()) {
@@ -388,7 +1142,7 @@ public class SettlemyntsMod {
                 ItemStack stack = inventory.getItem(slot);
                 PlotSessionData session = stack.get(ModItems.PLOT_SESSION_DATA);
                 if (session != null && plotSessionId.equals(session.plotSessionId())) {
-                    inventory.setItem(slot, ItemStack.EMPTY);
+                    stack.set(ModItems.PLOT_SESSION_DATA, new PlotSessionData(session.ownerCoreId(), null));
                     cleared++;
                 }
             }
@@ -435,7 +1189,11 @@ public class SettlemyntsMod {
             }
 
             for (Geometry.Polygon.Vertex block : Geometry.Polygon.outerRing(polygon)) {
-                int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, block.x(), block.z());
+                // MOTION_BLOCKING_NO_LEAVES, not WORLD_SURFACE -- see PlotSitePlacement's own comment;
+                // a wall point under a tree canopy used to start floating up in the leaves instead of
+                // on the real ground (2026-09-30 playtest report: "they should build from the ground
+                // up... they can be inside other blocks").
+                int groundY = serverLevel.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, block.x(), block.z());
                 for (int level = 0; level < GhostPlotWallEntity.WALL_HEIGHT_BLOCKS; level++) {
                     // No +0.5 centering here (fixed 2026-09-27, playtest feedback: the glass wasn't
                     // stacked on the block below it, offset by half a block) -- a Display.BlockDisplay
@@ -446,6 +1204,33 @@ public class SettlemyntsMod {
                 }
             }
         }
+    }
+
+    /**
+     * "Reposition Town Hall Core" (added 2026-09-30) -- grants a Locator bound to {@code core}'s own
+     * persistent UUID once it's confirmed the Core actually sits inside a finalized Town Hall plot
+     * right now; the granted item re-validates this fresh at use time too (see {@code
+     * founding.TownHallCoreRelocatorItem}), so nothing here needs to be cached.
+     */
+    private static void repositionTownHallCore(com.github.cerealklla.settlemynts.founding.RepositionTownHallCorePayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        if (!(player.level() instanceof ServerLevel serverLevel) || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal(
+                    "Couldn't find this settlement's Town Hall Core anymore -- try right-clicking it again to reopen this screen."));
+            return;
+        }
+        if (!core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
+            return;
+        }
+        if (core.findTownHallPlot(serverLevel).isEmpty()) {
+            player.sendSystemMessage(Component.literal("The Town Hall Core isn't currently inside a finalized Town Hall plot."));
+            return;
+        }
+        player.addItem(com.github.cerealklla.settlemynts.founding.TownHallCoreRelocatorItem.grantFor(core.getUUID(), serverLevel.getGameTime()));
+        player.sendSystemMessage(Component.literal("Right-click anywhere within the Town Hall Plot to move the Core there."));
     }
 
     /**
@@ -522,7 +1307,8 @@ public class SettlemyntsMod {
             // 2026-09-26, playtest feedback -- varying terrain along the perimeter made single
             // fixed-height blocks read as scattered floating icons, not a wall). A short vertical
             // stack per point gives a real "wall" silhouette even where the ground itself slopes.
-            int groundY = serverLevel.getHeight(Heightmap.Types.WORLD_SURFACE, block.x(), block.z());
+            // MOTION_BLOCKING_NO_LEAVES, not WORLD_SURFACE -- same fix as setShowPlotPerimeters above.
+            int groundY = serverLevel.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, block.x(), block.z());
             for (int level = 0; level < GhostBoundaryWallEntity.WALL_HEIGHT_BLOCKS; level++) {
                 // No +0.5 centering -- see the identical fix/comment in setShowPlotPerimeters, same date.
                 GhostBoundaryWallEntity.create(serverLevel, block.x(), groundY + level, block.z(), core.getUUID());
@@ -642,6 +1428,13 @@ public class SettlemyntsMod {
      * *updated* instead of a duplicate being created, so re-running Finalize later (e.g. after
      * adjusting stakes) doesn't leave stale entries behind.
      */
+    // 2026-10-05 fix (real report: 21 placed stakes produced a 486-vertex registered polygon,
+    // enough to visibly lag Lyfe's minimap): coveringBlocks/expandedBy trace a diagonal edge as a
+    // one-block staircase, not a straight line -- see Geometry.Polygon#simplified's own doc for why
+    // that's fixed with an explicit, opt-in simplification here rather than inside Cartographyr's
+    // exact block-level primitives themselves (Plot subdivision needs those to stay exact).
+    private static final double PERIMETER_SIMPLIFY_TOLERANCE_BLOCKS = 1.5;
+
     private static void registerWithCartographyr(ServerLevel level, GhostTownHallCoreEntity core, List<PerimeterFit.StakeInput> fittedStakes) {
         // fittedStakes is already in placement order (PerimeterFit.fit preserves whatever order its
         // caller passed in, 2026-09-27 -- see decisions.md same date) -- no re-sort needed here.
@@ -649,10 +1442,19 @@ public class SettlemyntsMod {
         for (PerimeterFit.StakeInput stake : fittedStakes) {
             realVertices.add(new Geometry.Polygon.Vertex((int) Math.floor(stake.x()), (int) Math.floor(stake.z())));
         }
-        Geometry.Polygon realPolygon = Geometry.Polygon.coveringBlocks(realVertices);
+        Geometry.Polygon realPolygon = Geometry.Polygon.coveringBlocks(realVertices).simplified(PERIMETER_SIMPLIFY_TOLERANCE_BLOCKS);
         registerSettlementCore(level, core, realPolygon);
 
-        Geometry paddedPolygon = Geometry.Polygon.expandedBy(realPolygon, (int) Math.round(CARTOGRAPHYR_PADDING_BLOCKS));
+        Geometry.Polygon paddedUnsimplified = Geometry.Polygon.expandedBy(realPolygon, (int) Math.round(CARTOGRAPHYR_PADDING_BLOCKS));
+        Geometry paddedPolygon = paddedUnsimplified.simplified(PERIMETER_SIMPLIFY_TOLERANCE_BLOCKS);
+
+        // 2026-10-05 fix: the settlement area itself must also be registered with Protectyons, not
+        // just its plots -- see ProtectyonsPlotBridge#registerSettlement's own doc for the live-test
+        // bug this closes (founder blocked from breaking terrain in their own freshly-finalized
+        // settlement, since nothing had ever granted a permitted set for the settlement-wide area).
+        if (ModList.get().isLoaded("protectyons")) {
+            ProtectyonsPlotBridge.registerSettlement(level, core.getUUID(), paddedPolygon, core.getTownPlanners());
+        }
 
         Long existingId = core.getCartographyrEntityId();
         if (existingId != null) {
@@ -741,19 +1543,233 @@ public class SettlemyntsMod {
         return entity instanceof GhostTownHallCoreEntity core ? core : null;
     }
 
+    private static final int ROAD_ACCESS_PREVIEW_INTERVAL_TICKS = 10;
+
     /**
-     * DEBUG ONLY -- grants a testing flag on every login, no real crafting recipe exists yet
-     * (design doc Section 5 calls for one; not built this milestone). Same pattern/caveats as
-     * Lyfe's own debug item grant (LyfeMod#onPlayerLoggedIn) -- must be removed or gated behind a
-     * real debug flag before any actual release.
+     * Live "where can the Road Access Flag go" ghost-torch preview (explicit user request,
+     * 2026-09-29) -- every {@link #ROAD_ACCESS_PREVIEW_INTERVAL_TICKS} ticks, regenerates {@code
+     * GhostRoadAccessPreviewEntity} markers over every currently-valid perimeter cell for any online
+     * player holding a Road Access Flag item, and clears them for anyone no longer holding it -- tied
+     * to the item actually being in hand, not just an active plot session, per the user's own framing
+     * ("as we're walking around with a road stake in hand").
+     *
+     * <p>Keeps showing the preview even once a flag is already placed for the session -- a real
+     * inconsistency, 2026-09-29: the item is never consumed on placement (design doc: "placing a new
+     * one replaces the old," the same reusable-item shape {@code PlotPlacementStakeItem} already
+     * uses), so hiding the preview the instant one exists left the player still holding the item with
+     * no visual feedback at all, confusing on its own terms ("placing the road stake down should
+     * remove it from your inventory, or keep the ghost torches visible, one of the two"). Since the
+     * item staying reusable is the existing, intended design, the preview now matches that instead.
      */
     @SubscribeEvent
-    public void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
-        Player player = event.getEntity();
-        if (player.level().isClientSide()) {
+    public void onServerTick(ServerTickEvent.Post event) {
+        if (event.getServer().getTickCount() % ROAD_ACCESS_PREVIEW_INTERVAL_TICKS != 0) {
             return;
         }
-        player.addItem(new ItemStack(ModItems.SETTLEMENT_CLAIM_FLAG.get(), 2));
-        LOGGER.info("Granted debug Settlement Claim Flag(s) to {}", player.getName().getString());
+        for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
+            if (!(player.level() instanceof ServerLevel serverLevel)) {
+                continue;
+            }
+            regenerateCarryPreview(player, serverLevel);
+            PlotSessionData session = resolveRoadAccessFlagSession(player);
+            // Plot Stakes rework (2026-09-30) made PlotSessionData#plotSessionId nullable -- a
+            // real server crash confirmed a Road Access Flag item can carry one with a null
+            // plotSessionId (an older/leftover flag stack), which used to NPE straight through
+            // findBySessionInPlacementOrder below. Treated the same as "not holding it."
+            if (session == null || session.plotSessionId() == null) {
+                // Not holding the item (switched away, dropped it, removed from hotbar, etc.) -- a
+                // real bug, 2026-09-29: this used to just `continue`, leaving any already-spawned
+                // torches for this player floating forever, since nothing else ever cleared them.
+                GhostRoadAccessPreviewEntity.regenerate(serverLevel, player.getUUID(), List.of());
+                continue;
+            }
+            UUID ownerCoreId = session.ownerCoreId();
+            UUID plotSessionId = session.plotSessionId();
+            List<GhostPlotStakeEntity> stakes = GhostPlotStakeEntity.findBySessionInPlacementOrder(serverLevel, ownerCoreId, plotSessionId);
+            if (stakes.size() < 3) {
+                GhostRoadAccessPreviewEntity.regenerate(serverLevel, player.getUUID(), List.of());
+                continue;
+            }
+            List<PlotGeometry.StakePoint> ordered = new ArrayList<>(stakes.size());
+            for (GhostPlotStakeEntity stake : stakes) {
+                ordered.add(new PlotGeometry.StakePoint(stake.getX(), stake.getZ()));
+            }
+            Geometry.Polygon plotPolygon = PlotGeometry.polygonFromStakes(ordered);
+            GhostRoadAccessPreviewEntity.regenerate(serverLevel, player.getUUID(), PlotGeometry.perimeterCells(plotPolygon));
+        }
+    }
+
+    /**
+     * Rope Fence rework (see decisions.md) -- redraws the single live "carrying" rope trailing from
+     * a player's current ghost leash anchor to their own live position, piggybacking on the same
+     * 10-tick cadence as the Road Access Flag preview above (cheap either way -- at most 5 cells).
+     * A player with no active anchor (not holding a Plot Placement Stake, or never placed a post
+     * yet) just gets the preview cleared.
+     */
+    private static void regenerateCarryPreview(ServerPlayer player, ServerLevel serverLevel) {
+        GhostPlotStakeEntity anchor = player.getMainHandItem().is(ModItems.PLOT_PLACEMENT_STAKE.get())
+                ? RopeFenceLeash.resolveGhostAnchor(serverLevel, player.getUUID())
+                : null;
+        if (anchor == null) {
+            return; // Nothing to clear per-player -- regenerateCarryPreview(level, core, session, null, null) at removal/finalize already handles that case.
+        }
+        GhostPlotFencePostEntity.regenerateCarryPreview(serverLevel, anchor.getOwnerCoreId(), anchor.getPlotSessionId(), anchor, player.position());
+    }
+
+    /**
+     * Rope Fence rework (see decisions.md) -- every tick (unlike the 10-tick-cadence preview above;
+     * this needs to feel responsive), physically pulls any player past {@link
+     * RopeFenceLeash#MAX_ROPE_LENGTH_BLOCKS} of their current leash anchor back toward it, for both
+     * the ghost plot-staking mechanic (holding a Plot Placement Stake) and the real, standalone Rope
+     * Fence Post item -- same category of "server nudges velocity" as vanilla's own leashed-mob-
+     * pulls-owner-back logic, just applied to the player instead of a mob. A player no longer holding
+     * the relevant item has their anchor cleared outright, which is what makes "the rope disappears"
+     * on an item swap.
+     */
+    @SubscribeEvent
+    public void onLeashTick(ServerTickEvent.Post event) {
+        for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
+            if (!(player.level() instanceof ServerLevel serverLevel)) {
+                continue;
+            }
+            if (player.getMainHandItem().is(ModItems.PLOT_PLACEMENT_STAKE.get())) {
+                GhostPlotStakeEntity anchor = RopeFenceLeash.resolveGhostAnchor(serverLevel, player.getUUID());
+                if (anchor != null) {
+                    applyLeashPull(player, new Vec3(anchor.getX(), anchor.getY(), anchor.getZ()), RopeFenceLeash.MAX_ROPE_LENGTH_BLOCKS);
+                }
+            } else {
+                RopeFenceLeash.clearGhostAnchor(player.getUUID());
+                // Plot Stakes rework (2026-09-30): switching away from the item resets its
+                // CurrentPlotID back to blank, same moment the rope itself breaks above -- see
+                // PlotPlacementStakeItem's own doc for why this matters (stops a stale PlotID from
+                // silently resuming an old, now-disconnected chain once the player switches back).
+                // Idempotent/cheap once already blank, so running it every tick the item isn't held
+                // (rather than only on the transition tick) needs no extra "was I holding it last
+                // tick" state.
+                clearCurrentPlotId(player, ModItems.PLOT_PLACEMENT_STAKE.get());
+            }
+
+            if (player.getMainHandItem().is(ModBlocks.ROPE_FENCE_POST_ITEM.get())) {
+                BlockPos anchorPos = RopeFenceLeash.resolveRealAnchor(player.getUUID());
+                if (anchorPos != null) {
+                    applyLeashPull(player, Vec3.atCenterOf(anchorPos), RopeFenceLeash.MAX_ROPE_LENGTH_BLOCKS);
+                }
+            } else {
+                RopeFenceLeash.clearRealAnchor(player.getUUID());
+            }
+
+            // Roadways Milestone 1 (added 2026-10-06) -- same leash-pull/anchor-clear shape as Plot
+            // Stakes above, just with its own separate tracking map (RoadwayStakeLeash) and its own,
+            // much longer max distance (design doc: signposts every ~100 blocks on a finished road --
+            // Roadway Stakes need to be able to span that same real distance, unlike Plot/Perimeter
+            // Stakes which mark a single settlement's own small boundary).
+            if (player.getMainHandItem().is(ModItems.ROADWAY_STAKE.get())) {
+                com.github.cerealklla.settlemynts.roadway.RoadwayStakeEntity anchor =
+                        com.github.cerealklla.settlemynts.roadway.RoadwayStakeLeash.resolveGhostAnchor(serverLevel, player.getUUID());
+                if (anchor != null) {
+                    applyLeashPull(player, new Vec3(anchor.getX(), anchor.getY(), anchor.getZ()),
+                            com.github.cerealklla.settlemynts.roadway.RoadwayStakeEntity.MAX_CONNECTION_LENGTH_BLOCKS);
+                }
+            } else {
+                com.github.cerealklla.settlemynts.roadway.RoadwayStakeLeash.clearGhostAnchor(player.getUUID());
+            }
+
+            // Road Access Flag rework (2026-09-30, mirrors Plot Stakes above): the flag has no rope,
+            // so this is just the CurrentPlotID reset -- independent of whether Plot Stakes is also
+            // being held, since they're two separate items a planner can carry at once.
+            if (!player.getMainHandItem().is(ModItems.ROAD_ACCESS_FLAG.get())) {
+                clearCurrentPlotId(player, ModItems.ROAD_ACCESS_FLAG.get());
+            }
+
+            // Plot Stakes rework (2026-09-30): "when a player walks out of the settlement that
+            // generated the Plot Stakes, remove the item from their inventory" -- checked at a coarser
+            // cadence (once a second) than the leash pull above, since a boundary exit doesn't need to
+            // feel as responsive as the physical rope. Road Access Flag gets the same rule, same day.
+            if (player.tickCount % 20 == 0) {
+                removeStalePlotItemsOutsideSettlement(player, serverLevel);
+            }
+        }
+    }
+
+    /**
+     * Sweeps every Plot Stakes/Road Access Flag item in {@code player}'s inventory (any slot, not
+     * just the held one -- the rule is about carrying it while outside the settlement, not holding
+     * it) and removes any whose granting settlement's real founded perimeter no longer contains the
+     * player's position. A settlement with no registered core polygon yet (still being founded, not
+     * finalized) is skipped rather than treated as "outside" -- both items only ever exist for
+     * already-finalized settlements in practice, but failing open here costs nothing and avoids
+     * punishing an edge case this rework didn't set out to handle.
+     */
+    private static void removeStalePlotItemsOutsideSettlement(ServerPlayer player, ServerLevel serverLevel) {
+        var inventory = player.getInventory();
+        BlockPos pos = player.blockPosition();
+        boolean removedAny = false;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.is(ModItems.PLOT_PLACEMENT_STAKE.get()) && !stack.is(ModItems.ROAD_ACCESS_FLAG.get())) {
+                continue;
+            }
+            PlotSessionData session = stack.get(ModItems.PLOT_SESSION_DATA);
+            if (session == null || !(serverLevel.getEntity(session.ownerCoreId()) instanceof GhostTownHallCoreEntity core)) {
+                continue;
+            }
+            Long coreEntityId = core.getCartographyrCoreEntityId();
+            if (coreEntityId == null) {
+                continue;
+            }
+            Optional<GeographicEntity> registered = Cartography.getEntity(serverLevel, new EntityId(coreEntityId));
+            if (registered.isEmpty() || !(registered.get().geometry() instanceof Geometry.Polygon corePolygon)) {
+                continue;
+            }
+            if (!corePolygon.contains(pos.getX(), pos.getZ())) {
+                inventory.setItem(slot, ItemStack.EMPTY);
+                removedAny = true;
+            }
+        }
+        if (removedAny) {
+            RopeFenceLeash.clearGhostAnchor(player.getUUID());
+            player.sendSystemMessage(Component.literal("You left the settlement -- your Plot Stakes/Road Access Flag have been removed."));
+        }
+    }
+
+    private static void clearCurrentPlotId(ServerPlayer player, net.minecraft.world.item.Item item) {
+        var inventory = player.getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.is(item)) {
+                continue;
+            }
+            PlotSessionData session = stack.get(ModItems.PLOT_SESSION_DATA);
+            if (session != null && session.plotSessionId() != null) {
+                stack.set(ModItems.PLOT_SESSION_DATA, new PlotSessionData(session.ownerCoreId(), null));
+            }
+        }
+    }
+
+    private static void applyLeashPull(ServerPlayer player, Vec3 anchorPos, double maxRopeLengthBlocks) {
+        Vec3 playerPos = player.position();
+        double distance = anchorPos.distanceTo(playerPos);
+        if (distance <= maxRopeLengthBlocks) {
+            return;
+        }
+        double overshoot = distance - maxRopeLengthBlocks;
+        Vec3 pull = anchorPos.subtract(playerPos).normalize().scale(Math.min(0.4, overshoot * 0.15));
+        player.setDeltaMovement(player.getDeltaMovement().add(pull));
+        player.hurtMarked = true; // Forces the velocity change to sync to the client, same as any other server-side push.
+    }
+
+    private static PlotSessionData resolveRoadAccessFlagSession(ServerPlayer player) {
+        ItemStack main = player.getMainHandItem();
+        if (main.is(ModItems.ROAD_ACCESS_FLAG.get())) {
+            PlotSessionData session = main.get(ModItems.PLOT_SESSION_DATA);
+            if (session != null) {
+                return session;
+            }
+        }
+        ItemStack off = player.getOffhandItem();
+        if (off.is(ModItems.ROAD_ACCESS_FLAG.get())) {
+            return off.get(ModItems.PLOT_SESSION_DATA);
+        }
+        return null;
     }
 }

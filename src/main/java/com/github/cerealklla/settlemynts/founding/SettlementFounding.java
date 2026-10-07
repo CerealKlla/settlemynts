@@ -6,6 +6,7 @@ import com.github.cerealklla.cartographyr.api.Cartography;
 import com.github.cerealklla.cartographyr.geo.Classification;
 import com.github.cerealklla.cartographyr.geo.EntityType;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
+import com.github.cerealklla.cartographyr.geo.Layer;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -41,9 +42,11 @@ public final class SettlementFounding {
     /**
      * The nearest existing settlement (player-founded or natural, finalized or still being staked)
      * to {@code (x, z)}, with its distance and compass direction, or empty if none exist yet in
-     * this dimension. Reuses Cartographyr's existing {@code Cartography.findEntities}/{@code
-     * Classification.CONSTRUCTED} query -- no new Cartographyr API needed, since natural villages
-     * are already tracked there (design doc Section 1).
+     * this dimension. Uses Cartographyr's layer-indexed {@code Cartography.findEntities}/{@code
+     * Layer.SETTLEMENT_ID} query (2026-10-02 -- previously scanned every {@code CONSTRUCTED}
+     * entity in the dimension, including however many plot/plot-buffer entities this mod itself
+     * registers under its own zone layer; see decisions.md) -- the settlement/settlement-core
+     * {@code EntityType} filter below still runs, since both share this one layer.
      *
      * <p>Added 2026-09-26 (see decisions.md) -- a real playtest request: a bare "too close" message
      * gave the player no way to judge how far to walk or which way, since there's no in-game frame
@@ -68,7 +71,7 @@ public final class SettlementFounding {
         double closestDz = 0;
         boolean found = false;
 
-        for (GeographicEntity entity : Cartography.findEntities(level, Classification.CONSTRUCTED)) {
+        for (GeographicEntity entity : Cartography.findEntities(level, Classification.CONSTRUCTED, Layer.SETTLEMENT_ID)) {
             if (!entity.type().equals(EntityType.SETTLEMENT)) {
                 continue;
             }
@@ -130,7 +133,10 @@ public final class SettlementFounding {
             for (int dz = -CONSTRUCTION_SITE_RADIUS; dz <= CONSTRUCTION_SITE_RADIUS; dz++) {
                 int columnX = center.getX() + dx;
                 int columnZ = center.getZ() + dz;
-                int surfaceY = level.getHeight(Heightmap.Types.WORLD_SURFACE, columnX, columnZ);
+                // MOTION_BLOCKING_NO_LEAVES, not WORLD_SURFACE -- WORLD_SURFACE lands on leaves/plants,
+                // which would start the clear too high and leave real ground-level vegetation standing
+                // (2026-09-30 fix, same root cause as PlotSitePlacement's own comment).
+                int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, columnX, columnZ);
                 for (int y = surfaceY; y < surfaceY + CLEAR_HEIGHT; y++) {
                     BlockPos pos = new BlockPos(columnX, y, columnZ);
                     if (!level.getBlockState(pos).isAir()) {

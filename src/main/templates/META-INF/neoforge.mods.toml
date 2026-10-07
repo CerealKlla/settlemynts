@@ -92,6 +92,61 @@ taxation/rent, on top of Cartographyr's geographic entity model.
     ordering="AFTER"
     side="BOTH"
 
+# Optional soft dependency -- the reverse direction of Blueprynts' own existing optional dependency
+# on Settlemynts (bridge.SettlemyntsZoneBridge there). Finalizing a plot auto-places a Blueprynts
+# Construction Site block if Blueprynts happens to be loaded (see bridge.BlueprintsConstructionBridge);
+# the mod works standalone without it. No versionRange -- an empty string is an invalid range that
+# makes FML reject an installed Blueprynts outright (same gotcha Blueprynts' own optional
+# Settlemynts dependency documents), omitting the field entirely is what actually means "any version."
+#
+# ordering="NONE", deliberately NOT "AFTER" -- Blueprynts' own optional dependency on Settlemynts
+# already declares "AFTER" (blueprynts loads after settlemynts), so this side also declaring "AFTER"
+# produced a real, confirmed mod dependency cycle at boot ("Detected a mod dependency cycle:
+# blueprynts, settlemynts") -- both mods insisting on loading after the other is unsatisfiable.
+# Load order doesn't actually matter here: BlueprintsConstructionBridge only runs during a Finalize
+# request (long after both mods' common setup), never at mod-construction/classload time.
+[[dependencies.${mod_id}]]
+    modId="blueprynts"
+    type="optional"
+    reason="Auto-places a Construction Site block on a newly-finalized, valid plot if present."
+    ordering="NONE"
+    side="BOTH"
+
+# Optional soft dependency -- Finalize registers a Plot's polygon + permitted players (Mayor, Town
+# Planners, Owner) with Protectyons' own permission registry if present (see
+# bridge.ProtectyonsPlotBridge); the mod works standalone without it. Same "ordering=NONE, no
+# versionRange" reasoning as the blueprynts dependency above.
+[[dependencies.${mod_id}]]
+    modId="protectyons"
+    type="optional"
+    reason="Registers a finalized Plot's polygon and permitted players so Protectyons can exempt them from its own protection enforcement."
+    ordering="NONE"
+    side="BOTH"
+
+# Optional soft dependency -- "Select Kyt" on the Guardhouse's Configure Garrison screen binds a
+# saved Kyt loadout name to a GarrisonSlot if Kyt happens to be loaded (see
+# bridge.KytGuardhouseBridge); the mod works standalone without it (the screen's "Select Kyt" row
+# simply never appears). Same "ordering=NONE, no versionRange" reasoning as blueprynts/protectyons
+# above -- this bridge only ever runs from a player-initiated screen click, long after both mods'
+# common setup, so load order doesn't matter.
+[[dependencies.${mod_id}]]
+    modId="kyt"
+    type="optional"
+    reason="Binds a saved Kyt loadout name to a Guardhouse garrison slot if present."
+    ordering="NONE"
+    side="BOTH"
+
+# Optional soft dependency (2026-10-05) -- a debug command registers a recurring-bill (plot rent)
+# against Yconomics' bill engine for a finalized plot if Yconomics happens to be loaded (see
+# bridge.YconomicsBillBridge). Same "ordering=NONE, no versionRange" reasoning as the other
+# optional dependencies above.
+[[dependencies.${mod_id}]]
+    modId="yconomics"
+    type="optional"
+    reason="Lets a finalized plot register a recurring rent bill against Yconomics' bill engine."
+    ordering="NONE"
+    side="BOTH"
+
 # Features are specific properties of the game environment, that you may want to declare you require. This example declares
 # that your mod requires GL version 3.2 or higher. Other features will be added. They are side aware so declaring this won't
 # stop your mod loading on the server for example.

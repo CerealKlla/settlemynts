@@ -15,8 +15,9 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 /**
  * A Planned Perimeter Stake's management UI (design doc Section 6) -- opened via {@link
  * OpenStakeScreenPayload}. Toggles "absolute" (capped at {@code maxAbsolute}, shown as "current/max"
- * and disabled at the cap -- matching the design doc's own "button shows current #/5 and is
- * disabled at 5/5") or removes the stake outright.
+ * and disabled at the cap -- design doc originally said "5/5", the cap is now {@link
+ * GhostPerimeterStakeEntity#MAX_ABSOLUTE_STAKES} instead of a hardcoded number) or removes the stake
+ * outright.
  */
 public final class StakeScreen extends Screen {
 
