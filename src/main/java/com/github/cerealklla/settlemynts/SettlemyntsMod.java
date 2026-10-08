@@ -606,6 +606,10 @@ public class SettlemyntsMod {
                 .orElse(java.util.List.of());
         java.util.Map<net.minecraft.resources.Identifier, Integer> stock =
                 com.github.cerealklla.settlemynts.api.Settlemynts.scanPlotItemStock(serverLevel, plot.plotId());
+        int shopGoldNuggets = stock.getOrDefault(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET), 0);
+        int playerGoldNuggets = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.isAvailable()
+                ? com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getNuggetBalance(player)
+                : 0;
 
         if (payload.manage()) {
             // Manage mode (2026-10-08, redesigned per explicit spec the same day): the plot's Shop
@@ -663,7 +667,7 @@ public class SettlemyntsMod {
                     .comparing((com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry e) -> e.shopStock() <= 0)
                     .thenComparing(com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry::label));
             PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
-                    payload.signPos(), plot.plotId(), true, java.util.List.of(), inventory));
+                    payload.signPos(), plot.plotId(), true, java.util.List.of(), inventory, shopGoldNuggets, playerGoldNuggets));
             return;
         }
 
@@ -688,7 +692,8 @@ public class SettlemyntsMod {
                         .comparing((com.github.cerealklla.settlemynts.plotsign.ShopListingEntry e) -> e.shopStock() <= 0)
                         .thenComparing(com.github.cerealklla.settlemynts.plotsign.ShopListingEntry::label))
                 .toList();
-        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(payload.signPos(), plot.plotId(), false, listings, java.util.List.of()));
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
+                payload.signPos(), plot.plotId(), false, listings, java.util.List.of(), shopGoldNuggets, playerGoldNuggets));
     }
 
     /** "Buy N" click on the real Shop screen -- charges the buyer only for whatever was actually filled. */

@@ -25,8 +25,16 @@ import net.minecraft.resources.Identifier;
  * existing listing not currently backed by box stock -- see {@code ShopInventoryEntry}'s own doc.
  * Only one of the two lists is ever populated for a given reply (the other is empty) since a single
  * request is always either buy or manage, never both.
+ *
+ * <p>{@code shopGoldNuggets}/{@code playerGoldNuggets} (added 2026-10-08, explicit request: "can we
+ * also list 'Merchant Gold: #' and 'Player Gold: #' somewhere?") -- the plot's own Gold Nugget stock
+ * (how much the shop itself has on hand to pay for a "Sell," a plain count out of {@code
+ * api.Settlemynts#scanPlotItemStock}) and the requesting player's own balance ({@code
+ * bridge.YconomicsShopBridge#getNuggetBalance}, loose inventory + Coin Purse). Computed for both
+ * modes alike (cheap either way) but only rendered by {@code client.ShopScreen} (buy mode) today.
  */
-public record OpenShopPayload(BlockPos signPos, UUID plotId, boolean manage, List<ShopListingEntry> listings, List<ShopInventoryEntry> inventory) implements CustomPacketPayload {
+public record OpenShopPayload(BlockPos signPos, UUID plotId, boolean manage, List<ShopListingEntry> listings,
+                               List<ShopInventoryEntry> inventory, int shopGoldNuggets, int playerGoldNuggets) implements CustomPacketPayload {
 
     public static final Type<OpenShopPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_shop"));
@@ -40,6 +48,8 @@ public record OpenShopPayload(BlockPos signPos, UUID plotId, boolean manage, Lis
             ByteBufCodecs.BOOL, OpenShopPayload::manage,
             ByteBufCodecs.fromCodec(LISTINGS_CODEC), OpenShopPayload::listings,
             ByteBufCodecs.fromCodec(INVENTORY_CODEC), OpenShopPayload::inventory,
+            ByteBufCodecs.VAR_INT, OpenShopPayload::shopGoldNuggets,
+            ByteBufCodecs.VAR_INT, OpenShopPayload::playerGoldNuggets,
             OpenShopPayload::new);
 
     @Override

@@ -30,6 +30,11 @@ import net.minecraft.world.item.ItemStack;
  * {@link ShopListingEntry#effectiveBuyPrice()}/{@link ShopListingEntry#effectiveSellPrice()}'s own
  * doc), e.g. "Buy (5) (4)".
  *
+ * <p>"Merchant Gold: #    Player Gold: #" (added 2026-10-08, explicit request) is drawn once above
+ * the table -- the shop's own Gold Nugget stock ({@link OpenShopPayload#shopGoldNuggets()}, relevant
+ * to whether a "Sell" can actually be paid out) and the viewing player's own balance ({@link
+ * OpenShopPayload#playerGoldNuggets()}, loose inventory + Coin Purse).
+ *
  * <p>"Shop Stock" is server-computed ({@link ShopListingEntry#shopStock()}, a snapshot as of when the
  * screen opened -- not live-updating while it's open, same as every other field here). "Player Stock"
  * is computed fresh every frame from the client's own inventory ({@link ShopListingEntry#matches}),
@@ -51,7 +56,7 @@ import net.minecraft.world.item.ItemStack;
 public final class ShopScreen extends Screen {
 
     private static final int ROW_HEIGHT = 24;
-    private static final int VIEWPORT_TOP = 60;
+    private static final int VIEWPORT_TOP = 72;
     private static final int PANEL_LEFT_MARGIN = 310;
     private static final int BACKGROUND_COLOR = 0xC0101010;
 
@@ -163,6 +168,9 @@ public final class ShopScreen extends Screen {
         int centerX = width / 2;
         int titleWidth = font.width(title);
         graphics.text(font, title, centerX - titleWidth / 2, 20, 0xFFFFFFFF);
+
+        String goldLine = "Merchant Gold: " + data.shopGoldNuggets() + "    Player Gold: " + data.playerGoldNuggets();
+        graphics.text(font, goldLine, centerX - font.width(goldLine) / 2, 36, 0xFFFFD700);
 
         graphics.text(font, "Item", centerX + COL_NAME_X, VIEWPORT_TOP - 16, 0xFFAAAAAA);
         graphics.text(font, "Shop Stock", centerX + COL_SHOP_STOCK_X, VIEWPORT_TOP - 16, 0xFFAAAAAA);
