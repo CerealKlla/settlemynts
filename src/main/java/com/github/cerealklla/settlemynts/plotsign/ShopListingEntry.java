@@ -17,13 +17,17 @@ import net.minecraft.world.item.Items;
  * zone.ShopResource}'s own types, so {@code client.ShopScreen} needs no cross-mod type reference at
  * all. {@code isTag} distinguishes a whole category ({@code resourceKey} is a tag id) from one
  * specific item ({@code resourceKey} is an item id) -- same split as {@code zone.ShopResource}.
+ * {@code buyPricePerUnit} (added 2026-10-08) is what the shop pays to buy this item back -- always
+ * {@code shop.ShopPricing#deriveBuyPrice(pricePerUnit)}, computed server-side so the client never
+ * needs its own copy of that formula.
  */
-public record ShopListingEntry(Identifier resourceKey, boolean isTag, int pricePerUnit) {
+public record ShopListingEntry(Identifier resourceKey, boolean isTag, int pricePerUnit, int buyPricePerUnit) {
 
     public static final Codec<ShopListingEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(ShopListingEntry::resourceKey),
             Codec.BOOL.fieldOf("is_tag").forGetter(ShopListingEntry::isTag),
-            Codec.INT.fieldOf("price_per_unit").forGetter(ShopListingEntry::pricePerUnit)
+            Codec.INT.fieldOf("price_per_unit").forGetter(ShopListingEntry::pricePerUnit),
+            Codec.INT.fieldOf("buy_price_per_unit").forGetter(ShopListingEntry::buyPricePerUnit)
     ).apply(i, ShopListingEntry::new));
 
     /**

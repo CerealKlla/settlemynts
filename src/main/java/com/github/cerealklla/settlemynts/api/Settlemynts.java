@@ -207,6 +207,26 @@ public final class Settlemynts {
         return YconomicsShopBridge.purchase(level, shopId.get(), resource, quantity, stockBoxes, paymentBoxes);
     }
 
+    /**
+     * The reverse of {@link #purchaseFromSettlementShop} (2026-10-08) -- sells {@code quantity} units
+     * of {@code itemId} to {@code plotId}'s Shop. Unlike the buy direction, there's only one box pool
+     * involved here: the plot's own boxes are both where the sold item ends up AND where the nuggets
+     * paid to the seller come from, so this resolves {@code resolvePlotBoxes} once and uses it for
+     * both roles -- no separate caller-supplied box list needed.
+     */
+    public static YconomicsShopBridge.SellResult sellToSettlementShop(ServerLevel level, UUID plotId, ShopResource resource,
+                                                                       Identifier itemId, int quantity) {
+        if (!YconomicsShopBridge.isAvailable()) {
+            return new YconomicsShopBridge.SellResult(0, 0);
+        }
+        Optional<UUID> shopId = YconomicsShopBridge.getShopIdFor(level, plotId);
+        if (shopId.isEmpty()) {
+            return new YconomicsShopBridge.SellResult(0, 0);
+        }
+        List<Container> plotBoxes = resolvePlotBoxes(level, plotId);
+        return YconomicsShopBridge.sell(level, shopId.get(), resource, itemId, quantity, plotBoxes, plotBoxes);
+    }
+
     /** Every real container located within {@code plotId}'s own polygon -- the same "all boxes on the plot" pool {@code bills.PlotBoxDiscovery} already reads for rent. */
     public static List<Container> resolvePlotBoxes(ServerLevel level, UUID plotId) {
         List<Container> containers = new ArrayList<>();

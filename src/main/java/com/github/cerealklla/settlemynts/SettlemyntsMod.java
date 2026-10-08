@@ -443,6 +443,10 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload.STREAM_CODEC,
                 (payload, context) -> buyFromShop(payload, context));
 
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SellToShopPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SellToShopPayload.STREAM_CODEC,
+                (payload, context) -> sellToShop(payload, context));
+
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload.STREAM_CODEC,
                 (payload, context) -> adjustListing(payload, context));
@@ -604,7 +608,7 @@ public class SettlemyntsMod {
                 .map(shopId -> com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(serverLevel, shopId).stream()
                         .map(l -> new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(
                                 l.resource().tag().map(t -> t.location()).orElseGet(() -> l.resource().itemId().get()),
-                                l.resource().tag().isPresent(), l.pricePerUnit()))
+                                l.resource().tag().isPresent(), l.pricePerUnit(), l.buyPricePerUnit()))
                         .toList())
                 .orElse(java.util.List.of());
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(payload.signPos(), plot.plotId(), payload.manage(), listings));
@@ -655,7 +659,65 @@ public class SettlemyntsMod {
         if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()) {
             com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.grantMerchantXp(player, result.nuggetsCharged());
         }
+        // Merchant skill price bonus, as a buy-side rebate (2026-10-08) -- same per-player formula
+        // MerchantListener already applies to vanilla NPC trades, and the same "rebate after a
+        // full-price charge" mechanism its own sell-side bonus already uses (there's no per-offer
+        // discount field here to adjust beforehand, unlike a real MerchantOffer) -- the shop's own
+        // payment boxes still receive the real listing price in full, same as any other buyer.
+        int rebate = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()
+                ? (int) Math.round(result.nuggetsCharged() * com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player))
+                : 0;
+        if (rebate > 0) {
+            net.minecraft.world.item.ItemStack reward = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.GOLD_NUGGET, rebate);
+            if (!player.getInventory().add(reward)) {
+                player.drop(reward, false);
+            }
+        }
         player.sendSystemMessage(Component.literal("Bought " + result.filled() + " for " + result.nuggetsCharged() + " nuggets."));
+    }
+
+    /** "Sell N" click on the real Shop screen (2026-10-08) -- the reverse of {@link #buyFromShop}: sells the seller's held item back to the shop. */
+    private static void sellToShop(com.github.cerealklla.settlemynts.plotsign.SellToShopPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<UUID> plotId = resolvePlotIdForSign(serverLevel, payload.signPos());
+        if (plotId.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
+                ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
+                : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
+        net.minecraft.world.item.ItemStack held = player.getMainHandItem();
+        if (held.isEmpty() || !resource.matches(held)) {
+            player.sendSystemMessage(Component.literal("You need to be holding a matching item to sell it."));
+            return;
+        }
+        net.minecraft.resources.Identifier itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(held.getItem());
+        int quantity = Math.min(payload.quantity(), held.getCount());
+        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.SellResult result =
+                com.github.cerealklla.settlemynts.api.Settlemynts.sellToSettlementShop(serverLevel, plotId.get(), resource, itemId, quantity);
+        if (result.itemsSold() <= 0) {
+            player.sendSystemMessage(Component.literal("The shop can't afford to buy that right now."));
+            return;
+        }
+        held.shrink(result.itemsSold());
+        int nuggetsOwed = result.nuggetsReceived();
+        // Merchant skill price bonus, sell-side (2026-10-08) -- same mechanism/formula as
+        // MerchantListener's own vanilla-NPC sell bonus: extra nuggets paid directly, since there's
+        // no per-offer field to boost a fixed result (see that class's own doc for why).
+        if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()) {
+            nuggetsOwed += (int) Math.round(nuggetsOwed * com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player));
+        }
+        net.minecraft.world.item.ItemStack payment = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.GOLD_NUGGET, nuggetsOwed);
+        if (!player.getInventory().add(payment)) {
+            player.drop(payment, false);
+        }
+        if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()) {
+            com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.grantMerchantXp(player, nuggetsOwed);
+        }
+        player.sendSystemMessage(Component.literal("Sold " + result.itemsSold() + " for " + nuggetsOwed + " nuggets."));
     }
 
     /** A price +/- or Remove click on the Manage Shop screen. */

@@ -2,9 +2,11 @@ package com.github.cerealklla.settlemynts.zone;
 
 import java.util.Optional;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * Settlemynts' own local mirror of Yconomics' {@code shop.ShopResource} (design doc Section 14a,
@@ -23,5 +25,16 @@ public record ShopResource(Optional<TagKey<Item>> tag, Optional<Identifier> item
 
     public static ShopResource ofItem(Identifier itemId) {
         return new ShopResource(Optional.empty(), Optional.of(itemId));
+    }
+
+    /** Added 2026-10-08 for "Sell N" -- does {@code stack} fall under this listing's resource? Mirrors Yconomics' own {@code shop.ShopResource#matches} exactly. */
+    public boolean matches(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        if (tag.isPresent()) {
+            return stack.is(tag.get());
+        }
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(itemId.get());
     }
 }

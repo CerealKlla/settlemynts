@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.bridge;
 
+import com.github.cerealklla.lyfe.api.Lyfe;
 import com.github.cerealklla.lyfe.merchant.MerchantListener;
 
 import net.minecraft.server.level.ServerPlayer;
@@ -35,5 +36,17 @@ public final class LyfeMerchantBridge {
         if (nuggetsCharged > 0) {
             MerchantListener.grantXpAndRaiseCoinPurseTier(player, (int) nuggetsCharged);
         }
+    }
+
+    /**
+     * How much a Settlement Shop purchase should discount the buyer, as a fraction (2026-10-08) --
+     * the exact same per-player Merchant-skill formula {@code MerchantListener} already applies to
+     * vanilla NPC trades, now reused here so both trading systems treat a skilled Merchant
+     * identically. Deliberately separate from {@code shop.ShopPricing}'s own shared sell/buy formula
+     * -- this is a per-player runtime modifier applied on top, never baked into the stored listing
+     * price (explicit user requirement).
+     */
+    public static double getPriceBonusFraction(ServerPlayer player) {
+        return Lyfe.getMerchantPriceBonusFraction(player);
     }
 }

@@ -6,6 +6,7 @@ import com.github.cerealklla.settlemynts.plotsign.AddListingFromHeldItemPayload;
 import com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload;
 import com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload;
 import com.github.cerealklla.settlemynts.plotsign.OpenShopPayload;
+import com.github.cerealklla.settlemynts.plotsign.SellToShopPayload;
 import com.github.cerealklla.settlemynts.plotsign.ShopListingEntry;
 
 import net.minecraft.client.Minecraft;
@@ -97,6 +98,8 @@ public final class ShopScreen extends Screen {
             } else {
                 addRenderableWidget(Button.builder(Component.literal("Buy"), b -> buy(listing))
                         .bounds(centerX + 90, rowY, 60, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("Sell"), b -> sell(listing))
+                        .bounds(centerX + 155, rowY, 60, 20).build());
             }
         }
 
@@ -123,6 +126,10 @@ public final class ShopScreen extends Screen {
 
     private void buy(ShopListingEntry listing) {
         send(new BuyFromShopPayload(data.signPos(), listing.resourceKey(), listing.isTag(), 1));
+    }
+
+    private void sell(ShopListingEntry listing) {
+        send(new SellToShopPayload(data.signPos(), listing.resourceKey(), listing.isTag(), 1));
     }
 
     private void adjust(ShopListingEntry listing, int priceDelta, boolean remove) {
@@ -164,7 +171,8 @@ public final class ShopScreen extends Screen {
         int y = VIEWPORT_TOP - scrollOffset;
         for (ShopListingEntry listing : listings) {
             if (y + ROW_HEIGHT >= VIEWPORT_TOP && y <= footerTop) {
-                String line = listing.label() + " -- " + listing.pricePerUnit() + " nuggets/unit";
+                String line = listing.label() + " -- Buy " + listing.pricePerUnit() + " / Sell "
+                        + listing.buyPricePerUnit() + " nuggets/unit";
                 graphics.text(font, line, centerX - PANEL_LEFT_MARGIN + 10, y + 6, 0xFFFFFFFF);
             }
             y += ROW_HEIGHT;

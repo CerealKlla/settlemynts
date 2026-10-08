@@ -31,8 +31,13 @@ public final class YconomicsShopBridge {
         return ModList.get().isLoaded("yconomics");
     }
 
-    /** Local mirror of Yconomics' {@code shop.ShopListing} -- see {@link ShopResource}'s own class doc for why. */
-    public record ShopListingView(ShopResource resource, int pricePerUnit) {
+    /**
+     * Local mirror of Yconomics' {@code shop.ShopListing} -- see {@link ShopResource}'s own class doc
+     * for why. {@code buyPricePerUnit} (added 2026-10-08) is always {@code
+     * shop.ShopPricing#deriveBuyPrice(pricePerUnit)} -- never independently settable, so it can't
+     * drift out of the required 60%/floor/never-equal relationship.
+     */
+    public record ShopListingView(ShopResource resource, int pricePerUnit, int buyPricePerUnit) {
     }
 
     public static UUID registerShop(ServerLevel level, UUID plotId) {
@@ -70,6 +75,21 @@ public final class YconomicsShopBridge {
         return new PurchaseResult(result.itemsReceived(), result.nuggetsCharged());
     }
 
+    /** Mirror of {@link PurchaseResult} for the reverse direction -- see {@code api.Yconomics.SellResult}'s own doc. */
+    public record SellResult(int itemsSold, int nuggetsReceived) {
+    }
+
+    /**
+     * "Sell N" -- the reverse of {@link #purchase}, added 2026-10-08. {@code itemId} is the concrete
+     * item actually being sold (resolved by the caller from the seller's held stack, since
+     * {@code resource} can be tag-based).
+     */
+    public static SellResult sell(ServerLevel level, UUID shopId, ShopResource resource, net.minecraft.resources.Identifier itemId,
+                                   int quantity, List<Container> stockBoxes, List<Container> paymentBoxes) {
+        Yconomics.SellResult result = Yconomics.sellToShop(level, shopId, toYconomics(resource), itemId, quantity, stockBoxes, paymentBoxes);
+        return new SellResult(result.itemsSold(), result.nuggetsReceived());
+    }
+
     /** The buyer's own Gold Nugget balance (loose inventory + Coin Purse) -- see {@code api.Yconomics#getNuggetBalance}. */
     public static int getNuggetBalance(Player player) {
         return Yconomics.getNuggetBalance(player);
@@ -83,7 +103,8 @@ public final class YconomicsShopBridge {
     private static ShopListingView toLocal(ShopListing listing) {
         com.github.cerealklla.yconomics.shop.ShopResource r = listing.resource();
         ShopResource local = r.tag().isPresent() ? ShopResource.ofTag(r.tag().get()) : ShopResource.ofItem(r.itemId().get());
-        return new ShopListingView(local, listing.pricePerUnit());
+        return new ShopListingView(local, listing.pricePerUnit(),
+                com.github.cerealklla.yconomics.shop.ShopPricing.deriveBuyPrice(listing.pricePerUnit()));
     }
 
     private static com.github.cerealklla.yconomics.shop.ShopResource toYconomics(ShopResource resource) {
