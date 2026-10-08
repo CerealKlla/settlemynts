@@ -664,9 +664,20 @@ public class SettlemyntsMod {
         // full-price charge" mechanism its own sell-side bonus already uses (there's no per-offer
         // discount field here to adjust beforehand, unlike a real MerchantOffer) -- the shop's own
         // payment boxes still receive the real listing price in full, same as any other buyer.
-        int rebate = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()
-                ? (int) Math.round(result.nuggetsCharged() * com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player))
-                : 0;
+        // Computed per-unit via ShopPricing.effectiveBuyCost (not a flat % of the total charged) --
+        // real bug found same day: a flat-fraction rebate here independent of the sell-side bonus
+        // formula could round to the exact same number as the sell-side payout at certain prices
+        // (confirmed: sell price 3, max Merchant level -> both landed on 2), letting a skilled
+        // Merchant buy and immediately sell back at zero net cost, for infinite free XP. effectiveBuyCost/
+        // effectiveSellPayout are a matched pair that guarantee the sell payout is always strictly
+        // less than the buy cost for the same price/bonus, closing that loop by construction.
+        int rebate = 0;
+        if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded() && result.filled() > 0) {
+            int pricePerUnit = result.nuggetsCharged() / result.filled();
+            double fraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player);
+            int effectiveCostPerUnit = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveBuyCost(pricePerUnit, fraction);
+            rebate = Math.max(0, result.nuggetsCharged() - effectiveCostPerUnit * result.filled());
+        }
         if (rebate > 0) {
             net.minecraft.world.item.ItemStack reward = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.GOLD_NUGGET, rebate);
             if (!player.getInventory().add(reward)) {
@@ -706,9 +717,16 @@ public class SettlemyntsMod {
         int nuggetsOwed = result.nuggetsReceived();
         // Merchant skill price bonus, sell-side (2026-10-08) -- same mechanism/formula as
         // MerchantListener's own vanilla-NPC sell bonus: extra nuggets paid directly, since there's
-        // no per-offer field to boost a fixed result (see that class's own doc for why).
+        // no per-offer field to boost a fixed result (see that class's own doc for why). Computed
+        // per-unit via ShopPricing.effectiveSellPayout (not a flat % bonus on top of the base payout)
+        // -- that method guarantees the result is always strictly less than what the SAME player
+        // would currently pay to buy this item back, closing a real zero-cost buy/sell XP loop a
+        // naive flat-% bonus here would otherwise allow (see buyFromShop's own comment for the exact
+        // rounding case found).
         if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()) {
-            nuggetsOwed += (int) Math.round(nuggetsOwed * com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player));
+            double fraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player);
+            int effectivePayoutPerUnit = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveSellPayout(result.sellPricePerUnit(), fraction);
+            nuggetsOwed = effectivePayoutPerUnit * result.itemsSold();
         }
         net.minecraft.world.item.ItemStack payment = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.GOLD_NUGGET, nuggetsOwed);
         if (!player.getInventory().add(payment)) {

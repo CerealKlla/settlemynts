@@ -217,11 +217,11 @@ public final class Settlemynts {
     public static YconomicsShopBridge.SellResult sellToSettlementShop(ServerLevel level, UUID plotId, ShopResource resource,
                                                                        Identifier itemId, int quantity) {
         if (!YconomicsShopBridge.isAvailable()) {
-            return new YconomicsShopBridge.SellResult(0, 0);
+            return new YconomicsShopBridge.SellResult(0, 0, 0);
         }
         Optional<UUID> shopId = YconomicsShopBridge.getShopIdFor(level, plotId);
         if (shopId.isEmpty()) {
-            return new YconomicsShopBridge.SellResult(0, 0);
+            return new YconomicsShopBridge.SellResult(0, 0, 0);
         }
         List<Container> plotBoxes = resolvePlotBoxes(level, plotId);
         return YconomicsShopBridge.sell(level, shopId.get(), resource, itemId, quantity, plotBoxes, plotBoxes);

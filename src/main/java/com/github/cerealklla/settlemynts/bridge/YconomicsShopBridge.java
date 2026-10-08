@@ -76,7 +76,7 @@ public final class YconomicsShopBridge {
     }
 
     /** Mirror of {@link PurchaseResult} for the reverse direction -- see {@code api.Yconomics.SellResult}'s own doc. */
-    public record SellResult(int itemsSold, int nuggetsReceived) {
+    public record SellResult(int itemsSold, int nuggetsReceived, int sellPricePerUnit) {
     }
 
     /**
@@ -87,7 +87,21 @@ public final class YconomicsShopBridge {
     public static SellResult sell(ServerLevel level, UUID shopId, ShopResource resource, net.minecraft.resources.Identifier itemId,
                                    int quantity, List<Container> stockBoxes, List<Container> paymentBoxes) {
         Yconomics.SellResult result = Yconomics.sellToShop(level, shopId, toYconomics(resource), itemId, quantity, stockBoxes, paymentBoxes);
-        return new SellResult(result.itemsSold(), result.nuggetsReceived());
+        return new SellResult(result.itemsSold(), result.nuggetsReceived(), result.sellPricePerUnit());
+    }
+
+    /**
+     * What a player with Lyfe's Merchant-skill bonus {@code bonusFraction} actually pays to buy one
+     * unit of {@code sellPricePerUnit}'s item -- see {@code shop.ShopPricing#effectiveBuyCost}'s own
+     * doc (includes the real rounding-based exploit this guards against).
+     */
+    public static int effectiveBuyCost(int sellPricePerUnit, double bonusFraction) {
+        return com.github.cerealklla.yconomics.shop.ShopPricing.effectiveBuyCost(sellPricePerUnit, bonusFraction);
+    }
+
+    /** The mirror of {@link #effectiveBuyCost} for the sell direction -- see {@code shop.ShopPricing#effectiveSellPayout}. */
+    public static int effectiveSellPayout(int sellPricePerUnit, double bonusFraction) {
+        return com.github.cerealklla.yconomics.shop.ShopPricing.effectiveSellPayout(sellPricePerUnit, bonusFraction);
     }
 
     /** The buyer's own Gold Nugget balance (loose inventory + Coin Purse) -- see {@code api.Yconomics#getNuggetBalance}. */
