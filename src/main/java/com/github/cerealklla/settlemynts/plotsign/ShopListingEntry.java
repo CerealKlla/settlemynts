@@ -23,15 +23,28 @@ import net.minecraft.world.item.Items;
  * resource currently sit in the plot's own boxes -- the "Shop Stock" column on the Buy-mode table,
  * computed server-side via {@code api.Settlemynts#scanPlotItemStock} since the client can't read box
  * contents that aren't its own.
+ *
+ * <p>{@code effectiveBuyPrice}/{@code effectiveSellPrice} (added 2026-10-08, real question: "are the
+ * prices listed in here after being modified by player merchant skills or before?") -- {@code
+ * pricePerUnit}/{@code buyPricePerUnit} are always the raw listing prices, with no per-player
+ * Merchant-skill bonus applied (that bonus is computed as a rebate/bonus at the moment of the real
+ * transaction, see {@code SettlemyntsMod#buyFromShop}/{@code #sellToShop}'s own comments for why).
+ * These two fields are what *this specific requesting player* would actually pay/receive right now,
+ * computed server-side the same way via {@code bridge.LyfeMerchantBridge#getPriceBonusFraction} and
+ * {@code bridge.YconomicsShopBridge#effectiveBuyCost}/{@code #effectiveSellPayout} -- equal to the
+ * raw price whenever Lyfe isn't loaded or this player's Merchant bonus is currently zero.
  */
-public record ShopListingEntry(Identifier resourceKey, boolean isTag, int pricePerUnit, int buyPricePerUnit, int shopStock) {
+public record ShopListingEntry(Identifier resourceKey, boolean isTag, int pricePerUnit, int buyPricePerUnit, int shopStock,
+                                int effectiveBuyPrice, int effectiveSellPrice) {
 
     public static final Codec<ShopListingEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(ShopListingEntry::resourceKey),
             Codec.BOOL.fieldOf("is_tag").forGetter(ShopListingEntry::isTag),
             Codec.INT.fieldOf("price_per_unit").forGetter(ShopListingEntry::pricePerUnit),
             Codec.INT.fieldOf("buy_price_per_unit").forGetter(ShopListingEntry::buyPricePerUnit),
-            Codec.INT.fieldOf("shop_stock").forGetter(ShopListingEntry::shopStock)
+            Codec.INT.fieldOf("shop_stock").forGetter(ShopListingEntry::shopStock),
+            Codec.INT.fieldOf("effective_buy_price").forGetter(ShopListingEntry::effectiveBuyPrice),
+            Codec.INT.fieldOf("effective_sell_price").forGetter(ShopListingEntry::effectiveSellPrice)
     ).apply(i, ShopListingEntry::new));
 
     /**

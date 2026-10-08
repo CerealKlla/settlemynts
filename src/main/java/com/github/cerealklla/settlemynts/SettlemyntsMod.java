@@ -667,6 +667,9 @@ public class SettlemyntsMod {
             return;
         }
 
+        double merchantBonusFraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()
+                ? com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player)
+                : 0.0;
         java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = views.stream()
                 .map(l -> {
                     net.minecraft.resources.Identifier key = l.resource().tag().map(t -> t.location()).orElseGet(() -> l.resource().itemId().get());
@@ -676,7 +679,10 @@ public class SettlemyntsMod {
                                 .filter(e -> l.resource().matches(new net.minecraft.world.item.ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(e.getKey()))))
                                 .mapToInt(java.util.Map.Entry::getValue).sum()
                             : stock.getOrDefault(key, 0);
-                    return new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(key, isTag, l.pricePerUnit(), l.buyPricePerUnit(), shopStock);
+                    int effectiveBuyPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveBuyCost(l.pricePerUnit(), merchantBonusFraction);
+                    int effectiveSellPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveSellPayout(l.pricePerUnit(), merchantBonusFraction);
+                    return new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(
+                            key, isTag, l.pricePerUnit(), l.buyPricePerUnit(), shopStock, effectiveBuyPrice, effectiveSellPrice);
                 })
                 .sorted(java.util.Comparator
                         .comparing((com.github.cerealklla.settlemynts.plotsign.ShopListingEntry e) -> e.shopStock() <= 0)

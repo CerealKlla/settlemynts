@@ -7,6 +7,7 @@ import com.github.cerealklla.settlemynts.plotsign.OpenShopPayload;
 import com.github.cerealklla.settlemynts.plotsign.SellToShopPayload;
 import com.github.cerealklla.settlemynts.plotsign.ShopListingEntry;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -22,7 +23,12 @@ import net.minecraft.world.item.ItemStack;
  * see that class's own doc). One row per listing, rendered as a table (real request, 2026-10-08):
  * Item Name | Shop Stock | Player Stock | "Buy (N)" | "Sell (N)", the button labels showing the real
  * per-unit price so a player never has to click to find out -- replaces the old plain "Buy"/"Sell"
- * labels plus a separate text line.
+ * labels plus a separate text line. The listed price is always the raw, un-adjusted listing price
+ * (real question, 2026-10-08: "are the prices listed in here after being modified by player merchant
+ * skills or before?") -- when this player's Merchant-skill bonus currently makes a real difference,
+ * a second number in green is appended showing what they'd actually pay/receive right now (see
+ * {@link ShopListingEntry#effectiveBuyPrice()}/{@link ShopListingEntry#effectiveSellPrice()}'s own
+ * doc), e.g. "Buy (5) (4)".
  *
  * <p>"Shop Stock" is server-computed ({@link ShopListingEntry#shopStock()}, a snapshot as of when the
  * screen opened -- not live-updating while it's open, same as every other field here). "Player Stock"
@@ -46,7 +52,7 @@ public final class ShopScreen extends Screen {
 
     private static final int ROW_HEIGHT = 24;
     private static final int VIEWPORT_TOP = 60;
-    private static final int PANEL_LEFT_MARGIN = 260;
+    private static final int PANEL_LEFT_MARGIN = 310;
     private static final int BACKGROUND_COLOR = 0xC0101010;
 
     private static final int COL_NAME_X = -PANEL_LEFT_MARGIN + 10;
@@ -88,10 +94,10 @@ public final class ShopScreen extends Screen {
             if (rowY < VIEWPORT_TOP || rowY + ROW_HEIGHT > footerTop) {
                 continue; // Not fully inside the viewport this frame -- see class doc.
             }
-            addRenderableWidget(Button.builder(Component.literal("Buy (" + listing.pricePerUnit() + ")"), b -> buy(listing))
-                    .bounds(centerX + 90, rowY, 80, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("Sell (" + listing.buyPricePerUnit() + ")"), b -> sell(listing))
-                    .bounds(centerX + 175, rowY, 80, 20).build());
+            addRenderableWidget(Button.builder(priceLabel("Buy", listing.pricePerUnit(), listing.effectiveBuyPrice()), b -> buy(listing))
+                    .bounds(centerX + 90, rowY, 100, 20).build());
+            addRenderableWidget(Button.builder(priceLabel("Sell", listing.buyPricePerUnit(), listing.effectiveSellPrice()), b -> sell(listing))
+                    .bounds(centerX + 195, rowY, 100, 20).build());
         }
 
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
@@ -118,6 +124,15 @@ public final class ShopScreen extends Screen {
 
     private void send(CustomPacketPayload payload) {
         Minecraft.getInstance().getConnection().send(new ServerboundCustomPayloadPacket(payload));
+    }
+
+    /** "Buy (5)", or "Buy (5) (4)" in green when this player's Merchant bonus makes the real price different -- see class doc. */
+    private static Component priceLabel(String verb, int rawPrice, int effectivePrice) {
+        Component label = Component.literal(verb + " (" + rawPrice + ")");
+        if (effectivePrice != rawPrice) {
+            label = label.copy().append(Component.literal(" (" + effectivePrice + ")").withStyle(ChatFormatting.GREEN));
+        }
+        return label;
     }
 
     private int playerStockOf(ShopListingEntry listing) {
