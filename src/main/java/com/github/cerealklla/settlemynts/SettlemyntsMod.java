@@ -608,9 +608,16 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.api.Settlemynts.scanPlotItemStock(serverLevel, plot.plotId());
 
         if (payload.manage()) {
-            // Manage mode (2026-10-08): every unique item physically in the plot's boxes right now,
-            // merged with any existing listing not currently backed by box stock -- see
-            // ShopInventoryEntry's own doc for why.
+            // Manage mode (2026-10-08, redesigned per explicit spec the same day): the plot's Shop
+            // Config is the union of four sources -- (1) real listings (always shown, concrete or
+            // tag), (2) whatever's physically in the plot's boxes right now, (3) every resource the
+            // owner has explicitly saved as 0/blank before (plot.suppressedShopResources(), so that
+            // choice is remembered and the row never vanishes or gets a default reapplied -- real
+            // report: "after setting them to 0 and hitting save, the next time I open the manage
+            // screen they aren't listed at all"), and (4) every item this Zone Type's catalog
+            // recommends (so a brand-new plot/item shows a sensible starting price). A row's
+            // suggestedPrice (a pure UI pre-fill hint, see ShopInventoryEntry's own doc) is only ever
+            // non-zero when the row is neither really listed nor already explicitly suppressed.
             java.util.Map<net.minecraft.resources.Identifier, Integer> listedPriceByItem = new java.util.LinkedHashMap<>();
             java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry> tagRows = new java.util.ArrayList<>();
             for (com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView view : views) {
@@ -624,38 +631,37 @@ public class SettlemyntsMod {
                     listedPriceByItem.put(view.resource().itemId().get(), view.pricePerUnit());
                 }
             }
-            java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry> inventory = new java.util.ArrayList<>(tagRows);
-            for (java.util.Map.Entry<net.minecraft.resources.Identifier, Integer> e : stock.entrySet()) {
-                int listedPrice = listedPriceByItem.getOrDefault(e.getKey(), 0);
-                int suggestedPrice = listedPrice > 0 ? 0 : com.github.cerealklla.settlemynts.zone.ShopSeeding.suggestedPriceFor(
-                        serverLevel, plot, payload.signPos(), com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(e.getKey()));
-                inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(
-                        e.getKey(), false, e.getValue(), listedPrice, suggestedPrice));
-            }
-            // Any concrete-item listing whose boxes are currently empty still needs to show up so the
-            // owner can see/edit (or remove) it.
-            for (java.util.Map.Entry<net.minecraft.resources.Identifier, Integer> e : listedPriceByItem.entrySet()) {
-                if (!stock.containsKey(e.getKey())) {
-                    inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(e.getKey(), false, 0, e.getValue(), 0));
-                }
-            }
-            // Every catalog-recommended item is always a candidate row, even with zero box stock and
-            // no real listing -- real follow-up report, 2026-10-08: un-listing a zero-stock catalog
-            // crop made its row vanish entirely from Manage Shop with no way to ever re-list it short
-            // of physically restocking it first. Only item-backed catalog entries are merged this way
-            // (every real catalog today is item-backed, never tag-backed).
+
+            java.util.Set<net.minecraft.resources.Identifier> suppressedItems = plot.suppressedShopResources().stream()
+                    .filter(s -> !s.isTag())
+                    .map(com.github.cerealklla.settlemynts.zone.SuppressedShopResource::resourceKey)
+                    .collect(java.util.stream.Collectors.toSet());
+
+            java.util.Map<net.minecraft.resources.Identifier, Integer> catalogDefaultByItem = new java.util.LinkedHashMap<>();
             for (com.github.cerealklla.settlemynts.zone.SeedListing seed : com.github.cerealklla.settlemynts.zone.ShopSeeding.catalogSeedListings(serverLevel, plot, payload.signPos())) {
-                com.github.cerealklla.settlemynts.zone.ShopResource resource = seed.listingResource();
-                if (resource.itemId().isEmpty()) {
-                    continue;
-                }
-                net.minecraft.resources.Identifier itemId = resource.itemId().get();
-                if (stock.containsKey(itemId) || listedPriceByItem.containsKey(itemId)) {
-                    continue; // Already has a row from live stock or a real listing above.
-                }
-                inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(itemId, false, 0, 0, seed.pricePerUnit()));
+                seed.listingResource().itemId().ifPresent(itemId -> catalogDefaultByItem.put(itemId, seed.pricePerUnit()));
             }
-            inventory.sort(java.util.Comparator.comparing(com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry::label));
+
+            java.util.Set<net.minecraft.resources.Identifier> allKeys = new java.util.LinkedHashSet<>();
+            allKeys.addAll(stock.keySet());
+            allKeys.addAll(listedPriceByItem.keySet());
+            allKeys.addAll(suppressedItems);
+            allKeys.addAll(catalogDefaultByItem.keySet());
+
+            java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry> inventory = new java.util.ArrayList<>(tagRows);
+            for (net.minecraft.resources.Identifier key : allKeys) {
+                int listedPrice = listedPriceByItem.getOrDefault(key, 0);
+                boolean alreadyConfigured = listedPrice > 0 || suppressedItems.contains(key);
+                int suggestedPrice = alreadyConfigured ? 0 : catalogDefaultByItem.getOrDefault(key, 0);
+                inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(
+                        key, false, stock.getOrDefault(key, 0), listedPrice, suggestedPrice));
+            }
+            // In-stock items first (explicit request, 2026-10-08: "I'd like the list sorted so that
+            // the items that the shop plot has in stock are always at the top"), alphabetical within
+            // each group.
+            inventory.sort(java.util.Comparator
+                    .comparing((com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry e) -> e.shopStock() <= 0)
+                    .thenComparing(com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry::label));
             PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
                     payload.signPos(), plot.plotId(), true, java.util.List.of(), inventory));
             return;
@@ -672,6 +678,9 @@ public class SettlemyntsMod {
                             : stock.getOrDefault(key, 0);
                     return new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(key, isTag, l.pricePerUnit(), l.buyPricePerUnit(), shopStock);
                 })
+                .sorted(java.util.Comparator
+                        .comparing((com.github.cerealklla.settlemynts.plotsign.ShopListingEntry e) -> e.shopStock() <= 0)
+                        .thenComparing(com.github.cerealklla.settlemynts.plotsign.ShopListingEntry::label))
                 .toList();
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(payload.signPos(), plot.plotId(), false, listings, java.util.List.of()));
     }
@@ -749,7 +758,20 @@ public class SettlemyntsMod {
         player.sendSystemMessage(Component.literal("Bought " + result.filled() + " for " + result.nuggetsCharged() + " nuggets."));
     }
 
-    /** "Sell N" click on the real Shop screen (2026-10-08) -- the reverse of {@link #buyFromShop}: sells the seller's held item back to the shop. */
+    /**
+     * "Sell N" click on the real Shop screen (2026-10-08) -- the reverse of {@link #buyFromShop}:
+     * sells a matching item back to the shop out of the seller's own inventory. Originally required
+     * holding the item in the main hand; changed same day per explicit request ("selling should not
+     * require you to have the item in your hand, just take it out of the players inventory excluding
+     * from within bundles/chests within the player inventory") to scan the player's whole {@code
+     * Inventory} ({@code getContainerSize()}/{@code getItem}, the plain 36 hotbar+main slots -- this
+     * MC version's equipment (armor/offhand) lives in a separate {@code EntityEquipment} component,
+     * not this container, so it's naturally excluded too) and pull from however many stacks are
+     * needed to cover the sale. A slot's own item id is all that's ever matched against -- a Bundle
+     * or Shulker Box sitting in the inventory is just one stack of its own item type, so its *nested*
+     * contents are never inspected or touched, satisfying the exclusion without any special-case
+     * logic.
+     */
     private static void sellToShop(com.github.cerealklla.settlemynts.plotsign.SellToShopPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
@@ -762,20 +784,41 @@ public class SettlemyntsMod {
         com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
                 ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
                 : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
-        net.minecraft.world.item.ItemStack held = player.getMainHandItem();
-        if (held.isEmpty() || !resource.matches(held)) {
-            player.sendSystemMessage(Component.literal("You need to be holding a matching item to sell it."));
+        net.minecraft.world.entity.player.Inventory inventory = player.getInventory();
+        net.minecraft.resources.Identifier itemId = null;
+        int available = 0;
+        java.util.List<Integer> matchingSlots = new java.util.ArrayList<>();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            net.minecraft.world.item.ItemStack stack = inventory.getItem(slot);
+            if (stack.isEmpty() || !resource.matches(stack)) {
+                continue;
+            }
+            if (itemId == null) {
+                itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+            }
+            available += stack.getCount();
+            matchingSlots.add(slot);
+        }
+        if (itemId == null || available <= 0) {
+            player.sendSystemMessage(Component.literal("You don't have any of that to sell."));
             return;
         }
-        net.minecraft.resources.Identifier itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(held.getItem());
-        int quantity = Math.min(payload.quantity(), held.getCount());
+        int quantity = Math.min(payload.quantity(), available);
         com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.SellResult result =
                 com.github.cerealklla.settlemynts.api.Settlemynts.sellToSettlementShop(serverLevel, plotId.get(), resource, itemId, quantity);
         if (result.itemsSold() <= 0) {
             player.sendSystemMessage(Component.literal("The shop can't afford to buy that right now."));
             return;
         }
-        held.shrink(result.itemsSold());
+        int remaining = result.itemsSold();
+        for (int slot : matchingSlots) {
+            if (remaining <= 0) {
+                break;
+            }
+            int take = Math.min(remaining, inventory.getItem(slot).getCount());
+            inventory.removeItem(slot, take);
+            remaining -= take;
+        }
         int nuggetsOwed = result.nuggetsReceived();
         // Merchant skill price bonus, sell-side (2026-10-08) -- same mechanism/formula as
         // MerchantListener's own vanilla-NPC sell bonus: extra nuggets paid directly, since there's
@@ -805,8 +848,12 @@ public class SettlemyntsMod {
      * plus price +/-1/+/-10 click-spam flow entirely -- real feedback: "having to close the UI, put
      * something in your hand, then go to the manage screen to add an item is clunky"). One batch
      * covering every row the owner saw. {@code price <= 0} removes any existing listing for that
-     * resource; {@code price > 0} sets/creates it at that exact price -- floor/never-equal-buy-sell
-     * enforcement happens inside {@code shop.ShopListing}'s own constructor either way.
+     * resource and marks it as explicitly suppressed (persisted on {@link PlotRecord}, see {@link
+     * com.github.cerealklla.settlemynts.zone.SuppressedShopResource}'s own doc) so {@code
+     * #requestShop}'s row assembly remembers this choice instead of reapplying a default the next
+     * time Manage Shop opens; {@code price > 0} sets/creates the listing at that exact price and
+     * clears any stale suppression marker -- floor/never-equal-buy-sell enforcement happens inside
+     * {@code shop.ShopListing}'s own constructor either way.
      */
     private static void setShopListings(com.github.cerealklla.settlemynts.plotsign.SetShopListingsPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
@@ -823,15 +870,30 @@ public class SettlemyntsMod {
             return;
         }
         UUID shopId = plot.shopId().get();
+        java.util.List<com.github.cerealklla.settlemynts.zone.SuppressedShopResource> suppressed =
+                new java.util.ArrayList<>(plot.suppressedShopResources());
+        boolean suppressionChanged = false;
         for (com.github.cerealklla.settlemynts.plotsign.ShopListingUpdate update : payload.updates()) {
             com.github.cerealklla.settlemynts.zone.ShopResource resource = update.isTag()
                     ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, update.resourceKey()))
                     : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(update.resourceKey());
+            com.github.cerealklla.settlemynts.zone.SuppressedShopResource marker =
+                    new com.github.cerealklla.settlemynts.zone.SuppressedShopResource(update.resourceKey(), update.isTag());
             if (update.price() <= 0) {
                 com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.removeListing(serverLevel, shopId, resource);
+                if (!suppressed.contains(marker)) {
+                    suppressed.add(marker);
+                    suppressionChanged = true;
+                }
             } else {
                 com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.setListingPrice(serverLevel, shopId, resource, update.price());
+                if (suppressed.remove(marker)) {
+                    suppressionChanged = true;
+                }
             }
+        }
+        if (suppressionChanged) {
+            resolved.get().core().updatePlot(plot.withSuppressedShopResources(suppressed));
         }
         player.sendSystemMessage(Component.literal("Shop listings updated."));
     }
@@ -1205,7 +1267,7 @@ public class SettlemyntsMod {
                     Map.of(Identifier.withDefaultNamespace("gold_nugget"), 1), 1L));
         }
 
-        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty());
+        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of());
         core.addPlot(plotRecord);
 
         // Plot Config Sign (design doc Section 14a) -- spawned unconditionally, next to the same

@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.zone;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -49,10 +50,18 @@ import net.minecraft.resources.Identifier;
  * at Finalize (unlike {@code constructionBoxId}/{@code billId} -- a plot may never become a shop at
  * all, so there's nothing to eagerly create). {@code Optional.empty()} until then, or permanently
  * if Yconomics isn't loaded.
+ *
+ * <p>{@code suppressedShopResources} (added 2026-10-08) -- the plot's Shop Config's explicit "set to
+ * 0/blank and saved" rows, per the design spec: "if a previous row was blank/0, then it should still
+ * be blank/0, so the player doesn't have to re-ignore items every single time." See {@link
+ * SuppressedShopResource}'s own class doc for why this can't just live inside a real Yconomics
+ * listing. Empty by default (including every pre-existing saved plot, via the codec's default-value
+ * fallback).
  */
 public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long cartographyrPlotEntityId,
                           long cartographyrBufferEntityId, Optional<BlockPos> boxPos, Optional<UUID> constructionBoxId,
-                          Optional<UUID> owner, Optional<UUID> billId, Optional<UUID> shopId) {
+                          Optional<UUID> owner, Optional<UUID> billId, Optional<UUID> shopId,
+                          List<SuppressedShopResource> suppressedShopResources) {
 
     public static final Codec<PlotRecord> CODEC = RecordCodecBuilder.create(i -> i.group(
             UUIDUtil.CODEC.fieldOf("plot_id").forGetter(PlotRecord::plotId),
@@ -64,12 +73,19 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
             UUIDUtil.CODEC.optionalFieldOf("construction_box_id").forGetter(PlotRecord::constructionBoxId),
             UUIDUtil.CODEC.optionalFieldOf("owner").forGetter(PlotRecord::owner),
             UUIDUtil.CODEC.optionalFieldOf("bill_id").forGetter(PlotRecord::billId),
-            UUIDUtil.CODEC.optionalFieldOf("shop_id").forGetter(PlotRecord::shopId)
+            UUIDUtil.CODEC.optionalFieldOf("shop_id").forGetter(PlotRecord::shopId),
+            SuppressedShopResource.CODEC.listOf().optionalFieldOf("suppressed_shop_resources", List.of()).forGetter(PlotRecord::suppressedShopResources)
     ).apply(i, PlotRecord::new));
 
     /** Stamps in a freshly-registered Shop id -- see this record's own class doc on when this happens. */
     public PlotRecord withShopId(UUID shopId) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, Optional.of(shopId));
+                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources);
+    }
+
+    /** Overwrites the full Shop Config suppression set -- see {@code SettlemyntsMod#setShopListings}, the only caller. */
+    public PlotRecord withSuppressedShopResources(List<SuppressedShopResource> suppressedShopResources) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources));
     }
 }
