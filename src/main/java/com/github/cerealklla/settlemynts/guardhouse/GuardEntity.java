@@ -67,6 +67,16 @@ import net.minecraft.world.level.storage.ValueOutput;
  * is needed anywhere in the guard's inventory -- {@code LivingEntity#getProjectile} defaults (via
  * NeoForge's {@code LivingGetProjectileEvent}) to an empty stack when nothing handles the event, and
  * {@code ProjectileUtil#getMobArrow} already tolerates that by falling back to a plain vanilla Arrow.
+ *
+ * <p><b>Follow-up real bug, same day</b>: a live report that this still didn't work on Production
+ * (despite working on the Dev Server) traced to {@link #readAdditionalSaveData} -- a guard reloaded
+ * from a save file (every server restart) restores its equipment via a raw
+ * {@code EntityEquipment#setAll} call (confirmed against the decompiled {@code LivingEntity} source)
+ * that bypasses {@code setItemSlot}/{@link #onEquipItem} entirely, so {@link #reassessWeaponGoal()}
+ * never re-ran for any guard that existed before this feature shipped -- only brand-new spawns (which
+ * go through {@link #equipFromLoadout}'s real {@code setItemSlot} calls) picked it up. Fixed by
+ * calling {@link #reassessWeaponGoal()} again at the end of {@link #readAdditionalSaveData}, after
+ * {@code super}'s call has actually populated real equipment from NBT.
  */
 public class GuardEntity extends PathfinderMob implements RangedAttackMob {
 
@@ -221,6 +231,17 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         super.readAdditionalSaveData(input);
         settlementCoreId = input.read("SettlementCoreId", UUIDUtil.CODEC).orElse(null);
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
+        // Real bug found live, 2026-10-08: a guard that existed before the ranged-attack fix shot
+        // nothing on Production even after redeploying, while a freshly-spawned guard worked fine on
+        // the Dev Server. Root cause: LivingEntity#readAdditionalSaveData (just called via super,
+        // above) restores equipment with a raw EntityEquipment#setAll, confirmed against the
+        // decompiled source to never call setItemSlot/onEquipItem at all -- so reloading a saved guard
+        // from disk (every server restart) silently skips reassessWeaponGoal() entirely, leaving it
+        // stuck on whatever goal the constructor picked (always meleeGoal, since equipment is still
+        // empty at that point -- see the constructor). Calling it again here, now that super's call
+        // has actually populated real equipment from NBT, fixes every already-saved guard on its next
+        // load -- not just newly-spawned ones.
+        reassessWeaponGoal();
     }
 
     /**
