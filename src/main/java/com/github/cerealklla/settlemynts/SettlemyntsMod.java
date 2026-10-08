@@ -451,6 +451,10 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload.STREAM_CODEC,
                 (payload, context) -> adjustListing(payload, context));
 
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetListingPricePayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SetListingPricePayload.STREAM_CODEC,
+                (payload, context) -> setListingPriceExact(payload, context));
+
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AddListingFromHeldItemPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.AddListingFromHeldItemPayload.STREAM_CODEC,
                 (payload, context) -> addListingFromHeldItem(payload, context));
@@ -765,6 +769,31 @@ public class SettlemyntsMod {
                 .findFirst().orElse(1);
         int newPrice = Math.max(1, currentPrice + payload.priceDelta());
         com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.setListingPrice(serverLevel, plot.shopId().get(), resource, newPrice);
+    }
+
+    /**
+     * "Confirm" on {@code client.EditListingPriceScreen} (2026-10-08) -- sets a listing to an exact
+     * typed price instead of nudging it by a delta (real feedback: typing a price beats spam-clicking
+     * +10 a thousand times for a high-value item). Same permission check and floor/never-equal
+     * enforcement (inside {@code shop.ShopListing}'s own constructor) as {@link #adjustListing}.
+     */
+    private static void setListingPriceExact(com.github.cerealklla.settlemynts.plotsign.SetListingPricePayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        if (plot.shopId().isEmpty()) {
+            return;
+        }
+        com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
+                ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
+                : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
+        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.setListingPrice(serverLevel, plot.shopId().get(), resource, Math.max(1, payload.newPrice()));
     }
 
     /** "Add Listing (Held Item)" click -- the resource is whatever's in the player's main hand. */

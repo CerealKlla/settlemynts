@@ -28,10 +28,13 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
  * BuyFromShopPayload}'s own doc) -- feedback is a chat message, no further screen state to track
  * client-side, so this screen never needs a round trip back to itself after a buy.
  *
- * <p><b>Manage mode</b> (owner/Town-Planner only, server-checked): the same rows gain "-10/-1/+1/+10"
- * price buttons and a "Remove" button, plus an "Add Listing (Held Item)" button at the bottom. Every
- * action re-requests the full listing (closing and reopening this same screen via a fresh {@link
- * OpenShopPayload}) rather than predicting the new state client-side -- simplest correct option.
+ * <p><b>Manage mode</b> (owner/Town-Planner only, server-checked): the same rows gain an "Edit Price"
+ * button (opens {@link EditListingPriceScreen}, a direct numeric entry -- replaced the original
+ * "-10/-1/+1/+10" click-spam buttons 2026-10-08, real feedback: "what if they want to sell a T5 sword
+ * for 10,000 nuggets? You want them to spam click +10 1000 times?") and a "Remove" button, plus an
+ * "Add Listing (Held Item)" button at the bottom. Every action re-requests the full listing (closing
+ * and reopening this same screen via a fresh {@link OpenShopPayload}) rather than predicting the new
+ * state client-side -- simplest correct option.
  *
  * <p><b>Scrolling + solid background, 2026-10-05</b> (real report: listings ran off the bottom of
  * the screen with no way to reach them, and had no backing panel to read against) -- same
@@ -46,7 +49,7 @@ public final class ShopScreen extends Screen {
 
     private static final int ROW_HEIGHT = 24;
     private static final int VIEWPORT_TOP = 50;
-    private static final int PANEL_LEFT_MARGIN = 230;
+    private static final int PANEL_LEFT_MARGIN = 260;
     private static final int BACKGROUND_COLOR = 0xC0101010;
 
     private final OpenShopPayload data;
@@ -85,16 +88,10 @@ public final class ShopScreen extends Screen {
                 continue; // Not fully inside the viewport this frame -- see class doc.
             }
             if (data.manage()) {
-                addRenderableWidget(Button.builder(Component.literal("-10"), b -> adjust(listing, -10, false))
-                        .bounds(centerX - 150, rowY, 30, 20).build());
-                addRenderableWidget(Button.builder(Component.literal("-1"), b -> adjust(listing, -1, false))
-                        .bounds(centerX - 118, rowY, 30, 20).build());
-                addRenderableWidget(Button.builder(Component.literal("+1"), b -> adjust(listing, 1, false))
-                        .bounds(centerX + 88, rowY, 30, 20).build());
-                addRenderableWidget(Button.builder(Component.literal("+10"), b -> adjust(listing, 10, false))
-                        .bounds(centerX + 120, rowY, 30, 20).build());
+                addRenderableWidget(Button.builder(Component.literal("Edit Price"), b -> editPrice(listing))
+                        .bounds(centerX + 90, rowY, 90, 20).build());
                 addRenderableWidget(Button.builder(Component.literal("Remove"), b -> adjust(listing, 0, true))
-                        .bounds(centerX + 155, rowY, 60, 20).build());
+                        .bounds(centerX + 185, rowY, 60, 20).build());
             } else {
                 addRenderableWidget(Button.builder(Component.literal("Buy"), b -> buy(listing))
                         .bounds(centerX + 90, rowY, 60, 20).build());
@@ -130,6 +127,10 @@ public final class ShopScreen extends Screen {
 
     private void sell(ShopListingEntry listing) {
         send(new SellToShopPayload(data.signPos(), listing.resourceKey(), listing.isTag(), 1));
+    }
+
+    private void editPrice(ShopListingEntry listing) {
+        Minecraft.getInstance().setScreen(new EditListingPriceScreen(data, listing));
     }
 
     private void adjust(ShopListingEntry listing, int priceDelta, boolean remove) {
