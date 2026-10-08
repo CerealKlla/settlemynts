@@ -35,6 +35,12 @@ import net.minecraft.world.item.ItemStack;
  * to whether a "Sell" can actually be paid out) and the viewing player's own balance ({@link
  * OpenShopPayload#playerGoldNuggets()}, loose inventory + Coin Purse).
  *
+ * <p>Column/button spacing was widened once for the green adjusted-price suffix above, then real
+ * feedback the same day ("the shop GUI stretches horizontally off the screen, there appears to be
+ * lots of space between columns we could collapse a bit") -- {@code PANEL_LEFT_MARGIN} and every
+ * column/button x-offset were tightened back down (total panel width roughly 450px instead of 620)
+ * rather than widened further, since the real problem was excess whitespace, not too little room.
+ *
  * <p>"Shop Stock" is server-computed ({@link ShopListingEntry#shopStock()}, a snapshot as of when the
  * screen opened -- not live-updating while it's open, same as every other field here). "Player Stock"
  * is computed fresh every frame from the client's own inventory ({@link ShopListingEntry#matches}),
@@ -57,12 +63,15 @@ public final class ShopScreen extends Screen {
 
     private static final int ROW_HEIGHT = 24;
     private static final int VIEWPORT_TOP = 72;
-    private static final int PANEL_LEFT_MARGIN = 310;
+    private static final int PANEL_LEFT_MARGIN = 225;
     private static final int BACKGROUND_COLOR = 0xC0101010;
 
     private static final int COL_NAME_X = -PANEL_LEFT_MARGIN + 10;
-    private static final int COL_SHOP_STOCK_X = -40;
-    private static final int COL_PLAYER_STOCK_X = 50;
+    private static final int COL_SHOP_STOCK_X = -70;
+    private static final int COL_PLAYER_STOCK_X = -10;
+    private static final int BUY_BUTTON_X = 35;
+    private static final int SELL_BUTTON_X = 130;
+    private static final int PRICE_BUTTON_WIDTH = 90;
 
     private final OpenShopPayload data;
     private int scrollOffset;
@@ -100,9 +109,9 @@ public final class ShopScreen extends Screen {
                 continue; // Not fully inside the viewport this frame -- see class doc.
             }
             addRenderableWidget(Button.builder(priceLabel("Buy", listing.pricePerUnit(), listing.effectiveBuyPrice()), b -> buy(listing))
-                    .bounds(centerX + 90, rowY, 100, 20).build());
+                    .bounds(centerX + BUY_BUTTON_X, rowY, PRICE_BUTTON_WIDTH, 20).build());
             addRenderableWidget(Button.builder(priceLabel("Sell", listing.buyPricePerUnit(), listing.effectiveSellPrice()), b -> sell(listing))
-                    .bounds(centerX + 195, rowY, 100, 20).build());
+                    .bounds(centerX + SELL_BUTTON_X, rowY, PRICE_BUTTON_WIDTH, 20).build());
         }
 
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
