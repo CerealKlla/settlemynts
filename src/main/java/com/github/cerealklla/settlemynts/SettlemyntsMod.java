@@ -639,6 +639,22 @@ public class SettlemyntsMod {
                     inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(e.getKey(), false, 0, e.getValue(), 0));
                 }
             }
+            // Every catalog-recommended item is always a candidate row, even with zero box stock and
+            // no real listing -- real follow-up report, 2026-10-08: un-listing a zero-stock catalog
+            // crop made its row vanish entirely from Manage Shop with no way to ever re-list it short
+            // of physically restocking it first. Only item-backed catalog entries are merged this way
+            // (every real catalog today is item-backed, never tag-backed).
+            for (com.github.cerealklla.settlemynts.zone.SeedListing seed : com.github.cerealklla.settlemynts.zone.ShopSeeding.catalogSeedListings(serverLevel, plot, payload.signPos())) {
+                com.github.cerealklla.settlemynts.zone.ShopResource resource = seed.listingResource();
+                if (resource.itemId().isEmpty()) {
+                    continue;
+                }
+                net.minecraft.resources.Identifier itemId = resource.itemId().get();
+                if (stock.containsKey(itemId) || listedPriceByItem.containsKey(itemId)) {
+                    continue; // Already has a row from live stock or a real listing above.
+                }
+                inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(itemId, false, 0, 0, seed.pricePerUnit()));
+            }
             inventory.sort(java.util.Comparator.comparing(com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry::label));
             PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
                     payload.signPos(), plot.plotId(), true, java.util.List.of(), inventory));

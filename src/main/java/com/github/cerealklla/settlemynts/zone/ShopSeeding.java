@@ -172,17 +172,29 @@ public final class ShopSeeding {
      * replaced the old always-on auto-listing behavior.
      */
     public static int suggestedPriceFor(ServerLevel level, PlotRecord plot, BlockPos plotAnchor, ShopResource resource) {
-        Optional<ShopSeedCatalog> catalog = ShopSeedCatalogRegistry.get(plot.zoneTypeId());
-        if (catalog.isEmpty()) {
-            return 0;
-        }
-        int tier = resolveTier(level, plot);
-        for (SeedListing seed : catalog.get().seedListingsFor(level, plotAnchor, tier)) {
+        for (SeedListing seed : catalogSeedListings(level, plot, plotAnchor)) {
             if (sameResource(seed.listingResource(), resource)) {
                 return seed.pricePerUnit();
             }
         }
         return 0;
+    }
+
+    /**
+     * Every {@link SeedListing} this plot's Zone Type's catalog recommends at its current Tier, or
+     * an empty list if it has none -- the full candidate set {@code client.ManageShopScreen} shows a
+     * row for even with zero box stock and no real listing (added 2026-10-08, real follow-up report:
+     * after explicitly un-listing a catalog crop at zero stock, its row vanished from Manage Shop
+     * entirely with no way to re-list it short of physically restocking it first). A catalog
+     * recommendation is always shown as a candidate row -- see {@code SettlemyntsMod#requestShop}'s
+     * manage-mode row assembly for how this merges with real listings/live box stock.
+     */
+    public static List<SeedListing> catalogSeedListings(ServerLevel level, PlotRecord plot, BlockPos plotAnchor) {
+        Optional<ShopSeedCatalog> catalog = ShopSeedCatalogRegistry.get(plot.zoneTypeId());
+        if (catalog.isEmpty()) {
+            return List.of();
+        }
+        return catalog.get().seedListingsFor(level, plotAnchor, resolveTier(level, plot));
     }
 
     /** See {@code bridge.BlueprintsConstructionBridge#resolveTier}'s own doc for why 1 is the safe default. */
