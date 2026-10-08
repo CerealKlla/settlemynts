@@ -20,16 +20,23 @@ import net.minecraft.world.item.Items;
  * not just the ones already listed -- plus any existing listing (concrete or tag-based) that isn't
  * backed by current box stock, so an owner can still see/edit a listing even if its boxes are
  * temporarily empty. {@code listedPrice} of {@code 0} means "not currently listed" -- the Manage
- * screen renders that as a blank price box, and typing {@code 0}/leaving it blank on Save removes any
- * existing listing for this resource (see {@code SetShopListingsPayload}'s own doc).
+ * screen renders that as a blank price box (falling back to {@code suggestedPrice} if nonzero), and
+ * typing {@code 0}/leaving it blank on Save removes any existing listing for this resource (see
+ * {@code SetShopListingsPayload}'s own doc). {@code suggestedPrice} (added 2026-10-08, replacing the
+ * old always-on catalog auto-listing -- see {@code zone.ShopSeeding#applyCatalog}'s own doc for the
+ * real bug this fixed) is a pure UI hint, never a real price: {@code zone.ShopSeeding#suggestedPriceFor}'s
+ * catalog recommendation for a never-yet-listed resource, shown only as the Sell Cost box's initial
+ * value so a brand-new item isn't blank with no guidance -- it has no effect at all once a real
+ * listing exists ({@code listedPrice > 0}) or once the owner has explicitly saved it blank.
  */
-public record ShopInventoryEntry(Identifier resourceKey, boolean isTag, int shopStock, int listedPrice) {
+public record ShopInventoryEntry(Identifier resourceKey, boolean isTag, int shopStock, int listedPrice, int suggestedPrice) {
 
     public static final Codec<ShopInventoryEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(ShopInventoryEntry::resourceKey),
             Codec.BOOL.fieldOf("is_tag").forGetter(ShopInventoryEntry::isTag),
             Codec.INT.fieldOf("shop_stock").forGetter(ShopInventoryEntry::shopStock),
-            Codec.INT.fieldOf("listed_price").forGetter(ShopInventoryEntry::listedPrice)
+            Codec.INT.fieldOf("listed_price").forGetter(ShopInventoryEntry::listedPrice),
+            Codec.INT.fieldOf("suggested_price").forGetter(ShopInventoryEntry::suggestedPrice)
     ).apply(i, ShopInventoryEntry::new));
 
     /** Same translated-name/"Any &lt;Tag&gt;" convention as {@link ShopListingEntry#label()}. */

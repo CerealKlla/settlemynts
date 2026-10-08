@@ -619,23 +619,24 @@ public class SettlemyntsMod {
                     int tagStock = stock.entrySet().stream()
                             .filter(e -> view.resource().matches(new net.minecraft.world.item.ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(e.getKey()))))
                             .mapToInt(java.util.Map.Entry::getValue).sum();
-                    tagRows.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(tag.location(), true, tagStock, view.pricePerUnit()));
+                    tagRows.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(tag.location(), true, tagStock, view.pricePerUnit(), 0));
                 } else {
                     listedPriceByItem.put(view.resource().itemId().get(), view.pricePerUnit());
                 }
             }
             java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry> inventory = new java.util.ArrayList<>(tagRows);
-            java.util.Set<net.minecraft.resources.Identifier> seen = new java.util.HashSet<>(listedPriceByItem.keySet());
-            seen.retainAll(stock.keySet());
             for (java.util.Map.Entry<net.minecraft.resources.Identifier, Integer> e : stock.entrySet()) {
+                int listedPrice = listedPriceByItem.getOrDefault(e.getKey(), 0);
+                int suggestedPrice = listedPrice > 0 ? 0 : com.github.cerealklla.settlemynts.zone.ShopSeeding.suggestedPriceFor(
+                        serverLevel, plot, payload.signPos(), com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(e.getKey()));
                 inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(
-                        e.getKey(), false, e.getValue(), listedPriceByItem.getOrDefault(e.getKey(), 0)));
+                        e.getKey(), false, e.getValue(), listedPrice, suggestedPrice));
             }
             // Any concrete-item listing whose boxes are currently empty still needs to show up so the
             // owner can see/edit (or remove) it.
             for (java.util.Map.Entry<net.minecraft.resources.Identifier, Integer> e : listedPriceByItem.entrySet()) {
                 if (!stock.containsKey(e.getKey())) {
-                    inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(e.getKey(), false, 0, e.getValue()));
+                    inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(e.getKey(), false, 0, e.getValue(), 0));
                 }
             }
             inventory.sort(java.util.Comparator.comparing(com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry::label));

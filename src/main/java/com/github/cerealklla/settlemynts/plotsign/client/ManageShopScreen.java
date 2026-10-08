@@ -26,6 +26,10 @@ import net.minecraft.resources.Identifier;
  * numeric "Sell Cost" {@link EditBox} instead of a separate held-item-add flow or +/-1/+/-10 buttons
  * (both already replaced once this session, see {@code ShopListingEntry}'s own history). Blank/zero
  * means "don't list it"; "Save Changes" sends every row in one {@link SetShopListingsPayload} batch.
+ * A never-yet-listed row is pre-filled with {@link ShopInventoryEntry#suggestedPrice()} (the Zone
+ * Type's catalog recommendation, if any) rather than a real price -- see that field's own doc for
+ * why this replaced the old always-on catalog auto-listing (real bug: an owner's explicit removal
+ * kept getting silently reinstated on the next open).
  *
  * <p><b>Why edited values are kept in {@link #pendingValues} rather than just read off the live
  * {@link EditBox} widgets</b>: this screen uses the same scissor-clip scroll pattern as {@code
@@ -51,7 +55,8 @@ public final class ManageShopScreen extends Screen {
         super(Component.literal("Manage Shop"));
         this.data = data;
         for (ShopInventoryEntry entry : data.inventory()) {
-            pendingValues.put(entry.resourceKey(), entry.listedPrice() > 0 ? Integer.toString(entry.listedPrice()) : "");
+            int prefill = entry.listedPrice() > 0 ? entry.listedPrice() : entry.suggestedPrice();
+            pendingValues.put(entry.resourceKey(), prefill > 0 ? Integer.toString(prefill) : "");
         }
     }
 

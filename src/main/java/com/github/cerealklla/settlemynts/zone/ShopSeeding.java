@@ -55,7 +55,7 @@ public final class ShopSeeding {
         UUID shopId = YconomicsShopBridge.registerShop(level, plot.plotId());
         PlotRecord seeded = plot.withShopId(shopId);
         core.updatePlot(seeded);
-        applyCatalog(level, seeded, shopId, catalog.get(), plotAnchor, 1);
+        applyCatalog(level, seeded, catalog.get(), plotAnchor, 1);
     }
 
     public static void syncToCatalog(ServerLevel level, PlotRecord plot, GhostTownHallCoreEntity core, BlockPos plotAnchor) {
@@ -66,14 +66,11 @@ public final class ShopSeeding {
         if (catalog.isEmpty()) {
             return;
         }
-        UUID shopId;
-        if (plot.shopId().isPresent()) {
-            shopId = plot.shopId().get();
-        } else {
-            shopId = YconomicsShopBridge.registerShop(level, plot.plotId());
+        if (plot.shopId().isEmpty()) {
+            UUID shopId = YconomicsShopBridge.registerShop(level, plot.plotId());
             core.updatePlot(plot.withShopId(shopId));
         }
-        applyCatalog(level, plot, shopId, catalog.get(), plotAnchor, resolveTier(level, plot));
+        applyCatalog(level, plot, catalog.get(), plotAnchor, resolveTier(level, plot));
     }
 
     private static final int NUGGET_FLOOR = 200;
@@ -127,35 +124,29 @@ public final class ShopSeeding {
     }
 
     /**
-     * Registers a catalog's listings (item + price) so an owner doesn't have to manually "Add
-     * Listing (Held Item)" one at a time for every single good a shop of this Zone Type would
-     * plausibly sell (explicit user request/clarification, 2026-10-06: "configure the shop...so a
-     * player doesn't have to set up every single item for every shop"). <b>Never deposits any stock
-     * for a resource-backed listing</b> -- a real correction the same day: an earlier pass had this
-     * auto-filling boxes with a full stack of every listed good, which was never asked for ("I said
-     * gold and research notes/recipes get restocked overnight, nothing else. The idea is that the
-     * plot would have to buy from other plots/settlements if it needed such resources"). A listing
-     * with no stock in the plot's boxes simply shows "Out of stock" until something -- an NPC
-     * worker, the owner, another plot's trade -- actually puts real goods there. The one exception
-     * is a stack-backed seed ({@link SeedListing#ofStacks}, Lyfe's Research/Recipe Notes) -- those
-     * ARE deposited here (and re-topped-up nightly, see {@link #restockAtMidnight}), since a Note
-     * has no other possible source: nothing else in the game can ever produce one.
+     * Tops up stock-backed catalog goods (Lyfe's Research/Recipe Notes) -- the only ones with no
+     * other possible source in the game. <b>No longer auto-creates or auto-prices any listing</b>
+     * (changed 2026-10-08, real bug report: a Farm plot's catalog-seeded crops kept reappearing in
+     * the real Shop every time Manage Shop reopened, even after the owner explicitly blanked their
+     * Sell Cost and saved -- this ran additively on every open with no way to tell "never seeded"
+     * apart from "owner removed this on purpose"). The fix the user actually asked for: "just don't
+     * set default prices on items that currently have no cost. That way the first time the player
+     * can exclude them, and every time after that it'll respect that." A listing is now created
+     * *only* by an explicit {@code client.ManageShopScreen} "Save Changes" -- see {@link
+     * #suggestedPriceFor} for how that screen still shows a catalog-appropriate starting price as a
+     * pure UI suggestion, never auto-applied. Resource-backed seeds (plain goods) never deposit
+     * stock either way -- see {@link #suggestedPriceFor}'s sibling doc below for the stock-vs-listing
+     * split this class has kept since 2026-10-06.
      */
-    private static void applyCatalog(ServerLevel level, PlotRecord plot, UUID shopId, ShopSeedCatalog catalog, BlockPos plotAnchor, int tier) {
+    private static void applyCatalog(ServerLevel level, PlotRecord plot, ShopSeedCatalog catalog, BlockPos plotAnchor, int tier) {
         List<SeedListing> seedListings = catalog.seedListingsFor(level, plotAnchor, tier);
         if (seedListings.isEmpty()) {
             return;
         }
-        List<YconomicsShopBridge.ShopListingView> existing = YconomicsShopBridge.getListings(level, shopId);
         List<Container> plotBoxes = null;
         for (SeedListing seed : seedListings) {
-            ShopResource resource = seed.listingResource();
-            boolean alreadyListed = existing.stream().anyMatch(l -> sameResource(l.resource(), resource));
-            if (!alreadyListed) {
-                YconomicsShopBridge.setListingPrice(level, shopId, resource, seed.pricePerUnit());
-            }
             if (seed.stacksToDeposit().isEmpty()) {
-                continue; // Resource-backed -- listing registered above, but never auto-stocked.
+                continue; // Resource-backed -- no listing, no stock; see this method's own class doc.
             }
             if (plotBoxes == null) {
                 plotBoxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plot.plotId());
@@ -163,13 +154,35 @@ public final class ShopSeeding {
             if (plotBoxes.isEmpty()) {
                 continue;
             }
-            int currentStock = countStock(plotBoxes, resource);
+            int currentStock = countStock(plotBoxes, seed.listingResource());
             int topUp = Math.max(0, seed.stockCount() - currentStock);
             if (topUp <= 0) {
                 continue;
             }
             depositStock(plotBoxes, seed, topUp);
         }
+    }
+
+    /**
+     * The catalog's recommended starting price for {@code resource}, or {@code 0} if this Zone Type
+     * has no catalog or no entry for it -- a pure UI suggestion for {@code
+     * client.ManageShopScreen}'s Sell Cost box, used only to pre-fill a row that has no real listing
+     * yet. Never applied automatically; the row only becomes a real listing if the owner leaves (or
+     * types) a price and clicks "Save Changes" -- see {@link #applyCatalog}'s own doc for why this
+     * replaced the old always-on auto-listing behavior.
+     */
+    public static int suggestedPriceFor(ServerLevel level, PlotRecord plot, BlockPos plotAnchor, ShopResource resource) {
+        Optional<ShopSeedCatalog> catalog = ShopSeedCatalogRegistry.get(plot.zoneTypeId());
+        if (catalog.isEmpty()) {
+            return 0;
+        }
+        int tier = resolveTier(level, plot);
+        for (SeedListing seed : catalog.get().seedListingsFor(level, plotAnchor, tier)) {
+            if (sameResource(seed.listingResource(), resource)) {
+                return seed.pricePerUnit();
+            }
+        }
+        return 0;
     }
 
     /** See {@code bridge.BlueprintsConstructionBridge#resolveTier}'s own doc for why 1 is the safe default. */
