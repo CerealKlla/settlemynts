@@ -648,6 +648,13 @@ public class SettlemyntsMod {
                 player.getInventory().placeItemBackInInventory(stack);
             }
         }
+        // Merchant skill XP for the buyer (2026-10-08, real report: "not gaining merchant xp for
+        // buying from a shop") -- Lyfe's own MerchantListener only ever grants XP from
+        // TradeWithVillagerEvent (NPC trades), which never fires for a player Shop purchase. 1:1
+        // XP per nugget charged, matching that listener's own baseline-value convention.
+        if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()) {
+            com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.grantMerchantXp(player, result.nuggetsCharged());
+        }
         player.sendSystemMessage(Component.literal("Bought " + result.filled() + " for " + result.nuggetsCharged() + " nuggets."));
     }
 

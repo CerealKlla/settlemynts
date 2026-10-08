@@ -180,6 +180,12 @@ dependencies {
     // reasoning.
     compileOnly files("../Yconomics/build/libs/yconomics-${yconomics_version}.jar")
 
+    // Lyfe is an optional soft dependency (see neoforge.mods.toml) -- a Settlement Shop purchase
+    // grants the buyer Merchant skill XP (see bridge.LyfeMerchantBridge), gated behind
+    // ModList.get().isLoaded("lyfe") at runtime, same isolation pattern as Blueprynts/Protectyons/
+    // Kyt/Yconomics above. compileOnly only, same reasoning.
+    compileOnly files("../Lyfe/build/libs/lyfe-${lyfe_version}.jar")
+
     // Plain JUnit 5 for pure Codec round-trip tests (no live server/registry needed, so
     // ModDevGradle's neoForge { unitTest {} } FML-bootstrap machinery isn't required here).
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'
