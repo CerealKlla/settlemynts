@@ -14,9 +14,11 @@ import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
@@ -25,9 +27,15 @@ import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.ai.goal.RangedBowAttackGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
+import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -45,8 +53,22 @@ import net.minecraft.world.level.storage.ValueOutput;
  * simplification -- and fights back against hostile {@link Monster}s only -- deliberately never
  * targets players, no raid/PvP scope this pass (see the guard-spawning plan's own "explicitly out
  * of scope" list, not an oversight).
+ *
+ * <p><b>Ranged attack, added 2026-10-08</b> (real report: a guard equipped with a bow via a Kyt
+ * held it but never fired) -- the original slice only ever added a plain {@code MeleeAttackGoal},
+ * with no {@link RangedAttackMob} implementation at all, so a bow in the mainhand slot was purely
+ * decorative. Mirrors vanilla's own {@code AbstractSkeleton} pattern exactly (confirmed against the
+ * real decompiled source before writing this): {@link #bowGoal}/{@link #meleeGoal} are swapped in
+ * and out of the goal selector by {@link #reassessWeaponGoal()} based on whatever's currently in the
+ * mainhand slot, called from {@link #onEquipItem} every time equipment changes (so re-equipping via
+ * {@link #equipFromLoadout} picks the right goal automatically) -- never added statically in {@link
+ * #registerGoals()}, since that runs from {@code Mob}'s own constructor before this class's field
+ * initializers exist yet, same reason vanilla's own class structures it this way. No real Arrow item
+ * is needed anywhere in the guard's inventory -- {@code LivingEntity#getProjectile} defaults (via
+ * NeoForge's {@code LivingGetProjectileEvent}) to an empty stack when nothing handles the event, and
+ * {@code ProjectileUtil#getMobArrow} already tolerates that by falling back to a plain vanilla Arrow.
  */
-public class GuardEntity extends PathfinderMob {
+public class GuardEntity extends PathfinderMob implements RangedAttackMob {
 
     // Safety-net threshold for the underground-correction check in customServerAiStep -- "don't want
     // them going underground intentionally" (GuardPatrolAreaGoal's own target-picking already only
@@ -54,11 +76,15 @@ public class GuardEntity extends PathfinderMob {
     // explicit user request, both halves of the same ask.
     private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
 
+    private final RangedBowAttackGoal<GuardEntity> bowGoal = new RangedBowAttackGoal<>(this, 1.0, 20, 15.0F);
+    private final MeleeAttackGoal meleeGoal = new MeleeAttackGoal(this, 1.0, false);
+
     private UUID settlementCoreId;
     private UUID plotId;
 
     public GuardEntity(EntityType<? extends GuardEntity> type, Level level) {
         super(type, level);
+        this.reassessWeaponGoal();
     }
 
     /** Called once by {@link GuardSpawnTicker} right after construction -- which plot's "Town Proper" buffer this guard patrols (see {@link #resolvePatrolArea}). */
@@ -109,13 +135,59 @@ public class GuardEntity extends PathfinderMob {
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(1, new FloatGoal(this));
-        this.goalSelector.addGoal(2, new MeleeAttackGoal(this, 1.0, false));
+        // Priority 2 (melee vs. bow) is deliberately NOT added here -- see reassessWeaponGoal().
         this.goalSelector.addGoal(3, new GuardPatrolAreaGoal(this, 0.8));
         this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
 
         this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
         this.targetSelector.addGoal(2, new GuardSightGoal(this));
+    }
+
+    /**
+     * Swaps {@link #meleeGoal}/{@link #bowGoal} into goal-selector priority 2 based on whatever's
+     * currently in the mainhand slot -- same pattern/call sites as vanilla's {@code
+     * AbstractSkeleton#reassessWeaponGoal}. Safe to call before {@code settlementCoreId}/{@code
+     * plotId} are set (constructor time) and repeatedly during {@link #equipFromLoadout} (once per
+     * slot, via {@link #onEquipItem}) -- idempotent either way.
+     */
+    private void reassessWeaponGoal() {
+        if (this.level() == null || this.level().isClientSide()) {
+            return;
+        }
+        this.goalSelector.removeGoal(this.meleeGoal);
+        this.goalSelector.removeGoal(this.bowGoal);
+        if (getMainHandItem().getItem() instanceof BowItem) {
+            this.goalSelector.addGoal(2, this.bowGoal);
+        } else {
+            this.goalSelector.addGoal(2, this.meleeGoal);
+        }
+    }
+
+    @Override
+    public void onEquipItem(EquipmentSlot slot, ItemStack oldStack, ItemStack stack) {
+        super.onEquipItem(slot, oldStack, stack);
+        if (slot == EquipmentSlot.MAINHAND) {
+            reassessWeaponGoal();
+        }
+    }
+
+    /** Mirrors {@code AbstractSkeleton#performRangedAttack} (confirmed against the real decompiled source). */
+    @Override
+    public void performRangedAttack(LivingEntity target, float power) {
+        ItemStack bowItem = getMainHandItem();
+        ItemStack projectileStack = getProjectile(bowItem);
+        AbstractArrow arrow = ProjectileUtil.getMobArrow(this, projectileStack, power, bowItem);
+        double xd = target.getX() - getX();
+        double yd = target.getY(0.3333333333333333) - arrow.getY();
+        double zd = target.getZ() - getZ();
+        double distanceToTarget = Math.sqrt(xd * xd + zd * zd);
+        if (level() instanceof ServerLevel serverLevel) {
+            Projectile.spawnProjectileUsingShoot(
+                    arrow, serverLevel, projectileStack, xd, yd + distanceToTarget * 0.2F, zd, 1.6F,
+                    14 - serverLevel.getDifficulty().getId() * 4);
+        }
+        playSound(SoundEvents.SKELETON_SHOOT, 1.0F, 1.0F / (getRandom().nextFloat() * 0.4F + 0.8F));
     }
 
     /**
