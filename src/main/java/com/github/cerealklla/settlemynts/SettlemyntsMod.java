@@ -447,17 +447,9 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.SellToShopPayload.STREAM_CODEC,
                 (payload, context) -> sellToShop(payload, context));
 
-        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload.TYPE,
-                com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload.STREAM_CODEC,
-                (payload, context) -> adjustListing(payload, context));
-
-        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetListingPricePayload.TYPE,
-                com.github.cerealklla.settlemynts.plotsign.SetListingPricePayload.STREAM_CODEC,
-                (payload, context) -> setListingPriceExact(payload, context));
-
-        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AddListingFromHeldItemPayload.TYPE,
-                com.github.cerealklla.settlemynts.plotsign.AddListingFromHeldItemPayload.STREAM_CODEC,
-                (payload, context) -> addListingFromHeldItem(payload, context));
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetShopListingsPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SetShopListingsPayload.STREAM_CODEC,
+                (payload, context) -> setShopListings(payload, context));
 
         // "Press G to open shop" proximity prompt (2026-10-05) -- see PlotShopProximityTicker's own doc.
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.TYPE,
@@ -608,14 +600,63 @@ public class SettlemyntsMod {
         // this Zone Type has no registered catalog. See ShopSeeding's own doc.
         com.github.cerealklla.settlemynts.zone.ShopSeeding.syncToCatalog(serverLevel, plot, core, payload.signPos());
         plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(plot);
-        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = plot.shopId()
-                .map(shopId -> com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(serverLevel, shopId).stream()
-                        .map(l -> new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(
-                                l.resource().tag().map(t -> t.location()).orElseGet(() -> l.resource().itemId().get()),
-                                l.resource().tag().isPresent(), l.pricePerUnit(), l.buyPricePerUnit()))
-                        .toList())
+
+        java.util.List<com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView> views = plot.shopId()
+                .map(shopId -> com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(serverLevel, shopId))
                 .orElse(java.util.List.of());
-        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(payload.signPos(), plot.plotId(), payload.manage(), listings));
+        java.util.Map<net.minecraft.resources.Identifier, Integer> stock =
+                com.github.cerealklla.settlemynts.api.Settlemynts.scanPlotItemStock(serverLevel, plot.plotId());
+
+        if (payload.manage()) {
+            // Manage mode (2026-10-08): every unique item physically in the plot's boxes right now,
+            // merged with any existing listing not currently backed by box stock -- see
+            // ShopInventoryEntry's own doc for why.
+            java.util.Map<net.minecraft.resources.Identifier, Integer> listedPriceByItem = new java.util.LinkedHashMap<>();
+            java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry> tagRows = new java.util.ArrayList<>();
+            for (com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView view : views) {
+                if (view.resource().tag().isPresent()) {
+                    net.minecraft.tags.TagKey<net.minecraft.world.item.Item> tag = view.resource().tag().get();
+                    int tagStock = stock.entrySet().stream()
+                            .filter(e -> view.resource().matches(new net.minecraft.world.item.ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(e.getKey()))))
+                            .mapToInt(java.util.Map.Entry::getValue).sum();
+                    tagRows.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(tag.location(), true, tagStock, view.pricePerUnit()));
+                } else {
+                    listedPriceByItem.put(view.resource().itemId().get(), view.pricePerUnit());
+                }
+            }
+            java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry> inventory = new java.util.ArrayList<>(tagRows);
+            java.util.Set<net.minecraft.resources.Identifier> seen = new java.util.HashSet<>(listedPriceByItem.keySet());
+            seen.retainAll(stock.keySet());
+            for (java.util.Map.Entry<net.minecraft.resources.Identifier, Integer> e : stock.entrySet()) {
+                inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(
+                        e.getKey(), false, e.getValue(), listedPriceByItem.getOrDefault(e.getKey(), 0)));
+            }
+            // Any concrete-item listing whose boxes are currently empty still needs to show up so the
+            // owner can see/edit (or remove) it.
+            for (java.util.Map.Entry<net.minecraft.resources.Identifier, Integer> e : listedPriceByItem.entrySet()) {
+                if (!stock.containsKey(e.getKey())) {
+                    inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(e.getKey(), false, 0, e.getValue()));
+                }
+            }
+            inventory.sort(java.util.Comparator.comparing(com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry::label));
+            PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
+                    payload.signPos(), plot.plotId(), true, java.util.List.of(), inventory));
+            return;
+        }
+
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = views.stream()
+                .map(l -> {
+                    net.minecraft.resources.Identifier key = l.resource().tag().map(t -> t.location()).orElseGet(() -> l.resource().itemId().get());
+                    boolean isTag = l.resource().tag().isPresent();
+                    int shopStock = isTag
+                            ? stock.entrySet().stream()
+                                .filter(e -> l.resource().matches(new net.minecraft.world.item.ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(e.getKey()))))
+                                .mapToInt(java.util.Map.Entry::getValue).sum()
+                            : stock.getOrDefault(key, 0);
+                    return new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(key, isTag, l.pricePerUnit(), l.buyPricePerUnit(), shopStock);
+                })
+                .toList();
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(payload.signPos(), plot.plotId(), false, listings, java.util.List.of()));
     }
 
     /** "Buy N" click on the real Shop screen -- charges the buyer only for whatever was actually filled. */
@@ -742,62 +783,15 @@ public class SettlemyntsMod {
         player.sendSystemMessage(Component.literal("Sold " + result.itemsSold() + " for " + nuggetsOwed + " nuggets."));
     }
 
-    /** A price +/- or Remove click on the Manage Shop screen. */
-    private static void adjustListing(com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload payload, IPayloadContext context) {
-        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
-            return;
-        }
-        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
-        if (resolved.isEmpty()) {
-            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
-            return;
-        }
-        PlotRecord plot = resolved.get().plot();
-        if (plot.shopId().isEmpty()) {
-            return;
-        }
-        com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
-                ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
-                : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
-        if (payload.remove()) {
-            com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.removeListing(serverLevel, plot.shopId().get(), resource);
-            return;
-        }
-        int currentPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(serverLevel, plot.shopId().get()).stream()
-                .filter(l -> l.resource().equals(resource))
-                .map(com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView::pricePerUnit)
-                .findFirst().orElse(1);
-        int newPrice = Math.max(1, currentPrice + payload.priceDelta());
-        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.setListingPrice(serverLevel, plot.shopId().get(), resource, newPrice);
-    }
-
     /**
-     * "Confirm" on {@code client.EditListingPriceScreen} (2026-10-08) -- sets a listing to an exact
-     * typed price instead of nudging it by a delta (real feedback: typing a price beats spam-clicking
-     * +10 a thousand times for a high-value item). Same permission check and floor/never-equal
-     * enforcement (inside {@code shop.ShopListing}'s own constructor) as {@link #adjustListing}.
+     * "Save Changes" on {@code client.ManageShopScreen} (2026-10-08, replacing the old held-item-add
+     * plus price +/-1/+/-10 click-spam flow entirely -- real feedback: "having to close the UI, put
+     * something in your hand, then go to the manage screen to add an item is clunky"). One batch
+     * covering every row the owner saw. {@code price <= 0} removes any existing listing for that
+     * resource; {@code price > 0} sets/creates it at that exact price -- floor/never-equal-buy-sell
+     * enforcement happens inside {@code shop.ShopListing}'s own constructor either way.
      */
-    private static void setListingPriceExact(com.github.cerealklla.settlemynts.plotsign.SetListingPricePayload payload, IPayloadContext context) {
-        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
-            return;
-        }
-        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
-        if (resolved.isEmpty()) {
-            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
-            return;
-        }
-        PlotRecord plot = resolved.get().plot();
-        if (plot.shopId().isEmpty()) {
-            return;
-        }
-        com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
-                ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
-                : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
-        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.setListingPrice(serverLevel, plot.shopId().get(), resource, Math.max(1, payload.newPrice()));
-    }
-
-    /** "Add Listing (Held Item)" click -- the resource is whatever's in the player's main hand. */
-    private static void addListingFromHeldItem(com.github.cerealklla.settlemynts.plotsign.AddListingFromHeldItemPayload payload, IPayloadContext context) {
+    private static void setShopListings(com.github.cerealklla.settlemynts.plotsign.SetShopListingsPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
@@ -811,15 +805,18 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("This Shop isn't registered yet -- reopen the menu first."));
             return;
         }
-        net.minecraft.world.item.ItemStack held = player.getMainHandItem();
-        if (held.isEmpty()) {
-            player.sendSystemMessage(Component.literal("Hold the item you want to sell first."));
-            return;
+        UUID shopId = plot.shopId().get();
+        for (com.github.cerealklla.settlemynts.plotsign.ShopListingUpdate update : payload.updates()) {
+            com.github.cerealklla.settlemynts.zone.ShopResource resource = update.isTag()
+                    ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, update.resourceKey()))
+                    : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(update.resourceKey());
+            if (update.price() <= 0) {
+                com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.removeListing(serverLevel, shopId, resource);
+            } else {
+                com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.setListingPrice(serverLevel, shopId, resource, update.price());
+            }
         }
-        net.minecraft.resources.Identifier itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(held.getItem());
-        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.setListingPrice(serverLevel, plot.shopId().get(),
-                com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(itemId), 1);
-        player.sendSystemMessage(Component.literal("Listed " + itemId + " at 1 nugget/unit -- reopen Manage Shop to adjust the price."));
+        player.sendSystemMessage(Component.literal("Shop listings updated."));
     }
 
     private record PlotRecordAndCore(PlotRecord plot, GhostTownHallCoreEntity core) {

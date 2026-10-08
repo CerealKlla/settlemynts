@@ -15,7 +15,7 @@ import net.minecraft.resources.Identifier;
  * BuyFromShopPayload}). {@code resourceKey}/{@code isTag} identify which existing listing is being
  * sold back (a shop only ever buys back something it already sells, see {@code
  * api.Yconomics#sellToShop}'s own doc) -- the concrete item actually sold is resolved server-side
- * from the seller's own held stack, same trust model as {@code AddListingFromHeldItemPayload}.
+ * from the seller's own held stack rather than trusting anything sent from the client.
  */
 public record SellToShopPayload(BlockPos signPos, Identifier resourceKey, boolean isTag, int quantity) implements CustomPacketPayload {
 

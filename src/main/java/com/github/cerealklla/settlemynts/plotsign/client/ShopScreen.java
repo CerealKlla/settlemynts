@@ -2,8 +2,6 @@ package com.github.cerealklla.settlemynts.plotsign.client;
 
 import java.util.List;
 
-import com.github.cerealklla.settlemynts.plotsign.AddListingFromHeldItemPayload;
-import com.github.cerealklla.settlemynts.plotsign.AdjustListingPayload;
 import com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload;
 import com.github.cerealklla.settlemynts.plotsign.OpenShopPayload;
 import com.github.cerealklla.settlemynts.plotsign.SellToShopPayload;
@@ -16,25 +14,24 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.world.item.ItemStack;
 
 /**
- * The real Shop screen (design doc Section 14a, 2026-10-05) -- replaces the old "Enter Shop"/
- * "Manage Shop" chat-message placeholder now that a real Yconomics-backed Shop exists (see
- * {@code bridge.YconomicsShopBridge}). One screen, two modes driven by {@link OpenShopPayload#manage()}:
+ * The real Shop screen, Buy mode only (design doc Section 14a, 2026-10-05; split out of Manage mode
+ * into {@code ManageShopScreen} 2026-10-08, since the two now have genuinely different data shapes --
+ * see that class's own doc). One row per listing, rendered as a table (real request, 2026-10-08):
+ * Item Name | Shop Stock | Player Stock | "Buy (N)" | "Sell (N)", the button labels showing the real
+ * per-unit price so a player never has to click to find out -- replaces the old plain "Buy"/"Sell"
+ * labels plus a separate text line.
  *
- * <p><b>Buy mode</b>: one row per listing (nice item name + price), a single "Buy" button (buys 1 --
- * the "Buy 10" option was removed 2026-10-05 per explicit request). The server charges the buyer's
- * own Gold Nugget balance only for however much stock was actually available (see {@code
- * BuyFromShopPayload}'s own doc) -- feedback is a chat message, no further screen state to track
- * client-side, so this screen never needs a round trip back to itself after a buy.
+ * <p>"Shop Stock" is server-computed ({@link ShopListingEntry#shopStock()}, a snapshot as of when the
+ * screen opened -- not live-updating while it's open, same as every other field here). "Player Stock"
+ * is computed fresh every frame from the client's own inventory ({@link ShopListingEntry#matches}),
+ * so it never goes stale while the screen is open even as the player buys/sells.
  *
- * <p><b>Manage mode</b> (owner/Town-Planner only, server-checked): the same rows gain an "Edit Price"
- * button (opens {@link EditListingPriceScreen}, a direct numeric entry -- replaced the original
- * "-10/-1/+1/+10" click-spam buttons 2026-10-08, real feedback: "what if they want to sell a T5 sword
- * for 10,000 nuggets? You want them to spam click +10 1000 times?") and a "Remove" button, plus an
- * "Add Listing (Held Item)" button at the bottom. Every action re-requests the full listing (closing
- * and reopening this same screen via a fresh {@link OpenShopPayload}) rather than predicting the new
- * state client-side -- simplest correct option.
+ * <p>The server charges the buyer's own Gold Nugget balance only for however much stock was actually
+ * available -- feedback is a chat message, no further screen state to track client-side, so this
+ * screen never needs a round trip back to itself after a buy or sell.
  *
  * <p><b>Scrolling + solid background, 2026-10-05</b> (real report: listings ran off the bottom of
  * the screen with no way to reach them, and had no backing panel to read against) -- same
@@ -48,15 +45,19 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 public final class ShopScreen extends Screen {
 
     private static final int ROW_HEIGHT = 24;
-    private static final int VIEWPORT_TOP = 50;
+    private static final int VIEWPORT_TOP = 60;
     private static final int PANEL_LEFT_MARGIN = 260;
     private static final int BACKGROUND_COLOR = 0xC0101010;
+
+    private static final int COL_NAME_X = -PANEL_LEFT_MARGIN + 10;
+    private static final int COL_SHOP_STOCK_X = -40;
+    private static final int COL_PLAYER_STOCK_X = 50;
 
     private final OpenShopPayload data;
     private int scrollOffset;
 
     public ShopScreen(OpenShopPayload data) {
-        super(Component.literal(data.manage() ? "Manage Shop" : "Shop"));
+        super(Component.literal("Shop"));
         this.data = data;
     }
 
@@ -67,7 +68,7 @@ public final class ShopScreen extends Screen {
     }
 
     private int footerTop() {
-        return data.manage() ? height - 70 : height - 40;
+        return height - 40;
     }
 
     private int maxScrollOffset() {
@@ -87,28 +88,14 @@ public final class ShopScreen extends Screen {
             if (rowY < VIEWPORT_TOP || rowY + ROW_HEIGHT > footerTop) {
                 continue; // Not fully inside the viewport this frame -- see class doc.
             }
-            if (data.manage()) {
-                addRenderableWidget(Button.builder(Component.literal("Edit Price"), b -> editPrice(listing))
-                        .bounds(centerX + 90, rowY, 90, 20).build());
-                addRenderableWidget(Button.builder(Component.literal("Remove"), b -> adjust(listing, 0, true))
-                        .bounds(centerX + 185, rowY, 60, 20).build());
-            } else {
-                addRenderableWidget(Button.builder(Component.literal("Buy"), b -> buy(listing))
-                        .bounds(centerX + 90, rowY, 60, 20).build());
-                addRenderableWidget(Button.builder(Component.literal("Sell"), b -> sell(listing))
-                        .bounds(centerX + 155, rowY, 60, 20).build());
-            }
-        }
-
-        int y = footerTop + 6;
-        if (data.manage()) {
-            addRenderableWidget(Button.builder(Component.literal("Add Listing (Held Item)"), b -> addFromHeldItem())
-                    .bounds(centerX - 110, y, 220, 20).build());
-            y += 30;
+            addRenderableWidget(Button.builder(Component.literal("Buy (" + listing.pricePerUnit() + ")"), b -> buy(listing))
+                    .bounds(centerX + 90, rowY, 80, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Sell (" + listing.buyPricePerUnit() + ")"), b -> sell(listing))
+                    .bounds(centerX + 175, rowY, 80, 20).build());
         }
 
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
-                .bounds(centerX - 50, y, 100, 20).build());
+                .bounds(centerX - 50, footerTop + 6, 100, 20).build());
     }
 
     @Override
@@ -129,28 +116,30 @@ public final class ShopScreen extends Screen {
         send(new SellToShopPayload(data.signPos(), listing.resourceKey(), listing.isTag(), 1));
     }
 
-    private void editPrice(ShopListingEntry listing) {
-        Minecraft.getInstance().setScreen(new EditListingPriceScreen(data, listing));
-    }
-
-    private void adjust(ShopListingEntry listing, int priceDelta, boolean remove) {
-        send(new AdjustListingPayload(data.signPos(), listing.resourceKey(), listing.isTag(), priceDelta, remove));
-        onClose();
-    }
-
-    private void addFromHeldItem() {
-        send(new AddListingFromHeldItemPayload(data.signPos()));
-        onClose();
-    }
-
     private void send(CustomPacketPayload payload) {
         Minecraft.getInstance().getConnection().send(new ServerboundCustomPayloadPacket(payload));
+    }
+
+    private int playerStockOf(ShopListingEntry listing) {
+        var player = Minecraft.getInstance().player;
+        if (player == null) {
+            return 0;
+        }
+        var inventory = player.getInventory();
+        int total = 0;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (listing.matches(stack)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
     }
 
     @Override
     public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         int centerX = width / 2;
-        graphics.fill(centerX - PANEL_LEFT_MARGIN, VIEWPORT_TOP - 4, centerX + PANEL_LEFT_MARGIN, footerTop() + 4, BACKGROUND_COLOR);
+        graphics.fill(centerX - PANEL_LEFT_MARGIN, VIEWPORT_TOP - 24, centerX + PANEL_LEFT_MARGIN, footerTop() + 4, BACKGROUND_COLOR);
     }
 
     @Override
@@ -159,6 +148,10 @@ public final class ShopScreen extends Screen {
         int centerX = width / 2;
         int titleWidth = font.width(title);
         graphics.text(font, title, centerX - titleWidth / 2, 20, 0xFFFFFFFF);
+
+        graphics.text(font, "Item", centerX + COL_NAME_X, VIEWPORT_TOP - 16, 0xFFAAAAAA);
+        graphics.text(font, "Shop Stock", centerX + COL_SHOP_STOCK_X, VIEWPORT_TOP - 16, 0xFFAAAAAA);
+        graphics.text(font, "Player Stock", centerX + COL_PLAYER_STOCK_X, VIEWPORT_TOP - 16, 0xFFAAAAAA);
 
         List<ShopListingEntry> listings = data.listings();
         int footerTop = footerTop();
@@ -172,9 +165,9 @@ public final class ShopScreen extends Screen {
         int y = VIEWPORT_TOP - scrollOffset;
         for (ShopListingEntry listing : listings) {
             if (y + ROW_HEIGHT >= VIEWPORT_TOP && y <= footerTop) {
-                String line = listing.label() + " -- Buy " + listing.pricePerUnit() + " / Sell "
-                        + listing.buyPricePerUnit() + " nuggets/unit";
-                graphics.text(font, line, centerX - PANEL_LEFT_MARGIN + 10, y + 6, 0xFFFFFFFF);
+                graphics.text(font, listing.label(), centerX + COL_NAME_X, y + 6, 0xFFFFFFFF);
+                graphics.text(font, Integer.toString(listing.shopStock()), centerX + COL_SHOP_STOCK_X, y + 6, 0xFFFFFFFF);
+                graphics.text(font, Integer.toString(playerStockOf(listing)), centerX + COL_PLAYER_STOCK_X, y + 6, 0xFFFFFFFF);
             }
             y += ROW_HEIGHT;
         }

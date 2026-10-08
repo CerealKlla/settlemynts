@@ -3,7 +3,9 @@ package com.github.cerealklla.settlemynts.api;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
@@ -26,9 +28,11 @@ import com.github.cerealklla.settlemynts.zone.ZoneType;
 import com.github.cerealklla.settlemynts.zone.ZoneTypeRegistry;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.fml.ModList;
 
@@ -225,6 +229,27 @@ public final class Settlemynts {
         }
         List<Container> plotBoxes = resolvePlotBoxes(level, plotId);
         return YconomicsShopBridge.sell(level, shopId.get(), resource, itemId, quantity, plotBoxes, plotBoxes);
+    }
+
+    /**
+     * Every unique item currently sitting in {@code plotId}'s own boxes, summed across all of them --
+     * drives {@code client.ManageShopScreen}'s scan-the-plot listing editor (2026-10-08, replacing the
+     * old "hold the item, walk to the sign" add-listing flow). Concrete item ids only (a box slot is
+     * always a concrete stack, never a tag) -- an existing tag-based listing is merged in separately by
+     * the caller, since this method has no way to know which tag(s) an owner might care about.
+     */
+    public static Map<Identifier, Integer> scanPlotItemStock(ServerLevel level, UUID plotId) {
+        Map<Identifier, Integer> counts = new LinkedHashMap<>();
+        for (Container box : resolvePlotBoxes(level, plotId)) {
+            for (int slot = 0; slot < box.getContainerSize(); slot++) {
+                ItemStack stack = box.getItem(slot);
+                if (!stack.isEmpty()) {
+                    Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+                    counts.merge(id, stack.getCount(), Integer::sum);
+                }
+            }
+        }
+        return counts;
     }
 
     /** Every real container located within {@code plotId}'s own polygon -- the same "all boxes on the plot" pool {@code bills.PlotBoxDiscovery} already reads for rent. */

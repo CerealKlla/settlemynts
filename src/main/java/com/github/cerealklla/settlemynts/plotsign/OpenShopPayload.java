@@ -17,22 +17,29 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
 /**
- * Server-to-client: opens {@code client.ShopScreen} (design doc Section 14a, 2026-10-05) --
- * replaces the old chat-message-only {@code PlotShopPlaceholderPayload} reply. {@code manage}
- * mirrors the request -- the same screen renders Buy or Manage controls depending on it.
+ * Server-to-client: opens {@code client.ShopScreen} (buy mode) or {@code client.ManageShopScreen}
+ * (manage mode) -- design doc Section 14a, 2026-10-05, split into two screens 2026-10-08. {@code
+ * manage} mirrors the request and picks which screen opens. {@code listings} (buy mode) is every
+ * currently-listed resource with its live price and stock; {@code inventory} (manage mode, added
+ * 2026-10-08) is every unique item physically sitting in the plot's boxes right now, plus any
+ * existing listing not currently backed by box stock -- see {@code ShopInventoryEntry}'s own doc.
+ * Only one of the two lists is ever populated for a given reply (the other is empty) since a single
+ * request is always either buy or manage, never both.
  */
-public record OpenShopPayload(BlockPos signPos, UUID plotId, boolean manage, List<ShopListingEntry> listings) implements CustomPacketPayload {
+public record OpenShopPayload(BlockPos signPos, UUID plotId, boolean manage, List<ShopListingEntry> listings, List<ShopInventoryEntry> inventory) implements CustomPacketPayload {
 
     public static final Type<OpenShopPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_shop"));
 
     private static final Codec<List<ShopListingEntry>> LISTINGS_CODEC = ShopListingEntry.CODEC.listOf();
+    private static final Codec<List<ShopInventoryEntry>> INVENTORY_CODEC = ShopInventoryEntry.CODEC.listOf();
 
     public static final StreamCodec<ByteBuf, OpenShopPayload> STREAM_CODEC = StreamCodec.composite(
             ByteBufCodecs.fromCodec(BlockPos.CODEC), OpenShopPayload::signPos,
             ByteBufCodecs.fromCodec(UUIDUtil.CODEC), OpenShopPayload::plotId,
             ByteBufCodecs.BOOL, OpenShopPayload::manage,
             ByteBufCodecs.fromCodec(LISTINGS_CODEC), OpenShopPayload::listings,
+            ByteBufCodecs.fromCodec(INVENTORY_CODEC), OpenShopPayload::inventory,
             OpenShopPayload::new);
 
     @Override

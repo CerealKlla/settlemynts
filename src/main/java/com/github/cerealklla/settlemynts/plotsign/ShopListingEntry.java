@@ -19,15 +19,19 @@ import net.minecraft.world.item.Items;
  * specific item ({@code resourceKey} is an item id) -- same split as {@code zone.ShopResource}.
  * {@code buyPricePerUnit} (added 2026-10-08) is what the shop pays to buy this item back -- always
  * {@code shop.ShopPricing#deriveBuyPrice(pricePerUnit)}, computed server-side so the client never
- * needs its own copy of that formula.
+ * needs its own copy of that formula. {@code shopStock} (added 2026-10-08) is how many units of this
+ * resource currently sit in the plot's own boxes -- the "Shop Stock" column on the Buy-mode table,
+ * computed server-side via {@code api.Settlemynts#scanPlotItemStock} since the client can't read box
+ * contents that aren't its own.
  */
-public record ShopListingEntry(Identifier resourceKey, boolean isTag, int pricePerUnit, int buyPricePerUnit) {
+public record ShopListingEntry(Identifier resourceKey, boolean isTag, int pricePerUnit, int buyPricePerUnit, int shopStock) {
 
     public static final Codec<ShopListingEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(ShopListingEntry::resourceKey),
             Codec.BOOL.fieldOf("is_tag").forGetter(ShopListingEntry::isTag),
             Codec.INT.fieldOf("price_per_unit").forGetter(ShopListingEntry::pricePerUnit),
-            Codec.INT.fieldOf("buy_price_per_unit").forGetter(ShopListingEntry::buyPricePerUnit)
+            Codec.INT.fieldOf("buy_price_per_unit").forGetter(ShopListingEntry::buyPricePerUnit),
+            Codec.INT.fieldOf("shop_stock").forGetter(ShopListingEntry::shopStock)
     ).apply(i, ShopListingEntry::new));
 
     /**
@@ -46,5 +50,16 @@ public record ShopListingEntry(Identifier resourceKey, boolean isTag, int priceP
         }
         Item item = BuiltInRegistries.ITEM.getValue(resourceKey);
         return item != Items.AIR ? new ItemStack(item).getHoverName().getString() : resourceKey.toString();
+    }
+
+    /** Does {@code stack} fall under this listing -- used client-side to compute the "Player Stock" column without a round trip. */
+    public boolean matches(ItemStack stack) {
+        if (stack.isEmpty()) {
+            return false;
+        }
+        if (isTag) {
+            return stack.is(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, resourceKey));
+        }
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(resourceKey);
     }
 }

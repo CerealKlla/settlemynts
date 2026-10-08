@@ -173,7 +173,9 @@ public class SettlemyntsModClient {
 
         ClientPlotSignRequests.takePendingShop().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(new ShopScreen(request));
+                Minecraft.getInstance().setScreen(request.manage()
+                        ? new com.github.cerealklla.settlemynts.plotsign.client.ManageShopScreen(request)
+                        : new ShopScreen(request));
             }
         });
     }
