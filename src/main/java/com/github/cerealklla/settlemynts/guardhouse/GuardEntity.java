@@ -29,7 +29,7 @@ import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.ai.goal.RangedBowAttackGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
-import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.Projectile;
@@ -50,7 +50,8 @@ import net.minecraft.world.level.storage.ValueOutput;
  * binds it to its garrison's own plot via {@link #setPlotIdentity}. Patrols its own plot's real
  * "Town Proper" buffer polygon (see {@link #resolvePatrolArea}, {@code GuardPatrolAreaGoal}) --
  * not a plain fixed-radius circle, which was this feature's first, deliberately-flagged v1
- * simplification -- and fights back against hostile {@link Monster}s only -- deliberately never
+ * simplification -- and fights back against hostile mobs (any {@link Enemy}, ground or flying --
+ * see {@code GuardSightGoal}'s own 2026-10-08 fix) only -- deliberately never
  * targets players, no raid/PvP scope this pass (see the guard-spawning plan's own "explicitly out
  * of scope" list, not an oversight).
  *

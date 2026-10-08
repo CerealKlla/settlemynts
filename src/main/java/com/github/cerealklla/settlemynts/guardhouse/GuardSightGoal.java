@@ -7,25 +7,36 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.phys.AABB;
 
 /**
  * Replaces vanilla's flat-range {@code NearestAttackableTargetGoal} with a light-dependent sight
- * radius (explicit user spec, 2026-10-06): a guard spots a hostile {@link Monster} from {@link
- * #DARK_SIGHT_RANGE_BLOCKS} away if the monster's own position is dark, or {@link
- * #LIT_SIGHT_RANGE_BLOCKS} away if it's lit. "Lit" reuses {@link
- * net.minecraft.world.level.LevelReader#getMaxLocalRawBrightness}, the same effective-brightness
- * value (combined block + time-adjusted sky light) vanilla itself already uses to decide "safe
- * from hostile spawns," at the same {@link #LIT_LIGHT_THRESHOLD} vanilla uses for that -- so
- * daylight counts as "lit" just as much as a nearby torch, not just placed light sources.
+ * radius (explicit user spec, 2026-10-06): a guard spots a hostile {@link Enemy} from {@link
+ * #DARK_SIGHT_RANGE_BLOCKS} away if its position is dark, or {@link #LIT_SIGHT_RANGE_BLOCKS} away
+ * if it's lit. "Lit" reuses {@link net.minecraft.world.level.LevelReader#getMaxLocalRawBrightness},
+ * the same effective-brightness value (combined block + time-adjusted sky light) vanilla itself
+ * already uses to decide "safe from hostile spawns," at the same {@link #LIT_LIGHT_THRESHOLD}
+ * vanilla uses for that -- so daylight counts as "lit" just as much as a nearby torch, not just
+ * placed light sources.
+ *
+ * <p><b>Real bug found and fixed, 2026-10-08</b> (live report: "guards use their bows against
+ * ground enemies but are completely ignoring phantoms"): this originally filtered candidates by
+ * {@code Monster.class}, vanilla's ground-hostile base class. Confirmed against the decompiled
+ * source that flying hostiles are siblings, not subclasses, of {@code Monster} -- {@code Phantom
+ * extends Mob implements Enemy} directly, never touching {@code Monster} at all, while {@code
+ * Monster} itself is only {@code implements Enemy}. {@link Enemy} (a marker interface, not an
+ * entity class) is the one thing every hostile mob actually shares, ground or flying, so the
+ * candidate scan now filters a plain {@code LivingEntity} search by {@code instanceof Enemy}
+ * instead of restricting the search itself to {@code Monster.class}.
  *
  * <p>Scans a flat {@link #MAX_SEARCH_RADIUS_BLOCKS}-sized box (the larger of the two ranges) every
- * {@link #COOLDOWN_TICKS}, picks the nearest qualifying, visible Monster, and assigns it directly
+ * {@link #COOLDOWN_TICKS}, picks the nearest qualifying, visible hostile, and assigns it directly
  * via {@link GuardEntity#setTarget} -- this goal never "runs" itself (no {@code start()}/{@code
- * stop()} behavior of its own), it only ever hands off to {@code MeleeAttackGoal} once a target is
- * set. Retaliating against whatever just hit the guard (regardless of range/light) stays a
- * completely separate, pre-existing mechanic via {@code HurtByTargetGoal}, untouched here.
+ * stop()} behavior of its own), it only ever hands off to {@code MeleeAttackGoal}/{@code
+ * RangedBowAttackGoal} once a target is set. Retaliating against whatever just hit the guard
+ * (regardless of range/light) stays a completely separate, pre-existing mechanic via {@code
+ * HurtByTargetGoal}, untouched here.
  */
 public class GuardSightGoal extends Goal {
 
@@ -56,19 +67,20 @@ public class GuardSightGoal extends Goal {
         if (!(guard.level() instanceof ServerLevel level)) {
             return false;
         }
-        Monster found = findNearestVisibleMonster(level);
+        LivingEntity found = findNearestVisibleHostile(level);
         if (found != null) {
             guard.setTarget(found);
         }
         return false;
     }
 
-    private Monster findNearestVisibleMonster(ServerLevel level) {
+    private LivingEntity findNearestVisibleHostile(ServerLevel level) {
         AABB searchBox = guard.getBoundingBox().inflate(MAX_SEARCH_RADIUS_BLOCKS);
-        List<Monster> candidates = level.getEntitiesOfClass(Monster.class, searchBox, LivingEntity::isAlive);
-        Monster nearest = null;
+        List<LivingEntity> candidates = level.getEntitiesOfClass(LivingEntity.class, searchBox,
+                e -> e.isAlive() && e instanceof Enemy);
+        LivingEntity nearest = null;
         double nearestDistSq = Double.MAX_VALUE;
-        for (Monster candidate : candidates) {
+        for (LivingEntity candidate : candidates) {
             double distSq = guard.distanceToSqr(candidate);
             double range = sightRangeFor(level, candidate);
             if (distSq > range * range) {
@@ -85,7 +97,7 @@ public class GuardSightGoal extends Goal {
         return nearest;
     }
 
-    private static double sightRangeFor(ServerLevel level, Monster candidate) {
+    private static double sightRangeFor(ServerLevel level, LivingEntity candidate) {
         BlockPos pos = candidate.blockPosition();
         int lightLevel = level.getMaxLocalRawBrightness(pos);
         return lightLevel >= LIT_LIGHT_THRESHOLD ? LIT_SIGHT_RANGE_BLOCKS : DARK_SIGHT_RANGE_BLOCKS;
