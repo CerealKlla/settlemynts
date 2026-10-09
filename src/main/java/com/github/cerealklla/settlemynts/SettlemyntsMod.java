@@ -468,6 +468,19 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.SetShopListingsPayload.STREAM_CODEC,
                 (payload, context) -> setShopListings(payload, context));
 
+        // Planned Inventory (2026-10-09) -- see zone.PlannedInventoryClearing's own doc.
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload.STREAM_CODEC,
+                (payload, context) -> requestPlannedInventory(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenPlannedInventoryPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenPlannedInventoryPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestPlannedInventory(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetPlannedInventoryPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SetPlannedInventoryPayload.STREAM_CODEC,
+                (payload, context) -> setPlannedInventory(payload, context));
+
         // "Press G to open shop" proximity prompt (2026-10-05) -- see PlotShopProximityTicker's own doc.
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.STREAM_CODEC,
@@ -978,6 +991,86 @@ public class SettlemyntsMod {
             resolved.get().core().updatePlot(plot.withSuppressedShopResources(suppressed));
         }
         player.sendSystemMessage(Component.literal("Shop listings updated."));
+    }
+
+    /**
+     * "Planned Inventory" button -- row assembly mirrors {@code requestShop}'s own manage-mode union
+     * (live box stock + existing config + catalog candidates), see {@code OpenPlannedInventoryPayload}'s
+     * own doc.
+     */
+    private static void requestPlannedInventory(com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        java.util.Map<net.minecraft.resources.Identifier, Integer> stock =
+                com.github.cerealklla.settlemynts.api.Settlemynts.scanPlotItemStock(serverLevel, plot.plotId());
+        stock.remove(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET));
+
+        java.util.Map<net.minecraft.resources.Identifier, com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget> targetsByItem = new java.util.LinkedHashMap<>();
+        java.util.List<com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget> tagTargets = new java.util.ArrayList<>();
+        for (com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget target : plot.plannedInventory()) {
+            if (target.isTag()) {
+                tagTargets.add(target);
+            } else {
+                targetsByItem.put(target.resourceKey(), target);
+            }
+        }
+
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry> entries = new java.util.ArrayList<>();
+        for (com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget target : tagTargets) {
+            net.minecraft.tags.TagKey<net.minecraft.world.item.Item> tag =
+                    net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, target.resourceKey());
+            com.github.cerealklla.settlemynts.zone.ShopResource resource = com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(tag);
+            int tagStock = stock.entrySet().stream()
+                    .filter(e -> resource.matches(new net.minecraft.world.item.ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(e.getKey()))))
+                    .mapToInt(java.util.Map.Entry::getValue).sum();
+            entries.add(new com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry(target.resourceKey(), true, tagStock, target.targetCount()));
+        }
+
+        java.util.Set<net.minecraft.resources.Identifier> itemKeys = new java.util.LinkedHashSet<>();
+        itemKeys.addAll(stock.keySet());
+        itemKeys.addAll(targetsByItem.keySet());
+        for (com.github.cerealklla.settlemynts.zone.SeedListing seed :
+                com.github.cerealklla.settlemynts.zone.ShopSeeding.catalogSeedListings(serverLevel, plot, payload.signPos())) {
+            seed.listingResource().itemId().ifPresent(itemKeys::add);
+        }
+        for (net.minecraft.resources.Identifier key : itemKeys) {
+            com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget existing = targetsByItem.get(key);
+            int targetCount = existing != null ? existing.targetCount() : -1;
+            entries.add(new com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry(key, false, stock.getOrDefault(key, 0), targetCount));
+        }
+        entries.sort(java.util.Comparator
+                .comparing((com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry e) -> e.currentStock() <= 0)
+                .thenComparing(com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry::label));
+
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenPlannedInventoryPayload(payload.signPos(), entries));
+    }
+
+    /** "Save Changes" on {@code client.PlannedInventoryScreen}. */
+    private static void setPlannedInventory(com.github.cerealklla.settlemynts.plotsign.SetPlannedInventoryPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
+            return;
+        }
+        java.util.List<com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget> targets = new java.util.ArrayList<>();
+        for (com.github.cerealklla.settlemynts.plotsign.PlannedInventoryUpdate update : payload.updates()) {
+            if (update.managed()) {
+                targets.add(new com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget(
+                        update.resourceKey(), update.isTag(), Math.max(0, update.targetCount())));
+            }
+        }
+        resolved.get().core().updatePlot(resolved.get().plot().withPlannedInventory(targets));
+        player.sendSystemMessage(Component.literal("Planned Inventory updated."));
     }
 
     private record PlotRecordAndCore(PlotRecord plot, GhostTownHallCoreEntity core) {
@@ -1582,7 +1675,7 @@ public class SettlemyntsMod {
                     Map.of(Identifier.withDefaultNamespace("gold_nugget"), 1), 1L));
         }
 
-        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1);
+        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1, java.util.List.of());
         core.addPlot(plotRecord);
 
         // Plot Config Sign (design doc Section 14a) -- spawned unconditionally, next to the same

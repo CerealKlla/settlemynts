@@ -56,6 +56,13 @@ public final class ShopSeeding {
         PlotRecord seeded = plot.withShopId(shopId);
         owner.updatePlot(seeded);
         applyCatalog(level, seeded, catalog.get(), plotAnchor, 1);
+        // NPC-owned plot, 2026-10-09 (explicit follow-up request: "a first pass at automatically
+        // setting the Planned Inventory for NPC shops with things that make sense") -- a player-owned
+        // plot gets nothing auto-populated here, same owner/no-owner split as applyCatalog/applyCatalogFull
+        // already draw for real listings themselves (see this method's own class doc).
+        if (seeded.owner().isEmpty()) {
+            autoPopulatePlannedInventory(owner, seeded, catalog.get().seedListingsFor(level, plotAnchor, 1));
+        }
     }
 
     /** True if this Zone Type has a registered catalog at all -- lets a caller decide whether it's even worth resolving/creating a Shop before calling {@link #seedNewPlotSharingShop}. */
@@ -90,7 +97,7 @@ public final class ShopSeeding {
         }
         PlotRecord seeded = plot.withShopId(sharedShopId);
         owner.updatePlot(seeded);
-        applyCatalogFull(level, seeded, catalog.get(), plotAnchor, 1);
+        applyCatalogFull(level, owner, seeded, catalog.get(), plotAnchor, 1);
     }
 
     /**
@@ -101,13 +108,13 @@ public final class ShopSeeding {
      * {@link #restockAtMidnight} for the exact same reason: plain goods need to actually restock (and
      * stay listed) here, since no owner's own production ever supplies them.
      */
-    public static void restockNaturalShop(ServerLevel level, PlotRecord plot, BlockPos plotAnchor) {
+    public static void restockNaturalShop(ServerLevel level, PlotOwner owner, PlotRecord plot, BlockPos plotAnchor) {
         if (!YconomicsShopBridge.isAvailable() || plot.shopId().isEmpty()) {
             return;
         }
         Optional<ShopSeedCatalog> catalog = ShopSeedCatalogRegistry.get(plot.zoneTypeId());
         if (catalog.isPresent()) {
-            applyCatalogFull(level, plot, catalog.get(), plotAnchor, resolveTier(level, plot));
+            applyCatalogFull(level, owner, plot, catalog.get(), plotAnchor, resolveTier(level, plot));
         }
         List<Container> plotBoxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plot.plotId());
         if (plotBoxes.isEmpty()) {
@@ -234,7 +241,7 @@ public final class ShopSeeding {
      * can ever customize an NPC-owned shop's price away from the catalog default in the first place,
      * unlike the player-owned case {@link #applyCatalog} guards against overwriting.
      */
-    private static void applyCatalogFull(ServerLevel level, PlotRecord plot, ShopSeedCatalog catalog, BlockPos plotAnchor, int tier) {
+    private static void applyCatalogFull(ServerLevel level, PlotOwner owner, PlotRecord plot, ShopSeedCatalog catalog, BlockPos plotAnchor, int tier) {
         if (plot.shopId().isEmpty()) {
             return;
         }
@@ -255,6 +262,40 @@ public final class ShopSeeding {
                 depositStock(plotBoxes, seed, topUp);
             }
         }
+        autoPopulatePlannedInventory(owner, plot, seedListings);
+    }
+
+    /**
+     * First-pass automatic Planned Inventory for an NPC-owned shop (2026-10-09, explicit follow-up
+     * request: "a first pass at automatically setting the Planned Inventory for NPC shops with things
+     * that make sense") -- reuses each {@link SeedListing#stockCount()} as the resource's default
+     * "happy state" target, the catalog's own idea of a reasonable baseline stock level. Only ever
+     * *adds* a target for a resource with no existing entry (same additive-only, idempotent shape as
+     * this class's own stock top-ups) -- never overwrites one a Town Planner has since hand-edited via
+     * {@code client.PlannedInventoryScreen}. A player-owned plot never reaches this method at all (see
+     * both call sites' own guards) -- the owner decides their own happy state manually, same as they
+     * decide their own prices via Manage Shop.
+     */
+    private static void autoPopulatePlannedInventory(PlotOwner owner, PlotRecord plot, List<SeedListing> seedListings) {
+        java.util.Set<java.util.Map.Entry<Identifier, Boolean>> existing = new java.util.HashSet<>();
+        for (PlannedInventoryTarget target : plot.plannedInventory()) {
+            existing.add(java.util.Map.entry(target.resourceKey(), target.isTag()));
+        }
+        List<PlannedInventoryTarget> additions = new java.util.ArrayList<>();
+        for (SeedListing seed : seedListings) {
+            ShopResource resource = seed.listingResource();
+            Identifier key = resource.tag().isPresent() ? resource.tag().get().location() : resource.itemId().get();
+            boolean isTag = resource.tag().isPresent();
+            if (existing.add(java.util.Map.entry(key, isTag))) {
+                additions.add(new PlannedInventoryTarget(key, isTag, seed.stockCount()));
+            }
+        }
+        if (additions.isEmpty()) {
+            return;
+        }
+        List<PlannedInventoryTarget> merged = new java.util.ArrayList<>(plot.plannedInventory());
+        merged.addAll(additions);
+        owner.updatePlot(plot.withPlannedInventory(merged));
     }
 
     /**

@@ -45,13 +45,24 @@ public final class ShopMidnightRestockTicker {
         if (!YconomicsShopBridge.isAvailable()) {
             return;
         }
+        // Collected (not settled per-plot) so PlannedInventoryClearing.settleGroup runs exactly once
+        // per settlement -- PlotConfigSignIndex is a flat server-wide map, not grouped by core.
+        java.util.Set<GhostTownHallCoreEntity> cores = new java.util.HashSet<>();
         for (Map.Entry<UUID, GlobalPos> entry : PlotConfigSignIndex.get(server).all().entrySet()) {
             GlobalPos pos = entry.getValue();
             ServerLevel level = server.getLevel(pos.dimension());
             if (level == null) {
                 continue;
             }
-            restockPlot(level, entry.getKey(), pos.pos());
+            GhostTownHallCoreEntity core = restockPlot(level, entry.getKey(), pos.pos());
+            if (core != null) {
+                cores.add(core);
+            }
+        }
+        for (GhostTownHallCoreEntity core : cores) {
+            if (core.level() instanceof ServerLevel level) {
+                PlannedInventoryClearing.settleGroup(level, core.getPlots());
+            }
         }
         restockNaturalSettlementShops(server);
     }
@@ -77,7 +88,9 @@ public final class ShopMidnightRestockTicker {
         if (level == null) {
             return;
         }
-        for (java.util.List<PlotRecord> plots : NaturalSettlementPlotStore.get(server).all().values()) {
+        for (Map.Entry<SettlementKey, java.util.List<PlotRecord>> settlementEntry : NaturalSettlementPlotStore.get(server).all().entrySet()) {
+            java.util.List<PlotRecord> plots = settlementEntry.getValue();
+            NaturalSettlementPlotOwner owner = new NaturalSettlementPlotOwner(server, settlementEntry.getKey());
             java.util.Map<net.minecraft.resources.Identifier, PlotRecord> representativeByZone = new java.util.HashMap<>();
             for (PlotRecord plot : plots) {
                 representativeByZone.putIfAbsent(plot.zoneTypeId(), plot);
@@ -86,21 +99,24 @@ public final class ShopMidnightRestockTicker {
                 if (representative.shopId().isEmpty()) {
                     continue;
                 }
-                ShopSeeding.restockNaturalShop(level, representative, BlockPos.ZERO);
+                ShopSeeding.restockNaturalShop(level, owner, representative, BlockPos.ZERO);
             }
+            PlannedInventoryClearing.settleGroup(level, plots);
         }
     }
 
-    private void restockPlot(ServerLevel level, UUID plotId, BlockPos signPos) {
+    /** Returns the resolved core (or {@code null}) so the caller can settle Planned Inventory once per settlement -- see this call site's own comment. */
+    private GhostTownHallCoreEntity restockPlot(ServerLevel level, UUID plotId, BlockPos signPos) {
         if (!(level.getBlockEntity(signPos) instanceof PlotConfigSignBlockEntity sign)
                 || sign.settlementCoreId() == null
                 || !(level.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
-            return; // Chunk not loaded, or the sign/core couldn't be resolved -- skip this day.
+            return null; // Chunk not loaded, or the sign/core couldn't be resolved -- skip this day.
         }
         PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
         if (plot == null) {
-            return;
+            return null;
         }
         ShopSeeding.restockAtMidnight(level, plot, signPos);
+        return core;
     }
 }

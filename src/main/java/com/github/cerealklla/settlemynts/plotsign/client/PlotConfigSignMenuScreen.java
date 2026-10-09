@@ -57,6 +57,10 @@ public final class PlotConfigSignMenuScreen extends Screen {
                 addRenderableWidget(Button.builder(Component.literal("Manage Shop"), b -> requestShop(true))
                         .bounds(centerX - 100, y, 200, 20).build());
                 y += 30;
+
+                addRenderableWidget(Button.builder(Component.literal("Planned Inventory"), b -> plannedInventory())
+                        .bounds(centerX - 100, y, 200, 20).build());
+                y += 30;
             }
         }
 
@@ -89,6 +93,11 @@ public final class PlotConfigSignMenuScreen extends Screen {
 
     private void requestShop(boolean manage) {
         send(new RequestShopPayload(new com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Sign(data.signPos()), manage));
+        onClose();
+    }
+
+    private void plannedInventory() {
+        send(new com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload(data.signPos()));
         onClose();
     }
 

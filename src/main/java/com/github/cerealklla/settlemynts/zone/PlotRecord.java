@@ -66,11 +66,19 @@ import net.minecraft.resources.Identifier;
  * (including every pre-existing saved plot). Pushed onto the Construction Box itself (via {@code
  * api.Blueprynts#setConstructionBoxAllowedTier}) whenever it changes, so the box's own Blueprint
  * picker knows how far up it's allowed to offer.
+ *
+ * <p>{@code plannedInventory} (added 2026-10-09) -- this plot's Planned Inventory config, set on
+ * {@code client.PlannedInventoryScreen}: each entry's own "happy state" target stock level for one
+ * resource. Consumed by {@code zone.PlannedInventoryClearing}'s nightly inter-plot trading pass (a
+ * plot below target buys from one above target, within the same settlement, at the seller's own real
+ * Shop sell price). Empty by default (including every pre-existing saved plot) -- a resource only
+ * ever participates once an entry exists for it; see {@link PlannedInventoryTarget}'s own class doc.
  */
 public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long cartographyrPlotEntityId,
                           long cartographyrBufferEntityId, Optional<BlockPos> boxPos, Optional<UUID> constructionBoxId,
                           Optional<UUID> owner, Optional<UUID> billId, Optional<UUID> shopId,
-                          List<SuppressedShopResource> suppressedShopResources, int tier) {
+                          List<SuppressedShopResource> suppressedShopResources, int tier,
+                          List<PlannedInventoryTarget> plannedInventory) {
 
     public static final Codec<PlotRecord> CODEC = RecordCodecBuilder.create(i -> i.group(
             UUIDUtil.CODEC.fieldOf("plot_id").forGetter(PlotRecord::plotId),
@@ -84,24 +92,31 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
             UUIDUtil.CODEC.optionalFieldOf("bill_id").forGetter(PlotRecord::billId),
             UUIDUtil.CODEC.optionalFieldOf("shop_id").forGetter(PlotRecord::shopId),
             SuppressedShopResource.CODEC.listOf().optionalFieldOf("suppressed_shop_resources", List.of()).forGetter(PlotRecord::suppressedShopResources),
-            Codec.INT.optionalFieldOf("tier", 1).forGetter(PlotRecord::tier)
+            Codec.INT.optionalFieldOf("tier", 1).forGetter(PlotRecord::tier),
+            PlannedInventoryTarget.CODEC.listOf().optionalFieldOf("planned_inventory", List.of()).forGetter(PlotRecord::plannedInventory)
     ).apply(i, PlotRecord::new));
 
     /** Stamps in a freshly-registered Shop id -- see this record's own class doc on when this happens. */
     public PlotRecord withShopId(UUID shopId) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier);
+                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier, plannedInventory);
     }
 
     /** Overwrites the full Shop Config suppression set -- see {@code SettlemyntsMod#setShopListings}, the only caller. */
     public PlotRecord withSuppressedShopResources(List<SuppressedShopResource> suppressedShopResources) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier);
+                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier, plannedInventory);
     }
 
     /** Raises (or sets) this plot's own unlocked construction-Tier cap -- see this record's own class doc. */
     public PlotRecord withTier(int tier) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory);
+    }
+
+    /** Overwrites the full Planned Inventory target set -- see {@code SettlemyntsMod#setPlannedInventory}, the only caller. */
+    public PlotRecord withPlannedInventory(List<PlannedInventoryTarget> plannedInventory) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, List.copyOf(plannedInventory));
     }
 }

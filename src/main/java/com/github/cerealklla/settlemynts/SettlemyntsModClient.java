@@ -184,6 +184,12 @@ public class SettlemyntsModClient {
                         : new ShopScreen(request));
             }
         });
+
+        ClientPlotSignRequests.takePendingPlannedInventory().ifPresent(request -> {
+            if (Minecraft.getInstance().screen == null) {
+                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.PlannedInventoryScreen(request));
+            }
+        });
     }
 
     private static void send(CustomPacketPayload payload) {

@@ -348,41 +348,119 @@ public class LumberjackWorkGoal extends Goal {
         }
     }
 
+    // Bounds the log flood-fill's worst case, mirroring Lyfe's own Lumberjack-skill cap exactly
+    // (gathering.WholeStructureClear#MAX_BLOCKS) -- "comfortably larger than any vanilla tree," and
+    // the same accepted tradeoff that cap already makes: a flood-fill could in principle walk from a
+    // real tree's trunk into an adjacent player-built log structure if the two happen to touch, but
+    // isRealTree already gates entry (a cabin wall alone never qualifies), and this cap bounds how far
+    // into anything connected the clear can ever reach regardless.
+    private static final int MAX_CONNECTED_LOGS = 64;
+
     /**
-     * Breaks every log, and now every leaf too (2026-10-06, explicit user request: "the lumberjack
-     * does need to be able to break leaves too when harvesting" -- the original "logs only, leaves
-     * left standing" scoping decision is superseded), within the same fixed local box {@link
-     * #isRealTree} already confirmed has a leaf in it -- deliberately NOT a connectivity flood-fill,
-     * for the identical reason given there: following connected logs/leaves could walk straight out
-     * of a real tree into an adjacent building if they happen to touch. A position-bounded box can
-     * only ever break the one tree it was already confirmed to be, never anything beyond it. Leaves
-     * are cleared via a plain {@code removeBlock} with no drop simulated (no sapling/stick chance) --
-     * same "don't simulate vanilla's loot tables, just the specific item we care about" precedent the
-     * log-handling below already set; the point here is clearing the canopy, not harvesting it.
+     * Flood-fills every log connected to {@code base} (26-neighbor, matching {@code BlockTags.LOGS})
+     * instead of the old fixed local box -- added 2026-10-09, real report (screenshot): wide/branchy
+     * trees were left with floating logs after a harvest, since the previous box was sized around just
+     * the base/top trunk column and a real tree's branches can extend well outside that. This is the
+     * exact same algorithm the Lumberjack *skill* already uses for a player's own tree-chop ({@code
+     * lyfe.gathering.WholeStructureClear#connectedBlocksOf}, including its 26-neighbor offsets for
+     * diagonally-offset branch logs and its same safety cap) -- duplicated here in full rather than
+     * taken as a dependency, since Settlemynts' worker AI must keep working correctly on a server with
+     * no Lyfe installed at all.
+     */
+    private static Set<BlockPos> findConnectedLogs(ServerLevel level, BlockPos base) {
+        Set<BlockPos> found = new java.util.HashSet<>();
+        java.util.Deque<BlockPos> frontier = new java.util.ArrayDeque<>();
+        frontier.add(base);
+        found.add(base);
+        while (!frontier.isEmpty() && found.size() < MAX_CONNECTED_LOGS) {
+            BlockPos current = frontier.poll();
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dy == 0 && dz == 0) {
+                            continue;
+                        }
+                        BlockPos neighbor = current.offset(dx, dy, dz);
+                        if (found.contains(neighbor)) {
+                            continue;
+                        }
+                        if (level.getBlockState(neighbor).is(BlockTags.LOGS)) {
+                            found.add(neighbor);
+                            frontier.add(neighbor);
+                            if (found.size() >= MAX_CONNECTED_LOGS) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Breaks every connected log (flood-filled, see {@link #findConnectedLogs}) plus every leaf within
+     * a margin of the real discovered trunk/branch footprint -- reworked 2026-10-09 from the old fixed
+     * local box (see {@link #findConnectedLogs}'s own doc for why). The leaf box is now the bounding
+     * box of every log actually found, expanded by {@link #CANOPY_HORIZONTAL_RADIUS}/{@link
+     * #CANOPY_VERTICAL_MARGIN}, instead of a box anchored only at the trunk's own base/top column --
+     * the same floating-canopy bug would otherwise persist for leaves even after the logs themselves
+     * were fully cleared.
+     *
+     * <p>Leaves now roll their real loot table (explicit user request, 2026-10-09: "pick up anything
+     * dropped by the tree... I would expect to see Apples and stick too (just not saplings)") via
+     * {@link Block#getDrops}, the same real-loot-table call {@code construction.SiteTerrainOps} already
+     * uses elsewhere in the suite for an identical "no player/tool context" case -- this naturally
+     * covers vanilla's own stick drop chance (added to every leaf type) and Oak's extra apple chance,
+     * with no hand-authored drop table needed. Sapling drops are deliberately filtered out and
+     * discarded (not deposited, not even dropped as a loose item) per that same explicit instruction --
+     * the Lumberjack already plants fresh saplings itself via {@link #plant}, so handing back the ones
+     * it just broke would be redundant at best.
      */
     private void harvest(ServerLevel level, BlockPos base) {
-        BlockPos top = trunkTop(level, base);
+        Set<BlockPos> logs = findConnectedLogs(level, base);
+        int minX = base.getX(), maxX = base.getX();
+        int minY = base.getY(), maxY = base.getY();
+        int minZ = base.getZ(), maxZ = base.getZ();
         List<Container> boxes = null;
-        for (int x = base.getX() - CANOPY_HORIZONTAL_RADIUS; x <= base.getX() + CANOPY_HORIZONTAL_RADIUS; x++) {
-            for (int z = base.getZ() - CANOPY_HORIZONTAL_RADIUS; z <= base.getZ() + CANOPY_HORIZONTAL_RADIUS; z++) {
-                for (int y = base.getY(); y <= top.getY() + CANOPY_VERTICAL_MARGIN; y++) {
+        for (BlockPos pos : logs) {
+            minX = Math.min(minX, pos.getX());
+            maxX = Math.max(maxX, pos.getX());
+            minY = Math.min(minY, pos.getY());
+            maxY = Math.max(maxY, pos.getY());
+            minZ = Math.min(minZ, pos.getZ());
+            maxZ = Math.max(maxZ, pos.getZ());
+            Item logItem = level.getBlockState(pos).getBlock().asItem();
+            level.removeBlock(pos, false);
+            if (logItem != net.minecraft.world.item.Items.AIR) {
+                if (boxes == null) {
+                    boxes = Settlemynts.resolvePlotBoxes(level, worker.plotId());
+                }
+                if (!boxes.isEmpty()) {
+                    ContainerDeposit.depositIntoAny(boxes, new ItemStack(logItem, 1));
+                }
+            }
+        }
+
+        for (int x = minX - CANOPY_HORIZONTAL_RADIUS; x <= maxX + CANOPY_HORIZONTAL_RADIUS; x++) {
+            for (int z = minZ - CANOPY_HORIZONTAL_RADIUS; z <= maxZ + CANOPY_HORIZONTAL_RADIUS; z++) {
+                for (int y = minY; y <= maxY + CANOPY_VERTICAL_MARGIN; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
-                    BlockState state = level.getBlockState(pos);
-                    if (state.is(BlockTags.LEAVES)) {
-                        level.removeBlock(pos, false);
+                    BlockState leafState = level.getBlockState(pos);
+                    if (!leafState.is(BlockTags.LEAVES)) {
                         continue;
                     }
-                    if (!state.is(BlockTags.LOGS)) {
-                        continue;
-                    }
-                    Item logItem = state.getBlock().asItem();
+                    List<ItemStack> drops = Block.getDrops(leafState, level, pos, null);
                     level.removeBlock(pos, false);
-                    if (logItem != net.minecraft.world.item.Items.AIR) {
+                    for (ItemStack drop : drops) {
+                        if (drop.isEmpty() || drop.is(net.minecraft.tags.ItemTags.SAPLINGS)) {
+                            continue;
+                        }
                         if (boxes == null) {
                             boxes = Settlemynts.resolvePlotBoxes(level, worker.plotId());
                         }
                         if (!boxes.isEmpty()) {
-                            ContainerDeposit.depositIntoAny(boxes, new ItemStack(logItem, 1));
+                            ContainerDeposit.depositIntoAny(boxes, drop);
                         }
                     }
                 }
