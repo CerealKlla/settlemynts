@@ -108,7 +108,8 @@ public final class PlotConfigSignMenuScreen extends Screen {
     }
 
     private void upgradePlot() {
-        Minecraft.getInstance().setScreen(new UpgradePlotScreen(data.signPos(), data.tier()));
+        send(new com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPreviewPayload(data.signPos()));
+        onClose();
     }
 
     private void send(CustomPacketPayload payload) {

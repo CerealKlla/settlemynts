@@ -192,6 +192,34 @@ public final class Settlemynts {
         return Optional.empty();
     }
 
+    /** One plot's own listed price for a resource -- see {@link #findSellingPlots}. */
+    public record PlotPrice(UUID plotId, int pricePerUnit) {
+    }
+
+    /**
+     * Every plot (if any) in {@code settlementCoreId}'s settlement whose Shop currently lists {@code
+     * resource}, each with its own listed price -- added 2026-10-09 for {@code
+     * construction.PlotTierMarketPurchasing}'s cheapest-first, stock-aware multi-seller allocation
+     * (explicit request: "using the cheapest of all plot store prices within the settlement, and
+     * keeping in mind available stock at those stores" -- {@link #findSellingPlot}/{@link
+     * #getAverageSettlementPrice} alone can't answer that, since they only ever return one plot or
+     * one averaged number). No stock check here either, same reasoning as {@link #findSellingPlot}.
+     */
+    public static List<PlotPrice> findSellingPlots(ServerLevel level, UUID settlementCoreId, ShopResource resource) {
+        List<PlotPrice> result = new ArrayList<>();
+        if (!YconomicsShopBridge.isAvailable() || !(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
+            return result;
+        }
+        for (PlotRecord plot : core.getPlots()) {
+            for (YconomicsShopBridge.ShopListingView listing : getListings(level, plot.plotId())) {
+                if (sameResource(listing.resource(), resource)) {
+                    result.add(new PlotPrice(plot.plotId(), listing.pricePerUnit()));
+                }
+            }
+        }
+        return result;
+    }
+
     /**
      * Buys up to {@code quantity} units of {@code resource} from {@code shopId} (the Shop that owns
      * {@code plotId}'s boxes), draining stock from every box located on {@code plotId}'s own plot (via

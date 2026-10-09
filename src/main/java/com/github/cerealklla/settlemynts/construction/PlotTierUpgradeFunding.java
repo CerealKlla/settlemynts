@@ -27,6 +27,13 @@ import net.minecraft.world.item.ItemStack;
  * the box to build a specific Blueprint) -- see {@code zone.PlotRecord#tier}'s own class doc. This
  * class never touches a Construction Box at all; it only raises {@code PlotRecord#tier} and debits
  * the plot's own boxes/the player's gold.
+ *
+ * <p><b>Widened 2026-10-09, same day</b> -- both {@link #preview} (shown on {@code
+ * client.UpgradePlotScreen} before any button is clicked) and {@link #fund} (the actual charge) now
+ * go through the same {@link PlotTierMarketPurchasing#planPurchase} cheapest-first, stock-aware
+ * allocation, so the number the player sees is exactly what they'll actually be charged -- real
+ * follow-up request after the first live test showed a flat, unexplained "missing resources"
+ * failure with no visibility into why.
  */
 public final class PlotTierUpgradeFunding {
 
@@ -42,10 +49,60 @@ public final class PlotTierUpgradeFunding {
         }
     }
 
+    /** One resource row for {@code client.UpgradePlotScreen} -- {@code mixCost}/{@code goldCost} are each that option's own total charge for JUST this resource, {@code mixFullyCovered}/{@code goldFullyCovered} say whether the whole settlement economy (plot stock + every seller) can actually supply the full needed amount at all. */
+    public record ResourcePreviewEntry(String label, int amount, int onHand, int mixCost, boolean mixFullyCovered, int goldCost, boolean goldFullyCovered) {
+    }
+
+    /** {@code onHandEnabled}/{@code mixEnabled}/{@code goldEnabled} already fold in both "can the resources actually be sourced at all" and "can the player actually afford the gold involved" -- {@code client.UpgradePlotScreen} just disables a button directly off these, no further client-side math needed. */
+    public record Preview(List<ResourcePreviewEntry> resources, boolean onHandEnabled, int mixTotalCost, boolean mixEnabled, int goldTotalCost, boolean goldEnabled) {
+    }
+
     private record Need(ResourceCost entry, int onHand, int shortfall) {
     }
 
     private PlotTierUpgradeFunding() {
+    }
+
+    public static Preview preview(ServerPlayer player, ServerLevel level, PlotRecord plot, UUID settlementCoreId, BlockPos originPos) {
+        List<ResourceCost> cost = PlotTierUpgradeCost.costFor(plot.tier() + 1);
+        List<Container> plotBoxes = Settlemynts.resolvePlotBoxes(level, plot.plotId());
+
+        List<ResourcePreviewEntry> entries = new ArrayList<>();
+        boolean onHandEnabled = true;
+        int mixTotal = 0;
+        boolean mixEnabled = true;
+        int goldTotal = 0;
+        boolean goldEnabled = true;
+        for (ResourceCost entry : cost) {
+            int onHand = Math.min(countAvailable(plotBoxes, entry.resource()), entry.amount());
+            int shortfall = entry.amount() - onHand;
+            if (shortfall > 0) {
+                onHandEnabled = false;
+            }
+            PlotTierMarketPurchasing.Allocation mixAlloc = shortfall > 0
+                    ? PlotTierMarketPurchasing.planPurchase(level, settlementCoreId, originPos, entry, shortfall)
+                    : new PlotTierMarketPurchasing.Allocation(List.of(), 0, 0);
+            boolean mixCovered = onHand + mixAlloc.quantityFilled() >= entry.amount();
+            mixTotal += mixAlloc.totalCost();
+            if (!mixCovered) {
+                mixEnabled = false;
+            }
+            PlotTierMarketPurchasing.Allocation goldAlloc = PlotTierMarketPurchasing.planPurchase(level, settlementCoreId, originPos, entry, entry.amount());
+            boolean goldCovered = goldAlloc.fullyCovered(entry.amount());
+            goldTotal += goldAlloc.totalCost();
+            if (!goldCovered) {
+                goldEnabled = false;
+            }
+            entries.add(new ResourcePreviewEntry(entry.resource().label(), entry.amount(), onHand, mixAlloc.totalCost(), mixCovered, goldAlloc.totalCost(), goldCovered));
+        }
+        int nuggetBalance = YconomicsShopBridge.getNuggetBalance(player);
+        if (mixEnabled && nuggetBalance < mixTotal) {
+            mixEnabled = false;
+        }
+        if (goldEnabled && nuggetBalance < goldTotal) {
+            goldEnabled = false;
+        }
+        return new Preview(entries, onHandEnabled, mixTotal, mixEnabled, goldTotal, goldEnabled);
     }
 
     public static Result fund(ServerPlayer player, ServerLevel level, PlotRecord plot, UUID settlementCoreId, BlockPos originPos, FundingOption option) {
@@ -71,19 +128,20 @@ public final class PlotTierUpgradeFunding {
             return Result.ok();
         }
 
-        List<PlotTierMarketPurchasing.Purchase> purchases = new ArrayList<>();
+        List<PlotTierMarketPurchasing.Allocation> allocations = new ArrayList<>();
         int totalCharge = 0;
         for (Need need : needs) {
             int quantity = option == FundingOption.GOLD_ONLY ? need.entry().amount() : need.shortfall();
             if (quantity <= 0) {
+                allocations.add(new PlotTierMarketPurchasing.Allocation(List.of(), 0, 0));
                 continue;
             }
-            PlotTierMarketPurchasing.Purchase purchase = PlotTierMarketPurchasing.resolvePurchase(level, settlementCoreId, originPos, need.entry(), quantity);
-            if (purchase == null) {
-                return Result.fail("Nobody sells " + need.entry().resource().label() + " nearby.");
+            PlotTierMarketPurchasing.Allocation allocation = PlotTierMarketPurchasing.planPurchase(level, settlementCoreId, originPos, need.entry(), quantity);
+            if (!allocation.fullyCovered(quantity)) {
+                return Result.fail("Not enough " + need.entry().resource().label() + " available in the settlement.");
             }
-            purchases.add(purchase);
-            totalCharge += purchase.buyerCharge();
+            allocations.add(allocation);
+            totalCharge += allocation.totalCost();
         }
 
         if (YconomicsShopBridge.getNuggetBalance(player) < totalCharge) {
@@ -97,26 +155,20 @@ public final class PlotTierUpgradeFunding {
                 }
             }
         }
-        for (PlotTierMarketPurchasing.Purchase purchase : purchases) {
-            ShopResource resource = ShopResource.ofTag(purchase.entry().resource().tag());
-            List<Container> sellerBoxes = Settlemynts.resolvePlotBoxes(level, purchase.sellerPlotId());
-            Settlemynts.purchaseFromSettlementShop(level, purchase.sellerPlotId(), resource, purchase.quantity(), sellerBoxes);
+        for (PlotTierMarketPurchasing.Allocation allocation : allocations) {
+            for (PlotTierMarketPurchasing.Purchase purchase : allocation.purchases()) {
+                ShopResource resource = ShopResource.ofTag(purchase.entry().resource().tag());
+                List<Container> sellerBoxes = Settlemynts.resolvePlotBoxes(level, purchase.sellerPlotId());
+                Settlemynts.purchaseFromSettlementShop(level, purchase.sellerPlotId(), resource, purchase.quantity(), sellerBoxes);
+            }
         }
         YconomicsShopBridge.withdrawNuggets(player, totalCharge);
         return Result.ok();
     }
 
+    /** Shared with {@link PlotTierMarketPurchasing}'s own identical scan (package-private there). */
     private static int countAvailable(List<Container> boxes, GenericResource resource) {
-        int total = 0;
-        for (Container box : boxes) {
-            for (int slot = 0; slot < box.getContainerSize(); slot++) {
-                ItemStack stack = box.getItem(slot);
-                if (!stack.isEmpty() && resource.matches(stack.getItem())) {
-                    total += stack.getCount();
-                }
-            }
-        }
-        return total;
+        return PlotTierMarketPurchasing.countAvailable(boxes, resource);
     }
 
     private static void drain(List<Container> boxes, GenericResource resource, int amount) {

@@ -171,6 +171,12 @@ public class SettlemyntsModClient {
             }
         }
 
+        ClientPlotSignRequests.takePendingUpgradePlotPreview().ifPresent(request -> {
+            if (Minecraft.getInstance().screen == null) {
+                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.UpgradePlotScreen(request));
+            }
+        });
+
         ClientPlotSignRequests.takePendingShop().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
                 Minecraft.getInstance().setScreen(request.manage()

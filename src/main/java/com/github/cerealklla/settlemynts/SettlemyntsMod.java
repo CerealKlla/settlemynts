@@ -495,6 +495,14 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPayload.STREAM_CODEC,
                 (payload, context) -> requestUpgradePlot(payload, context));
 
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPreviewPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPreviewPayload.STREAM_CODEC,
+                (payload, context) -> requestUpgradePlotPreview(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestUpgradePlotPreview(payload));
+
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestPlotManagement(payload));
@@ -1079,6 +1087,58 @@ public class SettlemyntsMod {
             entries.add(new com.github.cerealklla.settlemynts.plotsign.PlotSummaryEntry(summary.plotName(), summary.ownerDisplay(), summary.billingStanding(), summary.issue()));
         }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload(entries));
+    }
+
+    /**
+     * "Upgrade Plot" button click -- computes a live cost/affordability preview (see {@code
+     * construction.PlotTierUpgradeFunding#preview}) and sends it back so {@code
+     * client.UpgradePlotScreen} can show real current-on-plot amounts and live gold costs instead of
+     * a static client-computed table (added 2026-10-09, explicit follow-up request after the first
+     * live test: "The listed cost should have (#) next to each to show how much is currently in the
+     * plot, then the two money options should show the live gold cost... If not enough resources are
+     * available... the appropriate buttons should be disabled").
+     */
+    private static void requestUpgradePlotPreview(com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPreviewPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        if (plot.constructionBoxId().isEmpty() || plot.tier() >= 5) {
+            return; // Button shouldn't have been shown at all -- no message needed, same as other stale-state guards.
+        }
+        com.github.cerealklla.settlemynts.construction.PlotTierUpgradeFunding.Preview preview =
+                com.github.cerealklla.settlemynts.construction.PlotTierUpgradeFunding.preview(player, serverLevel, plot, core.getUUID(), payload.signPos());
+        List<String> labels = new ArrayList<>();
+        List<Integer> amounts = new ArrayList<>();
+        List<Integer> onHand = new ArrayList<>();
+        List<Integer> mixCosts = new ArrayList<>();
+        List<Boolean> mixCovered = new ArrayList<>();
+        List<Integer> goldCosts = new ArrayList<>();
+        List<Boolean> goldCovered = new ArrayList<>();
+        for (var entry : preview.resources()) {
+            labels.add(entry.label());
+            amounts.add(entry.amount());
+            onHand.add(entry.onHand());
+            mixCosts.add(entry.mixCost());
+            mixCovered.add(entry.mixFullyCovered());
+            goldCosts.add(entry.goldCost());
+            goldCovered.add(entry.goldFullyCovered());
+        }
+        int flags = com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload.packFlags(
+                preview.onHandEnabled(), preview.mixEnabled(), preview.goldEnabled());
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload(
+                payload.signPos(), plot.tier() + 1, labels, amounts, onHand, mixCosts, mixCovered, goldCosts, goldCovered,
+                preview.mixTotalCost(), preview.goldTotalCost(), flags));
     }
 
     /**

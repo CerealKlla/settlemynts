@@ -13,6 +13,7 @@ public final class ClientPlotSignRequests {
     private static volatile OpenPlotDetailsPayload pendingPlotDetails;
     private static volatile OpenPlotManagementPayload pendingPlotManagement;
     private static volatile OpenShopPayload pendingShop;
+    private static volatile UpgradePlotPreviewPayload pendingUpgradePlotPreview;
 
     private ClientPlotSignRequests() {
     }
@@ -54,6 +55,16 @@ public final class ClientPlotSignRequests {
     public static Optional<OpenShopPayload> takePendingShop() {
         OpenShopPayload request = pendingShop;
         pendingShop = null;
+        return Optional.ofNullable(request);
+    }
+
+    public static void requestUpgradePlotPreview(UpgradePlotPreviewPayload payload) {
+        pendingUpgradePlotPreview = payload;
+    }
+
+    public static Optional<UpgradePlotPreviewPayload> takePendingUpgradePlotPreview() {
+        UpgradePlotPreviewPayload request = pendingUpgradePlotPreview;
+        pendingUpgradePlotPreview = null;
         return Optional.ofNullable(request);
     }
 }
