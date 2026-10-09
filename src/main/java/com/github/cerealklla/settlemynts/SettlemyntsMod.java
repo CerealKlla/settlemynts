@@ -1129,7 +1129,8 @@ public class SettlemyntsMod {
                 preview.onHandEnabled(), preview.mixEnabled(), preview.goldEnabled());
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload(
                 payload.signPos(), plot.tier() + 1, rows,
-                preview.mixTotalCost(), preview.goldTotalCost(), flags, preview.goldOnPlot(), preview.goldOnPerson()));
+                preview.mixTotalCost(), preview.goldTotalCost(), flags, preview.goldOnPlot(), preview.goldOnPerson(),
+                preview.newlyAllowedZoneTypeLabels()));
     }
 
     /**

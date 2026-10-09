@@ -28,7 +28,8 @@ import net.minecraft.resources.Identifier;
  */
 public record UpgradePlotPreviewPayload(BlockPos signPos, int nextTier, List<ResourceRow> resources,
                                          int mixTotalCost, int goldTotalCost, int enabledFlags,
-                                         int goldOnPlot, int goldOnPerson) implements CustomPacketPayload {
+                                         int goldOnPlot, int goldOnPerson,
+                                         List<String> newlyAllowedZoneTypeLabels) implements CustomPacketPayload {
 
     /** One resource row for {@code client.UpgradePlotScreen} -- see {@code construction.PlotTierUpgradeFunding.ResourcePreviewEntry}, which this mirrors 1:1 over the wire. */
     public record ResourceRow(String label, int amount, int onHand, int mixCost, boolean mixCovered, int goldCost, boolean goldCovered) {
@@ -85,6 +86,7 @@ public record UpgradePlotPreviewPayload(BlockPos signPos, int nextTier, List<Res
             ByteBufCodecs.VAR_INT, UpgradePlotPreviewPayload::enabledFlags,
             ByteBufCodecs.VAR_INT, UpgradePlotPreviewPayload::goldOnPlot,
             ByteBufCodecs.VAR_INT, UpgradePlotPreviewPayload::goldOnPerson,
+            ByteBufCodecs.collection(ArrayList::new, ByteBufCodecs.STRING_UTF8), UpgradePlotPreviewPayload::newlyAllowedZoneTypeLabels,
             UpgradePlotPreviewPayload::new);
 
     @Override

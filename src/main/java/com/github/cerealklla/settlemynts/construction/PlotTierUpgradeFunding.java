@@ -7,8 +7,12 @@ import java.util.UUID;
 import com.github.cerealklla.blueprynts.blueprint.GenericResource;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
+import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 import com.github.cerealklla.settlemynts.zone.ShopResource;
+import com.github.cerealklla.settlemynts.zone.ZoneType;
+import com.github.cerealklla.settlemynts.zone.ZoneTypeRegistry;
+import com.github.cerealklla.settlemynts.zone.ZoneTypeUnlocks;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -60,10 +64,17 @@ public final class PlotTierUpgradeFunding {
      * client-side math needed. {@code goldOnPlot}/{@code goldOnPerson} (added 2026-10-09, explicit
      * request) are purely informational -- real Gold Nuggets don't count toward either funding option
      * today (only the player's own balance is ever charged), this just answers "how much is sitting
-     * in my plot's own boxes vs. on me."
+     * in my plot's own boxes vs. on me." {@code newlyAllowedZoneTypeLabels} (added 2026-10-09,
+     * explicit request: "I'd also like to see 'Buildings Allowed After Upgrade'... listing what the
+     * next upgrade would allow a player to place") -- empty unless this upgrade is for the
+     * settlement's own Town Hall plot specifically, since raising any other plot's own Tier cap
+     * doesn't change which Zone Types the settlement can establish (see {@code zone.ZoneTypeUnlocks}'s
+     * own Town Hall-Tier gate) -- a Mayor-skill-level unlock (the other, independent gate) isn't shown
+     * here, it isn't caused by this specific upgrade action.
      */
     public record Preview(List<ResourcePreviewEntry> resources, boolean onHandEnabled, int mixTotalCost, boolean mixEnabled,
-                           int goldTotalCost, boolean goldEnabled, int goldOnPlot, int goldOnPerson) {
+                           int goldTotalCost, boolean goldEnabled, int goldOnPlot, int goldOnPerson,
+                           List<String> newlyAllowedZoneTypeLabels) {
     }
 
     private record Need(ResourceCost entry, int onHand, int shortfall) {
@@ -112,7 +123,18 @@ public final class PlotTierUpgradeFunding {
             goldEnabled = false;
         }
         int goldOnPlot = countAvailable(plotBoxes, net.minecraft.world.item.Items.GOLD_NUGGET);
-        return new Preview(entries, onHandEnabled, mixTotal, mixEnabled, goldTotal, goldEnabled, goldOnPlot, nuggetBalance);
+
+        int nextTier = plot.tier() + 1;
+        List<String> newlyAllowedZoneTypeLabels = new ArrayList<>();
+        if (plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)) {
+            for (ZoneType type : ZoneTypeRegistry.all()) {
+                if (ZoneTypeUnlocks.minTownHallTierForZoneType(type.id()) == nextTier) {
+                    newlyAllowedZoneTypeLabels.add(type.label());
+                }
+            }
+        }
+
+        return new Preview(entries, onHandEnabled, mixTotal, mixEnabled, goldTotal, goldEnabled, goldOnPlot, nuggetBalance, newlyAllowedZoneTypeLabels);
     }
 
     private static int countAvailable(List<Container> boxes, net.minecraft.world.item.Item item) {

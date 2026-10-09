@@ -45,7 +45,14 @@ public final class PlotStakeScreen extends Screen {
         this.stakeCount = payload.stakeCount();
         this.valid = payload.valid();
         this.hasRoadAccessFlag = payload.hasRoadAccessFlag();
-        this.zoneTypes = List.copyOf(Settlemynts.getRegisteredZoneTypes());
+        // Filtered down to what this settlement can actually establish right now (added 2026-10-09,
+        // explicit request: "I'd like to not even show them as options in the plot type picker if
+        // they're unavailable") -- payload.allowedZoneTypeIds() is computed server-side (Town Hall
+        // Tier + Mayor level, see zone.ZoneTypeUnlocks#isAllowed), since neither is known client-side.
+        var allowedIds = java.util.Set.copyOf(payload.allowedZoneTypeIds());
+        this.zoneTypes = Settlemynts.getRegisteredZoneTypes().stream()
+                .filter(type -> allowedIds.contains(type.id().toString()))
+                .toList();
     }
 
     @Override

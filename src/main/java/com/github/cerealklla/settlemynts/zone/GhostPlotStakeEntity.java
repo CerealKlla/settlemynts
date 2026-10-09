@@ -323,7 +323,21 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay implements Leasha
         }
         boolean hasRoadAccessFlag = ownerCoreId != null && plotSessionId != null
                 && GhostRoadAccessFlagEntity.findBySession(serverLevel, ownerCoreId, plotSessionId) != null;
-        PacketDistributor.sendToPlayer(serverPlayer, new OpenPlotStakeScreenPayload(getId(), stakes.size(), valid, hasRoadAccessFlag));
+
+        // Added 2026-10-09, explicit follow-up request: "I'd like to not even show them as options in
+        // the plot type picker if they're unavailable" -- filters down from the FULL registry to just
+        // what this settlement can actually establish right now (Town Hall Tier + Mayor level, see
+        // ZoneTypeUnlocks#isAllowed), so client.PlotStakeScreen never even offers an ineligible type.
+        List<String> allowedZoneTypeIds = new ArrayList<>();
+        GhostTownHallCoreEntity core = findOwnerCore();
+        if (core != null) {
+            for (ZoneType type : ZoneTypeRegistry.all()) {
+                if (ZoneTypeUnlocks.isAllowed(serverLevel, core, type.id())) {
+                    allowedZoneTypeIds.add(type.id().toString());
+                }
+            }
+        }
+        PacketDistributor.sendToPlayer(serverPlayer, new OpenPlotStakeScreenPayload(getId(), stakes.size(), valid, hasRoadAccessFlag, allowedZoneTypeIds));
         return InteractionResult.SUCCESS;
     }
 

@@ -37,7 +37,8 @@ public final class UpgradePlotScreen extends Screen {
     protected void init() {
         int centerX = width / 2;
         int rowCount = data.resources().size();
-        int y = 46 + rowCount * 10 + 10 + 10 + 14;
+        int extraLines = data.newlyAllowedZoneTypeLabels().isEmpty() ? 0 : 1;
+        int y = 46 + rowCount * 10 + 10 + 10 + extraLines * 10 + 14;
 
         Button onHand = addRenderableWidget(Button.builder(Component.literal("Upgrade (Plot Resources)"),
                         b -> upgrade(PlotTierUpgradeFunding.FundingOption.ON_HAND))
@@ -85,6 +86,12 @@ public final class UpgradePlotScreen extends Screen {
         lineY += 10;
         String gold = "Gold: On Plot " + data.goldOnPlot() + ", On Person " + data.goldOnPerson();
         graphics.text(font, gold, centerX - font.width(gold) / 2, lineY, 0xFFFFD700);
+
+        if (!data.newlyAllowedZoneTypeLabels().isEmpty()) {
+            lineY += 10;
+            String allowed = "Buildings Allowed After Upgrade: " + String.join(", ", data.newlyAllowedZoneTypeLabels());
+            graphics.text(font, allowed, centerX - font.width(allowed) / 2, lineY, 0xFF55FF55);
+        }
     }
 
     @Override
