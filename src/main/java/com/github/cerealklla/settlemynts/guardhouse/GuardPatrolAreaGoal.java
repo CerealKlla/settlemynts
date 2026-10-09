@@ -81,11 +81,25 @@ public class GuardPatrolAreaGoal extends Goal {
         return guard.getNavigation().isDone() && guard.level() instanceof ServerLevel;
     }
 
+    // "Reached" the waypoint -- checked explicitly rather than relying solely on vanilla's own
+    // Navigation#isDone(), whose node-reach radius (derived from the guard's bounding box) left
+    // guards stopping noticeably short of the actual stake. 2 blocks (user-specified).
+    private static final double ARRIVE_DIST_SQ = 4.0;
+
     @Override
     public boolean canContinueToUse() {
         // Keeps this goal "running" (so it isn't re-evaluated/re-picked) for the whole walk to
-        // nextFinalDestination, only releasing once vanilla's own pathfinding reports arrival.
-        return nextFinalDestination != null && !guard.getNavigation().isDone();
+        // nextFinalDestination, releasing once vanilla's own pathfinding reports arrival OR the guard
+        // is already within ARRIVE_DIST_SQ of it, whichever comes first.
+        if (nextFinalDestination == null) {
+            return false;
+        }
+        if (guard.getNavigation().isDone()) {
+            return false;
+        }
+        double dx = guard.getX() - (nextFinalDestination.getX() + 0.5);
+        double dz = guard.getZ() - (nextFinalDestination.getZ() + 0.5);
+        return (dx * dx + dz * dz) > ARRIVE_DIST_SQ;
     }
 
     @Override

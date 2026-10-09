@@ -202,6 +202,20 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
     }
 
     /**
+     * Guards never damage each other -- explicit request. Checks the damage source's direct AND
+     * root-cause entity (an arrow's direct entity is the arrow itself, not the guard that fired it),
+     * rather than relying on target selection alone (which only governs who a guard chooses to
+     * attack, not what actually connects).
+     */
+    @Override
+    public boolean isInvulnerableTo(ServerLevel level, net.minecraft.world.damagesource.DamageSource source) {
+        if (source.getDirectEntity() instanceof GuardEntity || source.getEntity() instanceof GuardEntity) {
+            return true;
+        }
+        return super.isInvulnerableTo(level, source);
+    }
+
+    /**
      * Safety net for "teleport back to the surface if more than 5 blocks underground" -- runs every
      * server tick regardless of which goal is currently active, so it still catches a guard that
      * ended up underground via combat-chasing a monster into a hole, not just via its own patrol

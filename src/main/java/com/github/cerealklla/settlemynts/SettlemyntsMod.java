@@ -689,6 +689,9 @@ public class SettlemyntsMod {
             allKeys.addAll(listedPriceByItem.keySet());
             allKeys.addAll(suppressedItems);
             allKeys.addAll(catalogDefaultByItem.keySet());
+            // Gold Nuggets are the shop's own currency, not merchandise -- never a row here, same as
+            // the sell-mode listing table already (correctly) excludes it.
+            allKeys.remove(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET));
 
             java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry> inventory = new java.util.ArrayList<>(tagRows);
             for (net.minecraft.resources.Identifier key : allKeys) {
