@@ -211,6 +211,26 @@ public final class Settlemynts {
      * the player is looking at), so passing it through directly removes the broken re-derivation
      * entirely instead of teaching it about sharing.
      */
+    /**
+     * Convenience overload for a caller that only has {@code plotId} (every cross-mod consumer so
+     * far -- e.g. Lyfe's crafting/cooking structure-upgrade funding, always against a player-founded,
+     * 1:1 plot/shop) -- re-derives {@code shopId} via Yconomics' own {@code getShopIdFor}, which is
+     * correct for that 1:1 case. A natural settlement's own Shop screen already has the real
+     * {@code shopId} in hand and should keep calling the explicit-{@code shopId} overload directly,
+     * not this one -- see that overload's own doc for why.
+     */
+    public static YconomicsShopBridge.PurchaseResult purchaseFromSettlementShop(ServerLevel level, UUID plotId, ShopResource resource,
+                                                                                 int quantity, List<Container> paymentBoxes) {
+        if (!YconomicsShopBridge.isAvailable()) {
+            return new YconomicsShopBridge.PurchaseResult(List.of(), 0);
+        }
+        Optional<UUID> shopId = YconomicsShopBridge.getShopIdFor(level, plotId);
+        if (shopId.isEmpty()) {
+            return new YconomicsShopBridge.PurchaseResult(List.of(), 0);
+        }
+        return purchaseFromSettlementShop(level, plotId, shopId.get(), resource, quantity, paymentBoxes);
+    }
+
     public static YconomicsShopBridge.PurchaseResult purchaseFromSettlementShop(ServerLevel level, UUID plotId, UUID shopId, ShopResource resource,
                                                                                  int quantity, List<Container> paymentBoxes) {
         if (!YconomicsShopBridge.isAvailable()) {
