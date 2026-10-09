@@ -353,6 +353,17 @@ public final class Settlemynts {
         return containers;
     }
 
+    /**
+     * A finalized player-founded plot's own real polygon, if resolvable -- exposed publicly 2026-10-09
+     * so {@code zone.PlotCraftingStructures} (NPC plot crafting) can scan the same area this plot's own
+     * boxes are found in, without duplicating the settlement/core lookup here. {@code Optional.empty()}
+     * for a natural-village plot (no settlement polygon exists for one) or an unresolvable plot, same
+     * as {@link #resolvePlotBoxes}'s own fallback condition.
+     */
+    public static Optional<Geometry.Polygon> resolvePlotPolygon(ServerLevel level, UUID plotId) {
+        return findPolygonForPlot(level, plotId);
+    }
+
     private static Optional<Geometry.Polygon> findPolygonForPlot(ServerLevel level, UUID plotId) {
         AABB worldBounds = new AABB(-WORLD_SCAN_RADIUS, level.getMinY(), -WORLD_SCAN_RADIUS,
                 WORLD_SCAN_RADIUS, level.getMaxY(), WORLD_SCAN_RADIUS);

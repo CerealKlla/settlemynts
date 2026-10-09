@@ -1,12 +1,16 @@
 package com.github.cerealklla.settlemynts.zone;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.api.Settlemynts;
+import com.github.cerealklla.settlemynts.bridge.LyfeCraftingBridge;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -33,6 +37,19 @@ import net.minecraft.world.item.Items;
  * <p>Pricing is never decided here -- a plot with surplus but no real Shop listing price for that
  * resource is simply skipped this round (confirmed default, 2026-10-09): Planned Inventory only ever
  * decides quantities, the existing Shop system remains the sole source of price.
+ *
+ * <p><b>NPC plot crafting, added the same day</b> (explicit user request: "a Blacksmith may purchase
+ * ingots from other plots and turn them into Armor and Weapons to sell... at midnight, it can check
+ * all plots in town and buy what is cheaper, it may find a completed weapon that is listed cheaper
+ * than it would be to buy the raw materials and craft one itself") -- when a buyer's deficit resource
+ * is a known {@link LyfeCraftingBridge} recipe output, {@link #settleCraftableResource} replaces the
+ * plain direct-buy-only handling below: it recursively compares buying the finished item outright
+ * against buying its missing materials and crafting it (via {@code CraftingExecutor}), per unit,
+ * choosing whichever is cheaper -- recursively, since a required material might itself be a recipe
+ * output obtainable the same two ways (confirmed with the user: real recursion, not capped at one
+ * level, guarded against cycles by {@code visiting} even though real Lyfe recipes only ever bottom out
+ * at raw materials today). A resource with no known recipe (or Lyfe not loaded) falls through to the
+ * original direct-buy-only logic, unchanged.
  */
 public final class PlannedInventoryClearing {
 
@@ -81,6 +98,13 @@ public final class PlannedInventoryClearing {
     }
 
     private static void settleResource(ServerLevel level, List<Participant> participants, ResourceKey key) {
+        if (!key.isTag() && LyfeCraftingBridge.isLoaded()) {
+            Optional<LyfeCraftingBridge.RecipeInfo> recipe = LyfeCraftingBridge.getRecipe(key.id());
+            if (recipe.isPresent()) {
+                settleCraftableResource(level, participants, key, recipe.get());
+                return;
+            }
+        }
         ShopResource resource = key.toShopResource();
         List<Buyer> buyers = new ArrayList<>();
         List<Seller> sellers = new ArrayList<>();
@@ -160,5 +184,216 @@ public final class PlannedInventoryClearing {
             return a.itemId().get().equals(b.itemId().get());
         }
         return false;
+    }
+
+    // ---- NPC plot crafting: buy-vs-craft midnight resolution -- see class doc. ----
+
+    private static void settleCraftableResource(ServerLevel level, List<Participant> participants, ResourceKey key, LyfeCraftingBridge.RecipeInfo recipe) {
+        for (Participant buyer : participants) {
+            PlannedInventoryTarget target = findTarget(buyer.plot(), key);
+            if (target == null) {
+                continue;
+            }
+            int currentStock = ContainerWithdraw.countAvailable(buyer.boxes(), key.toShopResource());
+            int deficit = target.targetCount() - currentStock;
+            if (deficit <= 0) {
+                continue;
+            }
+            int buyerTier = PlotCraftingStructures.maxCraftingStructureTier(level, buyer.plot().plotId());
+            for (int i = 0; i < deficit; i++) {
+                if (!fulfillOneUnit(level, participants, buyer, key, buyerTier, new LinkedHashSet<>())) {
+                    break; // Can't make further progress on this resource for this buyer this round.
+                }
+            }
+        }
+    }
+
+    /**
+     * Obtains exactly one unit of {@code key} for {@code buyer}, choosing whichever of direct-buy or
+     * self-craft is cheaper (or the only achievable one), and actually executes it. Returns whether it
+     * succeeded. {@code visiting} is the cycle guard for the self-craft recursion below.
+     */
+    private static boolean fulfillOneUnit(ServerLevel level, List<Participant> participants, Participant buyer,
+                                           ResourceKey key, int buyerTier, Set<Identifier> visiting) {
+        if (visiting.contains(key.id())) {
+            return false;
+        }
+        long directCost = cheapestSellerPrice(level, participants, buyer, key);
+
+        Optional<LyfeCraftingBridge.RecipeInfo> recipe = key.isTag() || !LyfeCraftingBridge.isLoaded()
+                ? Optional.empty() : LyfeCraftingBridge.getRecipe(key.id());
+        boolean canCraft = recipe.isPresent() && buyerTier >= recipe.get().tier();
+        long craftCost = -1;
+        if (canCraft) {
+            Set<Identifier> nextVisiting = withAdded(visiting, key.id());
+            craftCost = estimateCraftCost(level, participants, buyer, recipe.get(), buyerTier, nextVisiting);
+        }
+
+        boolean useCraft = canCraft && craftCost >= 0 && (directCost < 0 || craftCost <= directCost);
+        if (useCraft) {
+            return executeCraftOne(level, participants, buyer, recipe.get(), buyerTier, withAdded(visiting, key.id()));
+        }
+        if (directCost >= 0) {
+            return executeDirectBuyOne(level, participants, buyer, key);
+        }
+        return false;
+    }
+
+    /** Non-mutating: the recursive total cost to obtain every ingredient for one craft of {@code recipe}, or {@code -1} if any piece is unobtainable. */
+    private static long estimateCraftCost(ServerLevel level, List<Participant> participants, Participant buyer,
+                                           LyfeCraftingBridge.RecipeInfo recipe, int buyerTier, Set<Identifier> visiting) {
+        long total = 0;
+        for (Map.Entry<Identifier, Integer> entry : recipe.specificComponents().entrySet()) {
+            long unitCost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(entry.getKey(), false), buyerTier, visiting);
+            if (unitCost < 0) {
+                return -1;
+            }
+            total += unitCost * entry.getValue();
+        }
+        for (Map.Entry<String, Integer> entry : recipe.genericComponents().entrySet()) {
+            long cheapestMemberUnitCost = -1;
+            for (Identifier member : LyfeCraftingBridge.componentGroupMembers(entry.getKey())) {
+                long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), buyerTier, visiting);
+                if (cost >= 0 && (cheapestMemberUnitCost < 0 || cost < cheapestMemberUnitCost)) {
+                    cheapestMemberUnitCost = cost;
+                }
+            }
+            if (cheapestMemberUnitCost < 0) {
+                return -1;
+            }
+            total += cheapestMemberUnitCost * entry.getValue();
+        }
+        return total;
+    }
+
+    /** Non-mutating: the cheaper of direct-buy or recursive self-craft for one unit of {@code key}, or {@code -1} if neither is achievable. */
+    private static long cheapestCostForOneUnit(ServerLevel level, List<Participant> participants, Participant buyer,
+                                                ResourceKey key, int buyerTier, Set<Identifier> visiting) {
+        long direct = cheapestSellerPrice(level, participants, buyer, key);
+        long craft = -1;
+        if (!key.isTag() && !visiting.contains(key.id()) && LyfeCraftingBridge.isLoaded()) {
+            Optional<LyfeCraftingBridge.RecipeInfo> recipe = LyfeCraftingBridge.getRecipe(key.id());
+            if (recipe.isPresent() && buyerTier >= recipe.get().tier()) {
+                craft = estimateCraftCost(level, participants, buyer, recipe.get(), buyerTier, withAdded(visiting, key.id()));
+            }
+        }
+        if (direct < 0) {
+            return craft;
+        }
+        if (craft < 0) {
+            return direct;
+        }
+        return Math.min(direct, craft);
+    }
+
+    /** Cheapest real Shop listing price for {@code key} across every participant except {@code buyer}, or {@code -1} if nobody lists it. Price-only -- not stock-limited, see class doc. */
+    private static long cheapestSellerPrice(ServerLevel level, List<Participant> participants, Participant buyer, ResourceKey key) {
+        ShopResource resource = key.toShopResource();
+        long best = -1;
+        for (Participant p : participants) {
+            if (p == buyer || p.plot().shopId().isEmpty()) {
+                continue;
+            }
+            int price = sellPriceFor(level, p.plot().shopId().get(), resource);
+            if (price > 0 && (best < 0 || price < best)) {
+                best = price;
+            }
+        }
+        return best;
+    }
+
+    /** Buys exactly one unit of {@code key} from the cheapest seller that actually has stock and that {@code buyer} can afford, walking sellers in ascending price order. */
+    private static boolean executeDirectBuyOne(ServerLevel level, List<Participant> participants, Participant buyer, ResourceKey key) {
+        ShopResource resource = key.toShopResource();
+        List<Participant> candidates = new ArrayList<>(participants);
+        candidates.remove(buyer);
+        candidates.sort(Comparator.comparingInt(p -> {
+            int price = p.plot().shopId().map(id -> sellPriceFor(level, id, resource)).orElse(0);
+            return price <= 0 ? Integer.MAX_VALUE : price;
+        }));
+        for (Participant seller : candidates) {
+            if (seller.plot().shopId().isEmpty()) {
+                continue;
+            }
+            int price = sellPriceFor(level, seller.plot().shopId().get(), resource);
+            if (price <= 0 || ContainerWithdraw.countAvailable(seller.boxes(), resource) <= 0) {
+                continue;
+            }
+            if (ContainerWithdraw.countAvailable(buyer.boxes(), GOLD_NUGGETS) < price) {
+                continue;
+            }
+            List<ItemStack> goods = ContainerWithdraw.drain(seller.boxes(), resource, 1);
+            if (goods.isEmpty()) {
+                continue;
+            }
+            for (ItemStack stack : goods) {
+                ContainerDeposit.depositIntoAny(buyer.boxes(), stack);
+            }
+            for (ItemStack stack : ContainerWithdraw.drain(buyer.boxes(), GOLD_NUGGETS, price)) {
+                ContainerDeposit.depositIntoAny(seller.boxes(), stack);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Crafts exactly one unit of {@code recipe} for {@code buyer} -- tops up any shortfall in its own
+     * boxes first (buy-or-recursively-craft each missing ingredient, one unit at a time, via {@link
+     * #fulfillOneUnit}), then calls {@code CraftingExecutor.craftOne} for real. Returns {@code false}
+     * (no partial side effects beyond whatever ingredients were actually purchased/crafted along the
+     * way -- same graceful partial-fulfillment philosophy the rest of this engine already has) if any
+     * required ingredient couldn't be fully topped up.
+     */
+    private static boolean executeCraftOne(ServerLevel level, List<Participant> participants, Participant buyer,
+                                            LyfeCraftingBridge.RecipeInfo recipe, int buyerTier, Set<Identifier> visiting) {
+        Map<Identifier, Integer> available = Settlemynts.scanPlotItemStock(level, buyer.plot().plotId());
+
+        for (Map.Entry<Identifier, Integer> entry : recipe.specificComponents().entrySet()) {
+            int need = entry.getValue() - available.getOrDefault(entry.getKey(), 0);
+            for (int i = 0; i < need; i++) {
+                if (!fulfillOneUnit(level, participants, buyer, new ResourceKey(entry.getKey(), false), buyerTier, visiting)) {
+                    return false;
+                }
+            }
+        }
+        for (Map.Entry<String, Integer> entry : recipe.genericComponents().entrySet()) {
+            List<Identifier> members = LyfeCraftingBridge.componentGroupMembers(entry.getKey());
+            int have = members.stream().mapToInt(m -> available.getOrDefault(m, 0)).sum();
+            int need = entry.getValue() - have;
+            for (int i = 0; i < need; i++) {
+                Identifier cheapestMember = cheapestGroupMember(level, participants, buyer, members, buyerTier, visiting);
+                if (cheapestMember == null || !fulfillOneUnit(level, participants, buyer, new ResourceKey(cheapestMember, false), buyerTier, visiting)) {
+                    return false;
+                }
+            }
+        }
+
+        Map<Identifier, Integer> finalAvailable = Settlemynts.scanPlotItemStock(level, buyer.plot().plotId());
+        if (!CraftingExecutor.canCraftOne(finalAvailable, recipe)) {
+            return false; // Shouldn't normally happen given the top-ups above -- defensive guard.
+        }
+        CraftingExecutor.craftOne(buyer.boxes(), recipe);
+        return true;
+    }
+
+    private static Identifier cheapestGroupMember(ServerLevel level, List<Participant> participants, Participant buyer,
+                                                    List<Identifier> members, int buyerTier, Set<Identifier> visiting) {
+        Identifier best = null;
+        long bestCost = -1;
+        for (Identifier member : members) {
+            long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), buyerTier, visiting);
+            if (cost >= 0 && (bestCost < 0 || cost < bestCost)) {
+                bestCost = cost;
+                best = member;
+            }
+        }
+        return best;
+    }
+
+    private static Set<Identifier> withAdded(Set<Identifier> set, Identifier id) {
+        Set<Identifier> copy = new LinkedHashSet<>(set);
+        copy.add(id);
+        return copy;
     }
 }
