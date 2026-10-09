@@ -53,6 +53,42 @@ public final class ShopMidnightRestockTicker {
             }
             restockPlot(level, entry.getKey(), pos.pos());
         }
+        restockNaturalSettlementShops(server);
+    }
+
+    /**
+     * Same daily restock, for natural-settlement Shops (added 2026-10-08, explicit user request:
+     * "the same logic applied everywhere" -- these intentionally share {@link
+     * ShopSeeding#restockAtMidnight}'s own {@code NUGGET_FLOOR}, not a separate value). A natural
+     * settlement's Shop is shared across every plot of that Zone Type (see {@code
+     * NaturalVillagePlotGenerator}), so only one representative plot per (settlement, Zone Type) is
+     * restocked -- {@code api.Settlemynts#resolvePlotBoxes} resolves any of them to the exact same
+     * underground vault anyway (see {@code zone.NaturalShopVault}).
+     *
+     * <p>Calls {@link ShopSeeding#restockNaturalShop}, not {@link ShopSeeding#restockAtMidnight} --
+     * same real bug and reasoning as {@code ShopSeeding#seedNewPlotSharingShop}'s own doc: a shop
+     * with no owner needs plain goods actually restocked (and their listings kept alive), which
+     * {@code restockAtMidnight} deliberately no longer does for a player-owned plot's own good reason
+     * (an owner's own production should supply those, not a daily conjure). The gold-nugget floor is
+     * still the one piece both paths share verbatim.
+     */
+    private void restockNaturalSettlementShops(MinecraftServer server) {
+        ServerLevel level = server.overworld(); // Villages are overworld-only.
+        if (level == null) {
+            return;
+        }
+        for (java.util.List<PlotRecord> plots : NaturalSettlementPlotStore.get(server).all().values()) {
+            java.util.Map<net.minecraft.resources.Identifier, PlotRecord> representativeByZone = new java.util.HashMap<>();
+            for (PlotRecord plot : plots) {
+                representativeByZone.putIfAbsent(plot.zoneTypeId(), plot);
+            }
+            for (PlotRecord representative : representativeByZone.values()) {
+                if (representative.shopId().isEmpty()) {
+                    continue;
+                }
+                ShopSeeding.restockNaturalShop(level, representative, BlockPos.ZERO);
+            }
+        }
     }
 
     private void restockPlot(ServerLevel level, UUID plotId, BlockPos signPos) {

@@ -9,7 +9,6 @@ import com.mojang.serialization.Codec;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -33,7 +32,7 @@ import net.minecraft.resources.Identifier;
  * bridge.YconomicsShopBridge#getNuggetBalance}, loose inventory + Coin Purse). Computed for both
  * modes alike (cheap either way) but only rendered by {@code client.ShopScreen} (buy mode) today.
  */
-public record OpenShopPayload(BlockPos signPos, UUID plotId, boolean manage, List<ShopListingEntry> listings,
+public record OpenShopPayload(ShopAnchor anchor, UUID plotId, boolean manage, List<ShopListingEntry> listings,
                                List<ShopInventoryEntry> inventory, int shopGoldNuggets, int playerGoldNuggets) implements CustomPacketPayload {
 
     public static final Type<OpenShopPayload> TYPE =
@@ -43,7 +42,7 @@ public record OpenShopPayload(BlockPos signPos, UUID plotId, boolean manage, Lis
     private static final Codec<List<ShopInventoryEntry>> INVENTORY_CODEC = ShopInventoryEntry.CODEC.listOf();
 
     public static final StreamCodec<ByteBuf, OpenShopPayload> STREAM_CODEC = StreamCodec.composite(
-            ByteBufCodecs.fromCodec(BlockPos.CODEC), OpenShopPayload::signPos,
+            ShopAnchor.STREAM_CODEC, OpenShopPayload::anchor,
             ByteBufCodecs.fromCodec(UUIDUtil.CODEC), OpenShopPayload::plotId,
             ByteBufCodecs.BOOL, OpenShopPayload::manage,
             ByteBufCodecs.fromCodec(LISTINGS_CODEC), OpenShopPayload::listings,

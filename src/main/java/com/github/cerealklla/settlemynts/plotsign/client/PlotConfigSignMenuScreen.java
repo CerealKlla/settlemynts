@@ -82,7 +82,7 @@ public final class PlotConfigSignMenuScreen extends Screen {
     }
 
     private void requestShop(boolean manage) {
-        send(new RequestShopPayload(data.signPos(), manage));
+        send(new RequestShopPayload(new com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Sign(data.signPos()), manage));
         onClose();
     }
 

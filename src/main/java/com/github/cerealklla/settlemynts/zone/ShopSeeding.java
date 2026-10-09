@@ -6,10 +6,10 @@ import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
-import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
@@ -44,7 +44,7 @@ public final class ShopSeeding {
     private ShopSeeding() {
     }
 
-    public static void seedNewPlot(ServerLevel level, PlotRecord plot, GhostTownHallCoreEntity core, BlockPos plotAnchor) {
+    public static void seedNewPlot(ServerLevel level, PlotRecord plot, PlotOwner owner, BlockPos plotAnchor) {
         if (!YconomicsShopBridge.isAvailable()) {
             return;
         }
@@ -54,11 +54,73 @@ public final class ShopSeeding {
         }
         UUID shopId = YconomicsShopBridge.registerShop(level, plot.plotId());
         PlotRecord seeded = plot.withShopId(shopId);
-        core.updatePlot(seeded);
+        owner.updatePlot(seeded);
         applyCatalog(level, seeded, catalog.get(), plotAnchor, 1);
     }
 
-    public static void syncToCatalog(ServerLevel level, PlotRecord plot, GhostTownHallCoreEntity core, BlockPos plotAnchor) {
+    /** True if this Zone Type has a registered catalog at all -- lets a caller decide whether it's even worth resolving/creating a Shop before calling {@link #seedNewPlotSharingShop}. */
+    public static boolean hasCatalog(Identifier zoneTypeId) {
+        return ShopSeedCatalogRegistry.get(zoneTypeId).isPresent();
+    }
+
+    /**
+     * Same as {@link #seedNewPlot}, except the plot is stamped with {@code sharedShopId} (an already-
+     * resolved or freshly-minted Shop another plot of the same Zone Type may already be using) instead
+     * of always minting a brand-new one -- see {@code zone.NaturalSettlementPlotStore}'s own
+     * {@code sharedShops} doc for why natural-village plots of the same type all share one Shop.
+     * Calling this repeatedly with the same {@code sharedShopId} for several plots is safe --
+     * {@link #applyCatalogFull}'s stock top-up is idempotent either way.
+     *
+     * <p><b>Uses {@link #applyCatalogFull} (deposits + lists resource-backed goods too), not {@link
+     * #applyCatalog}</b> -- a real bug found live 2026-10-08: natural-village Shops showed "no items
+     * for sale" even after a midnight restock, because {@code applyCatalog}'s "never auto-list, the
+     * owner must explicitly Save Changes" rule (added the same day, for an unrelated player-owned-plot
+     * bug) silently applies here too, except a natural settlement's shared Shop has **no owner and no
+     * Manage Shop access at all** -- nothing can ever perform that explicit save. The no-auto-list
+     * rule is correct for a player-owned plot (an owner can and should curate their own listings); it
+     * was never meant to apply to an NPC-owned shop with nobody able to curate it.
+     */
+    public static void seedNewPlotSharingShop(ServerLevel level, PlotRecord plot, PlotOwner owner, BlockPos plotAnchor, UUID sharedShopId) {
+        if (!YconomicsShopBridge.isAvailable()) {
+            return;
+        }
+        Optional<ShopSeedCatalog> catalog = ShopSeedCatalogRegistry.get(plot.zoneTypeId());
+        if (catalog.isEmpty()) {
+            return;
+        }
+        PlotRecord seeded = plot.withShopId(sharedShopId);
+        owner.updatePlot(seeded);
+        applyCatalogFull(level, seeded, catalog.get(), plotAnchor, 1);
+    }
+
+    /**
+     * Daily restock for a natural settlement's shared Shop -- the equivalent of {@link
+     * #restockAtMidnight} for a Shop with no owner (see {@link #seedNewPlotSharingShop}'s own doc for
+     * why that method, not {@link #applyCatalog}, is what this must also build on). Called from
+     * {@code zone.ShopMidnightRestockTicker#restockNaturalSettlementShops} instead of the shared
+     * {@link #restockAtMidnight} for the exact same reason: plain goods need to actually restock (and
+     * stay listed) here, since no owner's own production ever supplies them.
+     */
+    public static void restockNaturalShop(ServerLevel level, PlotRecord plot, BlockPos plotAnchor) {
+        if (!YconomicsShopBridge.isAvailable() || plot.shopId().isEmpty()) {
+            return;
+        }
+        Optional<ShopSeedCatalog> catalog = ShopSeedCatalogRegistry.get(plot.zoneTypeId());
+        if (catalog.isPresent()) {
+            applyCatalogFull(level, plot, catalog.get(), plotAnchor, resolveTier(level, plot));
+        }
+        List<Container> plotBoxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plot.plotId());
+        if (plotBoxes.isEmpty()) {
+            return;
+        }
+        int currentNuggets = countStock(plotBoxes, GOLD_NUGGETS);
+        int nuggetTopUp = Math.max(0, NUGGET_FLOOR - currentNuggets);
+        if (nuggetTopUp > 0) {
+            ContainerDeposit.depositIntoAny(plotBoxes, new ItemStack(Items.GOLD_NUGGET, nuggetTopUp));
+        }
+    }
+
+    public static void syncToCatalog(ServerLevel level, PlotRecord plot, PlotOwner owner, BlockPos plotAnchor) {
         if (!YconomicsShopBridge.isAvailable()) {
             return;
         }
@@ -68,7 +130,7 @@ public final class ShopSeeding {
         }
         if (plot.shopId().isEmpty()) {
             UUID shopId = YconomicsShopBridge.registerShop(level, plot.plotId());
-            core.updatePlot(plot.withShopId(shopId));
+            owner.updatePlot(plot.withShopId(shopId));
         }
         applyCatalog(level, plot, catalog.get(), plotAnchor, resolveTier(level, plot));
     }
@@ -160,6 +222,38 @@ public final class ShopSeeding {
                 continue;
             }
             depositStock(plotBoxes, seed, topUp);
+        }
+    }
+
+    /**
+     * The no-owner equivalent of {@link #applyCatalog} -- deposits stock AND creates/refreshes a real
+     * listing for *every* catalog entry, resource-backed or stack-backed alike, since a natural
+     * settlement's shared Shop has no owner to ever perform the explicit "Save Changes"
+     * {@link #applyCatalog} now requires. Always (re)sets each listing's price to the catalog's own
+     * value via {@code YconomicsShopBridge#setListingPrice} -- safe here specifically because nobody
+     * can ever customize an NPC-owned shop's price away from the catalog default in the first place,
+     * unlike the player-owned case {@link #applyCatalog} guards against overwriting.
+     */
+    private static void applyCatalogFull(ServerLevel level, PlotRecord plot, ShopSeedCatalog catalog, BlockPos plotAnchor, int tier) {
+        if (plot.shopId().isEmpty()) {
+            return;
+        }
+        UUID shopId = plot.shopId().get();
+        List<SeedListing> seedListings = catalog.seedListingsFor(level, plotAnchor, tier);
+        if (seedListings.isEmpty()) {
+            return;
+        }
+        List<Container> plotBoxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plot.plotId());
+        for (SeedListing seed : seedListings) {
+            YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), seed.pricePerUnit());
+            if (plotBoxes.isEmpty()) {
+                continue;
+            }
+            int currentStock = countStock(plotBoxes, seed.listingResource());
+            int topUp = Math.max(0, seed.stockCount() - currentStock);
+            if (topUp > 0) {
+                depositStock(plotBoxes, seed, topUp);
+            }
         }
     }
 

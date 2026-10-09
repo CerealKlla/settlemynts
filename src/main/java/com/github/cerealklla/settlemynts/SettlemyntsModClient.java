@@ -167,7 +167,7 @@ public class SettlemyntsModClient {
         // "Enter Shop" button already sends (manage=false), now against the real Shop backend.
         while (OPEN_SHOP.consumeClick()) {
             if (Minecraft.getInstance().screen == null) {
-                ClientShopPromptState.get().ifPresent(signPos -> send(new RequestShopPayload(signPos, false)));
+                ClientShopPromptState.get().ifPresent(anchor -> send(new RequestShopPayload(anchor, false)));
             }
         }
 

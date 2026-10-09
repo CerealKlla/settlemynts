@@ -55,7 +55,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
  * plain floating icon for now, same pattern as Yconomics' {@code LootBagRenderer}. Both are
  * intentional scope cuts for this first milestone, not oversights -- see decisions.md.
  */
-public class GhostTownHallCoreEntity extends Entity {
+public class GhostTownHallCoreEntity extends Entity implements com.github.cerealklla.settlemynts.zone.PlotOwner {
 
     // Shared with SettlemyntsMod's built-in ZoneType registration (was an inline literal there) and
     // with findTownHallPlot below, added 2026-09-30 for "Reposition Town Hall Core" -- a single named

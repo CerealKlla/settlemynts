@@ -104,6 +104,13 @@ public class SettlemyntsMod {
     // other mod) can define its own EntityType for whatever it registers, no coordination needed.
     public static final EntityType PLOT_ENTITY_TYPE = new EntityType(Identifier.fromNamespaceAndPath(MODID, "plot"));
     public static final EntityType PLOT_BUFFER_ENTITY_TYPE = new EntityType(Identifier.fromNamespaceAndPath(MODID, "plot_buffer"));
+    // Deliberately a different EntityType from PLOT_ENTITY_TYPE (added 2026-10-08) -- a natural
+    // village's auto-generated per-building plots are explicitly NOT meant to render on the minimap
+    // (real user feedback during testing: the per-building outlines were visual clutter players don't
+    // need to see), unlike a player-founded plot. Lyfe's MinimapTracker only allow-lists
+    // PLOT_ENTITY_TYPE, so this type is invisible there for free -- everything else about a natural
+    // plot (ZoneType, Shop, etc.) is otherwise identical to a real plot; see zone.NaturalVillagePlotGenerator.
+    public static final EntityType NATURAL_PLOT_ENTITY_TYPE = new EntityType(Identifier.fromNamespaceAndPath(MODID, "natural_plot"));
 
     // The settlement's *real* (unpadded) fitted polygon, registered alongside the existing
     // Classification.CONSTRUCTED/EntityType.SETTLEMENT entity (which keeps its padded geometry
@@ -184,6 +191,15 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.LocatorCancelListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotStakeTossGuard());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.roadway.RoadwayClearanceListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillagePlotListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerationTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillageShopLinkTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalShopVaultProtectionListener());
+        NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.server.ServerStartingEvent event) ->
+                com.github.cerealklla.settlemynts.zone.NaturalVillagePlotPending.clearStaleQueuesOnServerStart());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerDeathListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerRespawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerShopInteractListener());
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.RegisterCommandsEvent event) ->
                 com.github.cerealklla.settlemynts.debug.DebugCommands.register(event.getDispatcher()));
 
@@ -454,7 +470,7 @@ public class SettlemyntsMod {
         // "Press G to open shop" proximity prompt (2026-10-05) -- see PlotShopProximityTicker's own doc.
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.STREAM_CODEC,
-                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState.set(payload.present(), payload.signPos()));
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState.set(payload.present(), payload.anchor()));
 
         // "Plot Details" (any plot's own sign) / "Plot Management" (Town Hall sign only) -- 2026-10-05.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestPlotDetailsPayload.TYPE,
@@ -566,40 +582,62 @@ public class SettlemyntsMod {
 
     /** "Enter Shop"/"Manage Shop" click -- lazily registers a Shop for the plot on the first "Manage Shop" (2026-10-05). */
     private static void requestShop(com.github.cerealklla.settlemynts.plotsign.RequestShopPayload payload, IPayloadContext context) {
-        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+        if (!(context.player() instanceof ServerPlayer player)) {
+            return;
+        }
+        handleRequestShop(player, payload.anchor(), payload.manage());
+    }
+
+    /**
+     * Real body of "Enter Shop"/"Manage Shop," extracted 2026-10-08 so {@code
+     * resident.VillagerShopInteractListener} (a plain right-click on a natural village's trading
+     * Villager, Part C of the "Natural settlements..." plan) can open the exact same Shop screen a
+     * Plot Config Sign's "Enter Shop" button would, without duplicating this logic.
+     */
+    public static void handleRequestShop(ServerPlayer player, com.github.cerealklla.settlemynts.plotsign.ShopAnchor anchor, boolean manage) {
+        if (!(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
         if (!com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.isAvailable()) {
             player.sendSystemMessage(Component.literal("Shop system not available (Yconomics isn't loaded)."));
             return;
         }
-        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
-                || sign.settlementCoreId() == null
-                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, anchor);
+        if (resolved.isEmpty()) {
             player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
             return;
         }
-        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
-        if (plot == null || !com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlock.hasShop(serverLevel, sign)) {
+        PlotRecord plot = resolved.get().plot();
+        com.github.cerealklla.settlemynts.zone.PlotOwner owner = resolved.get().owner();
+        // A natural village's auto-generated plot has no sign/owner to manage it through -- Manage
+        // Shop is simply never offered for one, regardless of what the client asked for (see
+        // ShopAnchor.Npc's own doc).
+        manage = manage && owner instanceof GhostTownHallCoreEntity;
+        if (plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)
+                || plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)
+                || (plot.shopId().isEmpty() && !manage)) {
             player.sendSystemMessage(Component.literal("This plot doesn't have a Shop."));
             return;
         }
-        boolean canManage = com.github.cerealklla.settlemynts.zone.PlotPermissions.canManage(plot, core, player.getUUID());
-        if (payload.manage() && !canManage) {
-            player.sendSystemMessage(Component.literal("You don't have permission to manage this Shop."));
-            return;
-        }
-        if (payload.manage() && plot.shopId().isEmpty()) {
-            java.util.UUID shopId = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.registerShop(serverLevel, plot.plotId());
-            plot = plot.withShopId(shopId);
-            core.updatePlot(plot);
+        if (manage) {
+            boolean canManage = com.github.cerealklla.settlemynts.zone.PlotPermissions.canManage(plot, (GhostTownHallCoreEntity) owner, player.getUUID());
+            if (!canManage) {
+                player.sendSystemMessage(Component.literal("You don't have permission to manage this Shop."));
+                return;
+            }
+            if (plot.shopId().isEmpty()) {
+                java.util.UUID shopId = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.registerShop(serverLevel, plot.plotId());
+                plot = plot.withShopId(shopId);
+                owner.updatePlot(plot);
+            }
         }
         // Idempotent catalog catch-up (2026-10-05) -- adds any Zone-Type-appropriate listings not
         // yet present (including the first ones, for a plot finalized before this feature existed,
         // or a plot whose Tier has risen since it was last seeded) and tops up low stock. No-op if
         // this Zone Type has no registered catalog. See ShopSeeding's own doc.
-        com.github.cerealklla.settlemynts.zone.ShopSeeding.syncToCatalog(serverLevel, plot, core, payload.signPos());
-        plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(plot);
+        com.github.cerealklla.settlemynts.zone.ShopSeeding.syncToCatalog(serverLevel, plot, owner, resolved.get().anchorPos());
+        UUID resolvedPlotId = plot.plotId();
+        plot = owner.getPlots().stream().filter(p -> p.plotId().equals(resolvedPlotId)).findFirst().orElse(plot);
 
         java.util.List<com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView> views = plot.shopId()
                 .map(shopId -> com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(serverLevel, shopId))
@@ -611,7 +649,7 @@ public class SettlemyntsMod {
                 ? com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getNuggetBalance(player)
                 : 0;
 
-        if (payload.manage()) {
+        if (manage) {
             // Manage mode (2026-10-08, redesigned per explicit spec the same day): the plot's Shop
             // Config is the union of four sources -- (1) real listings (always shown, concrete or
             // tag), (2) whatever's physically in the plot's boxes right now, (3) every resource the
@@ -642,7 +680,7 @@ public class SettlemyntsMod {
                     .collect(java.util.stream.Collectors.toSet());
 
             java.util.Map<net.minecraft.resources.Identifier, Integer> catalogDefaultByItem = new java.util.LinkedHashMap<>();
-            for (com.github.cerealklla.settlemynts.zone.SeedListing seed : com.github.cerealklla.settlemynts.zone.ShopSeeding.catalogSeedListings(serverLevel, plot, payload.signPos())) {
+            for (com.github.cerealklla.settlemynts.zone.SeedListing seed : com.github.cerealklla.settlemynts.zone.ShopSeeding.catalogSeedListings(serverLevel, plot, resolved.get().anchorPos())) {
                 seed.listingResource().itemId().ifPresent(itemId -> catalogDefaultByItem.put(itemId, seed.pricePerUnit()));
             }
 
@@ -667,7 +705,7 @@ public class SettlemyntsMod {
                     .comparing((com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry e) -> e.shopStock() <= 0)
                     .thenComparing(com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry::label));
             PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
-                    payload.signPos(), plot.plotId(), true, java.util.List.of(), inventory, shopGoldNuggets, playerGoldNuggets));
+                    anchor, plot.plotId(), true, java.util.List.of(), inventory, shopGoldNuggets, playerGoldNuggets));
             return;
         }
 
@@ -693,7 +731,7 @@ public class SettlemyntsMod {
                         .thenComparing(com.github.cerealklla.settlemynts.plotsign.ShopListingEntry::label))
                 .toList();
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
-                payload.signPos(), plot.plotId(), false, listings, java.util.List.of(), shopGoldNuggets, playerGoldNuggets));
+                anchor, plot.plotId(), false, listings, java.util.List.of(), shopGoldNuggets, playerGoldNuggets));
     }
 
     /** "Buy N" click on the real Shop screen -- charges the buyer only for whatever was actually filled. */
@@ -701,17 +739,23 @@ public class SettlemyntsMod {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        java.util.Optional<UUID> plotId = resolvePlotIdForSign(serverLevel, payload.signPos());
-        if (plotId.isEmpty()) {
+        java.util.Optional<ShopContext> resolvedBuy = resolveShopContext(serverLevel, payload.anchor());
+        if (resolvedBuy.isEmpty()) {
             player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        UUID plotId = resolvedBuy.get().plot().plotId();
+        java.util.Optional<UUID> shopId = resolvedBuy.get().plot().shopId();
+        if (shopId.isEmpty()) {
+            player.sendSystemMessage(Component.literal("This plot has no Shop."));
             return;
         }
         com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
                 ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
                 : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
-        java.util.List<net.minecraft.world.Container> boxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, plotId.get());
+        java.util.List<net.minecraft.world.Container> boxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, plotId);
         com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.PurchaseResult result =
-                com.github.cerealklla.settlemynts.api.Settlemynts.purchaseFromSettlementShop(serverLevel, plotId.get(), resource, payload.quantity(), boxes);
+                com.github.cerealklla.settlemynts.api.Settlemynts.purchaseFromSettlementShop(serverLevel, plotId, shopId.get(), resource, payload.quantity(), boxes);
         if (result.filled() <= 0) {
             player.sendSystemMessage(Component.literal("Out of stock."));
             return;
@@ -787,9 +831,15 @@ public class SettlemyntsMod {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        java.util.Optional<UUID> plotId = resolvePlotIdForSign(serverLevel, payload.signPos());
-        if (plotId.isEmpty()) {
+        java.util.Optional<ShopContext> resolvedSell = resolveShopContext(serverLevel, payload.anchor());
+        if (resolvedSell.isEmpty()) {
             player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        UUID plotId = resolvedSell.get().plot().plotId();
+        java.util.Optional<UUID> shopId = resolvedSell.get().plot().shopId();
+        if (shopId.isEmpty()) {
+            player.sendSystemMessage(Component.literal("This plot has no Shop."));
             return;
         }
         com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
@@ -816,7 +866,7 @@ public class SettlemyntsMod {
         }
         int quantity = Math.min(payload.quantity(), available);
         com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.SellResult result =
-                com.github.cerealklla.settlemynts.api.Settlemynts.sellToSettlementShop(serverLevel, plotId.get(), resource, itemId, quantity);
+                com.github.cerealklla.settlemynts.api.Settlemynts.sellToSettlementShop(serverLevel, plotId, shopId.get(), resource, itemId, quantity);
         if (result.itemsSold() <= 0) {
             player.sendSystemMessage(Component.literal("The shop can't afford to buy that right now."));
             return;
@@ -912,11 +962,53 @@ public class SettlemyntsMod {
     private record PlotRecordAndCore(PlotRecord plot, GhostTownHallCoreEntity core) {
     }
 
-    private static java.util.Optional<UUID> resolvePlotIdForSign(ServerLevel level, net.minecraft.core.BlockPos signPos) {
-        if (!(level.getBlockEntity(signPos) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign) || sign.plotId() == null) {
+    /**
+     * Resolves either {@link com.github.cerealklla.settlemynts.plotsign.ShopAnchor} variant to a real
+     * plot -- {@link com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Sign} the existing
+     * Plot-Config-Sign-block path, {@link com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc}
+     * (added 2026-10-08, Part C of the "Natural settlements..." plan) a tagged trading Villager
+     * resolved via its persistent {@code settlemynts_plot_id} tag ({@code
+     * zone.NaturalVillagePlotGenerator#PLOT_ID_TAG}) back through {@code
+     * zone.NaturalSettlementPlotStore#findByPlotId}.
+     */
+    private record ShopContext(PlotRecord plot, com.github.cerealklla.settlemynts.zone.PlotOwner owner, net.minecraft.core.BlockPos anchorPos) {
+    }
+
+    private static java.util.Optional<ShopContext> resolveShopContext(ServerLevel level, com.github.cerealklla.settlemynts.plotsign.ShopAnchor anchor) {
+        if (anchor instanceof com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Sign sign) {
+            net.minecraft.core.BlockPos pos = sign.pos();
+            if (!(level.getBlockEntity(pos) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity signEntity)
+                    || signEntity.settlementCoreId() == null
+                    || !(level.getEntity(signEntity.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+                return java.util.Optional.empty();
+            }
+            PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(signEntity.plotId())).findFirst().orElse(null);
+            if (plot == null) {
+                return java.util.Optional.empty();
+            }
+            return java.util.Optional.of(new ShopContext(plot, core, pos));
+        }
+        com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc npc = (com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc) anchor;
+        boolean foundEntity = level.getEntity(npc.entityId()) instanceof net.minecraft.world.entity.npc.villager.Villager;
+        if (!foundEntity) {
+            LOGGER.info("Natural village shop: Npc anchor entityId={} -- no Villager entity found at that id", npc.entityId());
             return java.util.Optional.empty();
         }
-        return java.util.Optional.of(sign.plotId());
+        net.minecraft.world.entity.npc.villager.Villager villager = (net.minecraft.world.entity.npc.villager.Villager) level.getEntity(npc.entityId());
+        java.util.Optional<UUID> plotId = villager.getPersistentData().getIntArray(com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator.PLOT_ID_TAG)
+                .map(net.minecraft.core.UUIDUtil::uuidFromIntArray);
+        if (plotId.isEmpty()) {
+            LOGGER.info("Natural village shop: Npc anchor entityId={} -- Villager found but has no plot tag", npc.entityId());
+            return java.util.Optional.empty();
+        }
+        java.util.Optional<ShopContext> resolved = com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore.get(level.getServer()).findByPlotId(plotId.get())
+                .map(entry -> new ShopContext(entry.getValue(),
+                        new com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotOwner(level.getServer(), entry.getKey()),
+                        villager.blockPosition()));
+        if (resolved.isEmpty()) {
+            LOGGER.info("Natural village shop: Npc anchor entityId={} plotId={} -- tag present but no matching plot found in the store", npc.entityId(), plotId.get());
+        }
+        return resolved;
     }
 
     private static java.util.Optional<PlotRecordAndCore> resolvePlotForManage(ServerLevel level, net.minecraft.core.BlockPos signPos, UUID playerId) {

@@ -4,7 +4,6 @@ import io.netty.buffer.ByteBuf;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -17,13 +16,13 @@ import net.minecraft.resources.Identifier;
  * api.Yconomics#sellToShop}'s own doc) -- the concrete item actually sold is resolved server-side
  * from the seller's own held stack rather than trusting anything sent from the client.
  */
-public record SellToShopPayload(BlockPos signPos, Identifier resourceKey, boolean isTag, int quantity) implements CustomPacketPayload {
+public record SellToShopPayload(ShopAnchor anchor, Identifier resourceKey, boolean isTag, int quantity) implements CustomPacketPayload {
 
     public static final Type<SellToShopPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "sell_to_shop"));
 
     public static final StreamCodec<ByteBuf, SellToShopPayload> STREAM_CODEC = StreamCodec.composite(
-            ByteBufCodecs.fromCodec(BlockPos.CODEC), SellToShopPayload::signPos,
+            ShopAnchor.STREAM_CODEC, SellToShopPayload::anchor,
             ByteBufCodecs.fromCodec(Identifier.CODEC), SellToShopPayload::resourceKey,
             ByteBufCodecs.BOOL, SellToShopPayload::isTag,
             ByteBufCodecs.VAR_INT, SellToShopPayload::quantity,

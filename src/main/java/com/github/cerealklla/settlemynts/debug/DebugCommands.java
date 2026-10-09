@@ -1,6 +1,7 @@
 package com.github.cerealklla.settlemynts.debug;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,7 +17,10 @@ import com.github.cerealklla.settlemynts.bridge.YconomicsBillBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
+import com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore;
+import com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
+import com.github.cerealklla.settlemynts.zone.SettlementKey;
 
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -70,8 +74,75 @@ public final class DebugCommands {
                 .requires(source -> true) // deliberately no permission gate -- see class doc
                 .then(Commands.literal("plotinfo")
                         .executes(ctx -> plotInfo(ctx.getSource())))
+                .then(Commands.literal("naturalvillagers")
+                        .executes(ctx -> naturalVillagers(ctx.getSource())))
                 .then(Commands.literal("plot")
                         .then(Commands.literal("bill").then(billPlotId))));
+    }
+
+    /**
+     * DEBUG ONLY -- added 2026-10-08 to directly check a real user report ("I don't think a single
+     * NPC has taken a job out of 4 towns") instead of guessing at vanilla profession-claiming timing
+     * from code review alone. For every known natural settlement, reports total Villager count, how
+     * many have claimed a real profession (i.e. not {@code VillagerProfession.NONE}) and what they
+     * are, and how many are tagged with {@link NaturalVillagePlotGenerator#PLOT_ID_TAG} (the thing
+     * that actually lets them open the shared Shop) -- see {@code zone.NaturalVillageShopLinkTicker}.
+     * This mod never assigns a profession itself; if this command shows 0 villagers with a real
+     * profession, that's vanilla's own job-site-claiming AI not having claimed anything yet, not a
+     * bug here.
+     */
+    private static int naturalVillagers(CommandSourceStack source) {
+        if (!(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run in a real level."));
+            return 0;
+        }
+        Map<SettlementKey, List<PlotRecord>> allSettlements = NaturalSettlementPlotStore.get(level.getServer()).all();
+        if (allSettlements.isEmpty()) {
+            source.sendFailure(Component.literal("No natural-village plots tracked yet."));
+            return 0;
+        }
+        for (Map.Entry<SettlementKey, List<PlotRecord>> entry : allSettlements.entrySet()) {
+            Optional<GeographicEntity> settlementEntity = Cartography.getEntity(level, new EntityId(entry.getKey().settlementEntityId()));
+            if (settlementEntity.isEmpty() || !(settlementEntity.get().geometry() instanceof Geometry.Polygon polygon) || polygon.vertices().isEmpty()) {
+                source.sendSuccess(() -> Component.literal("Settlement " + entry.getKey() + ": no loaded Cartographyr entity."), false);
+                continue;
+            }
+            int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
+            for (Geometry.Polygon.Vertex vertex : polygon.vertices()) {
+                minX = Math.min(minX, vertex.x());
+                maxX = Math.max(maxX, vertex.x());
+                minZ = Math.min(minZ, vertex.z());
+                maxZ = Math.max(maxZ, vertex.z());
+            }
+            AABB bounds = new AABB(minX, level.getMinY(), minZ, maxX, level.getMaxY(), maxZ);
+            List<net.minecraft.world.entity.npc.villager.Villager> villagers =
+                    level.getEntitiesOfClass(net.minecraft.world.entity.npc.villager.Villager.class, bounds,
+                            v -> v.getClass() == net.minecraft.world.entity.npc.villager.Villager.class);
+            int withProfession = 0;
+            int tagged = 0;
+            StringBuilder professions = new StringBuilder();
+            for (net.minecraft.world.entity.npc.villager.Villager villager : villagers) {
+                var profession = villager.getVillagerData().profession();
+                boolean hasJob = !profession.is(net.minecraft.world.entity.npc.villager.VillagerProfession.NONE);
+                if (hasJob) {
+                    withProfession++;
+                    professions.append(profession.unwrapKey().map(k -> k.identifier().getPath()).orElse("?")).append(", ");
+                }
+                if (villager.getPersistentData().contains(NaturalVillagePlotGenerator.PLOT_ID_TAG)) {
+                    tagged++;
+                }
+            }
+            String plotSummary = entry.getValue().size() + " plot(s): " + entry.getValue().stream()
+                    .map(p -> p.name()).reduce((a, b) -> a + ", " + b).orElse("none");
+            int villagerCount = villagers.size();
+            int finalWithProfession = withProfession;
+            int finalTagged = tagged;
+            String professionList = professions.toString();
+            source.sendSuccess(() -> Component.literal("Settlement " + entry.getKey() + " (" + plotSummary + "): "
+                    + villagerCount + " villager(s), " + finalWithProfession + " with a claimed profession ["
+                    + professionList + "], " + finalTagged + " tagged for shop access."), false);
+        }
+        return 1;
     }
 
     /**

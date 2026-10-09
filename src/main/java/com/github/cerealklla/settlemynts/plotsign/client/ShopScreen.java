@@ -129,11 +129,11 @@ public final class ShopScreen extends Screen {
     }
 
     private void buy(ShopListingEntry listing) {
-        send(new BuyFromShopPayload(data.signPos(), listing.resourceKey(), listing.isTag(), 1));
+        send(new BuyFromShopPayload(data.anchor(), listing.resourceKey(), listing.isTag(), 1));
     }
 
     private void sell(ShopListingEntry listing) {
-        send(new SellToShopPayload(data.signPos(), listing.resourceKey(), listing.isTag(), 1));
+        send(new SellToShopPayload(data.anchor(), listing.resourceKey(), listing.isTag(), 1));
     }
 
     private void send(CustomPacketPayload payload) {

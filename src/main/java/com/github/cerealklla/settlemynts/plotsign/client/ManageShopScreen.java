@@ -120,8 +120,11 @@ public final class ManageShopScreen extends Screen {
                     return new ShopListingUpdate(entry.resourceKey(), entry.isTag(), price);
                 })
                 .toList();
+        // Manage mode is sign-only (see ShopAnchor's own doc -- a natural village's auto-generated
+        // plot never offers Manage Shop), so this screen's anchor is always a Sign.
+        net.minecraft.core.BlockPos signPos = ((com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Sign) data.anchor()).pos();
         Minecraft.getInstance().getConnection().send(new ServerboundCustomPayloadPacket(
-                new SetShopListingsPayload(data.signPos(), updates)));
+                new SetShopListingsPayload(signPos, updates)));
         // Closes outright rather than reopening this same screen with its now-stale data -- same
         // "action then close, reopen the sign for fresh state" convention this feature area already
         // settled on (see ShopScreen's own doc).
