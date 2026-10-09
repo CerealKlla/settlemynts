@@ -36,8 +36,8 @@ public final class UpgradePlotScreen extends Screen {
     @Override
     protected void init() {
         int centerX = width / 2;
-        int rowCount = data.resourceLabels().size();
-        int y = 46 + rowCount * 10 + 14;
+        int rowCount = data.resources().size();
+        int y = 46 + rowCount * 10 + 10 + 10 + 14;
 
         Button onHand = addRenderableWidget(Button.builder(Component.literal("Upgrade (Plot Resources)"),
                         b -> upgrade(PlotTierUpgradeFunding.FundingOption.ON_HAND))
@@ -77,12 +77,14 @@ public final class UpgradePlotScreen extends Screen {
         String header = "Upgrade to Tier " + data.nextTier() + " costs:";
         graphics.text(font, header, centerX - font.width(header) / 2, 34, 0xFFFFFFFF);
         int lineY = 46;
-        for (int i = 0; i < data.resourceLabels().size(); i++) {
-            String line = data.resourceAmounts().get(i) + "x " + data.resourceLabels().get(i)
-                    + " (" + data.resourceOnHand().get(i) + " on plot)";
+        for (UpgradePlotPreviewPayload.ResourceRow row : data.resources()) {
+            String line = row.amount() + "x " + row.label() + " (" + row.onHand() + " on plot)";
             graphics.text(font, line, centerX - font.width(line) / 2, lineY, 0xFFAAAAAA);
             lineY += 10;
         }
+        lineY += 10;
+        String gold = "Gold: On Plot " + data.goldOnPlot() + ", On Person " + data.goldOnPerson();
+        graphics.text(font, gold, centerX - font.width(gold) / 2, lineY, 0xFFFFD700);
     }
 
     @Override

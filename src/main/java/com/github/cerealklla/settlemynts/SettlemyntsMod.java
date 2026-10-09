@@ -1118,27 +1118,16 @@ public class SettlemyntsMod {
         }
         com.github.cerealklla.settlemynts.construction.PlotTierUpgradeFunding.Preview preview =
                 com.github.cerealklla.settlemynts.construction.PlotTierUpgradeFunding.preview(player, serverLevel, plot, core.getUUID(), payload.signPos());
-        List<String> labels = new ArrayList<>();
-        List<Integer> amounts = new ArrayList<>();
-        List<Integer> onHand = new ArrayList<>();
-        List<Integer> mixCosts = new ArrayList<>();
-        List<Boolean> mixCovered = new ArrayList<>();
-        List<Integer> goldCosts = new ArrayList<>();
-        List<Boolean> goldCovered = new ArrayList<>();
+        List<com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload.ResourceRow> rows = new ArrayList<>();
         for (var entry : preview.resources()) {
-            labels.add(entry.label());
-            amounts.add(entry.amount());
-            onHand.add(entry.onHand());
-            mixCosts.add(entry.mixCost());
-            mixCovered.add(entry.mixFullyCovered());
-            goldCosts.add(entry.goldCost());
-            goldCovered.add(entry.goldFullyCovered());
+            rows.add(new com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload.ResourceRow(
+                    entry.label(), entry.amount(), entry.onHand(), entry.mixCost(), entry.mixFullyCovered(), entry.goldCost(), entry.goldFullyCovered()));
         }
         int flags = com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload.packFlags(
                 preview.onHandEnabled(), preview.mixEnabled(), preview.goldEnabled());
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload(
-                payload.signPos(), plot.tier() + 1, labels, amounts, onHand, mixCosts, mixCovered, goldCosts, goldCovered,
-                preview.mixTotalCost(), preview.goldTotalCost(), flags));
+                payload.signPos(), plot.tier() + 1, rows,
+                preview.mixTotalCost(), preview.goldTotalCost(), flags, preview.goldOnPlot(), preview.goldOnPerson()));
     }
 
     /**

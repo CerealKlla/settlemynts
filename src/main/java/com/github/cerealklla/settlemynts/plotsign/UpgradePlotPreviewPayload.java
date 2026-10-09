@@ -16,19 +16,32 @@ import net.minecraft.resources.Identifier;
 /**
  * Server-to-client: opens {@code client.UpgradePlotScreen} with a live, server-computed cost/
  * affordability breakdown (see {@code construction.PlotTierUpgradeFunding#preview}) -- added
- * 2026-10-09. Parallel lists (one entry per required resource) rather than a nested record, to keep
- * the {@code StreamCodec} simple; {@code enabledFlags} packs the three button-enabled booleans into
- * one bitmask (vanilla's {@code StreamCodec#composite} tops out at 12 fields, one more than this
- * payload would otherwise need) -- {@link #onHandEnabled()}/{@link #mixEnabled()}/{@link
- * #goldEnabled()} unpack it. These already fold in both sourceability (plot stock + settlement
- * economy, stock-aware) and the player's own gold balance -- the screen just disables a button
- * directly off these, no further client-side math needed.
+ * 2026-10-09. Per-resource fields are grouped into {@link ResourceRow} (its own small
+ * {@code StreamCodec}) rather than parallel lists -- vanilla's {@code StreamCodec#composite} tops out
+ * at 12 fields, and the original 7-parallel-list shape left no room for {@code goldOnPlot}/
+ * {@code goldOnPerson} (added the same day, "I'd like to see ... Gold: On Plot #, On Person #")
+ * without this restructure. {@code enabledFlags} still packs the three button-enabled booleans into
+ * one bitmask -- {@link #onHandEnabled()}/{@link #mixEnabled()}/{@link #goldEnabled()} unpack it.
+ * These already fold in both sourceability (plot stock + settlement economy, stock-aware) and the
+ * player's own gold balance -- the screen just disables a button directly off these, no further
+ * client-side math needed.
  */
-public record UpgradePlotPreviewPayload(BlockPos signPos, int nextTier,
-                                         List<String> resourceLabels, List<Integer> resourceAmounts, List<Integer> resourceOnHand,
-                                         List<Integer> mixCosts, List<Boolean> mixCovered,
-                                         List<Integer> goldCosts, List<Boolean> goldCovered,
-                                         int mixTotalCost, int goldTotalCost, int enabledFlags) implements CustomPacketPayload {
+public record UpgradePlotPreviewPayload(BlockPos signPos, int nextTier, List<ResourceRow> resources,
+                                         int mixTotalCost, int goldTotalCost, int enabledFlags,
+                                         int goldOnPlot, int goldOnPerson) implements CustomPacketPayload {
+
+    /** One resource row for {@code client.UpgradePlotScreen} -- see {@code construction.PlotTierUpgradeFunding.ResourcePreviewEntry}, which this mirrors 1:1 over the wire. */
+    public record ResourceRow(String label, int amount, int onHand, int mixCost, boolean mixCovered, int goldCost, boolean goldCovered) {
+        public static final StreamCodec<ByteBuf, ResourceRow> STREAM_CODEC = StreamCodec.composite(
+                ByteBufCodecs.STRING_UTF8, ResourceRow::label,
+                ByteBufCodecs.VAR_INT, ResourceRow::amount,
+                ByteBufCodecs.VAR_INT, ResourceRow::onHand,
+                ByteBufCodecs.VAR_INT, ResourceRow::mixCost,
+                ByteBufCodecs.BOOL, ResourceRow::mixCovered,
+                ByteBufCodecs.VAR_INT, ResourceRow::goldCost,
+                ByteBufCodecs.BOOL, ResourceRow::goldCovered,
+                ResourceRow::new);
+    }
 
     private static final int ON_HAND_ENABLED_BIT = 1;
     private static final int MIX_ENABLED_BIT = 2;
@@ -66,16 +79,12 @@ public record UpgradePlotPreviewPayload(BlockPos signPos, int nextTier,
     public static final StreamCodec<ByteBuf, UpgradePlotPreviewPayload> STREAM_CODEC = StreamCodec.composite(
             ByteBufCodecs.fromCodec(BlockPos.CODEC), UpgradePlotPreviewPayload::signPos,
             ByteBufCodecs.VAR_INT, UpgradePlotPreviewPayload::nextTier,
-            ByteBufCodecs.collection(ArrayList::new, ByteBufCodecs.STRING_UTF8), UpgradePlotPreviewPayload::resourceLabels,
-            ByteBufCodecs.collection(ArrayList::new, ByteBufCodecs.VAR_INT), UpgradePlotPreviewPayload::resourceAmounts,
-            ByteBufCodecs.collection(ArrayList::new, ByteBufCodecs.VAR_INT), UpgradePlotPreviewPayload::resourceOnHand,
-            ByteBufCodecs.collection(ArrayList::new, ByteBufCodecs.VAR_INT), UpgradePlotPreviewPayload::mixCosts,
-            ByteBufCodecs.collection(ArrayList::new, ByteBufCodecs.BOOL), UpgradePlotPreviewPayload::mixCovered,
-            ByteBufCodecs.collection(ArrayList::new, ByteBufCodecs.VAR_INT), UpgradePlotPreviewPayload::goldCosts,
-            ByteBufCodecs.collection(ArrayList::new, ByteBufCodecs.BOOL), UpgradePlotPreviewPayload::goldCovered,
+            ByteBufCodecs.collection(ArrayList::new, ResourceRow.STREAM_CODEC), UpgradePlotPreviewPayload::resources,
             ByteBufCodecs.VAR_INT, UpgradePlotPreviewPayload::mixTotalCost,
             ByteBufCodecs.VAR_INT, UpgradePlotPreviewPayload::goldTotalCost,
             ByteBufCodecs.VAR_INT, UpgradePlotPreviewPayload::enabledFlags,
+            ByteBufCodecs.VAR_INT, UpgradePlotPreviewPayload::goldOnPlot,
+            ByteBufCodecs.VAR_INT, UpgradePlotPreviewPayload::goldOnPerson,
             UpgradePlotPreviewPayload::new);
 
     @Override

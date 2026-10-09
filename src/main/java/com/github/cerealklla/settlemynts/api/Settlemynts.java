@@ -20,6 +20,7 @@ import com.github.cerealklla.settlemynts.construction.ZoneTierConstructionConfig
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.zone.PlotGeometry;
+import com.github.cerealklla.settlemynts.zone.PlotPermissions;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 import com.github.cerealklla.settlemynts.zone.ShopResource;
 import com.github.cerealklla.settlemynts.zone.ShopSeedCatalog;
@@ -88,8 +89,33 @@ public final class Settlemynts {
         return ShopSeedCatalogRegistry.get(zoneTypeId);
     }
 
-    /** A finalized plot's public-facing details -- everything a cross-mod caller needs without reaching into {@code zone.PlotRecord}/{@code founding.GhostTownHallCoreEntity} directly. */
-    public record PlotHandle(UUID plotId, Identifier zoneTypeId, Optional<UUID> owner, UUID settlementCoreId, Geometry.Polygon polygon) {
+    /**
+     * A finalized plot's public-facing details -- everything a cross-mod caller needs without
+     * reaching into {@code zone.PlotRecord}/{@code founding.GhostTownHallCoreEntity} directly.
+     * {@code tier} (added 2026-10-09 for Lyfe's crafting/cooking structure upgrade cap -- "do not
+     * allow the structure to upgrade past the limit of the plot itself") is the plot's own unlocked
+     * construction-Tier cap, see {@code zone.PlotRecord#tier}'s own class doc for the full
+     * plot-tier-vs-building-tier split this mirrors.
+     */
+    public record PlotHandle(UUID plotId, Identifier zoneTypeId, Optional<UUID> owner, UUID settlementCoreId, Geometry.Polygon polygon, int tier) {
+    }
+
+    /**
+     * Can {@code playerId} manage the finalized plot at {@code pos} -- a thin cross-mod wrapper over
+     * {@code zone.PlotPermissions#canManage}, added 2026-10-09 for Lyfe's crafting/cooking structure
+     * upgrade button (real report: "do not show the upgrade button" to a non-owner). {@code false} if
+     * there's no plot there at all, same as every other negative case here.
+     */
+    public static boolean canManagePlotAt(ServerLevel level, BlockPos pos, UUID playerId) {
+        AABB worldBounds = new AABB(-WORLD_SCAN_RADIUS, level.getMinY(), -WORLD_SCAN_RADIUS,
+                WORLD_SCAN_RADIUS, level.getMaxY(), WORLD_SCAN_RADIUS);
+        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+            Optional<PlotRecord> plot = PlotGeometry.findContainingPlot(level, core, pos.getX(), pos.getZ());
+            if (plot.isPresent()) {
+                return PlotPermissions.canManage(plot.get(), core, playerId);
+            }
+        }
+        return false;
     }
 
     /**
@@ -108,7 +134,7 @@ public final class Settlemynts {
             if (plot.isPresent()) {
                 Optional<Geometry.Polygon> polygon = resolvePolygon(level, plot.get());
                 if (polygon.isPresent()) {
-                    return Optional.of(new PlotHandle(plot.get().plotId(), plot.get().zoneTypeId(), plot.get().owner(), core.getUUID(), polygon.get()));
+                    return Optional.of(new PlotHandle(plot.get().plotId(), plot.get().zoneTypeId(), plot.get().owner(), core.getUUID(), polygon.get(), plot.get().tier()));
                 }
             }
         }

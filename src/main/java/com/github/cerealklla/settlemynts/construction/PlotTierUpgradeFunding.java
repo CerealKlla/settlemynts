@@ -53,8 +53,17 @@ public final class PlotTierUpgradeFunding {
     public record ResourcePreviewEntry(String label, int amount, int onHand, int mixCost, boolean mixFullyCovered, int goldCost, boolean goldFullyCovered) {
     }
 
-    /** {@code onHandEnabled}/{@code mixEnabled}/{@code goldEnabled} already fold in both "can the resources actually be sourced at all" and "can the player actually afford the gold involved" -- {@code client.UpgradePlotScreen} just disables a button directly off these, no further client-side math needed. */
-    public record Preview(List<ResourcePreviewEntry> resources, boolean onHandEnabled, int mixTotalCost, boolean mixEnabled, int goldTotalCost, boolean goldEnabled) {
+    /**
+     * {@code onHandEnabled}/{@code mixEnabled}/{@code goldEnabled} already fold in both "can the
+     * resources actually be sourced at all" and "can the player actually afford the gold involved" --
+     * {@code client.UpgradePlotScreen} just disables a button directly off these, no further
+     * client-side math needed. {@code goldOnPlot}/{@code goldOnPerson} (added 2026-10-09, explicit
+     * request) are purely informational -- real Gold Nuggets don't count toward either funding option
+     * today (only the player's own balance is ever charged), this just answers "how much is sitting
+     * in my plot's own boxes vs. on me."
+     */
+    public record Preview(List<ResourcePreviewEntry> resources, boolean onHandEnabled, int mixTotalCost, boolean mixEnabled,
+                           int goldTotalCost, boolean goldEnabled, int goldOnPlot, int goldOnPerson) {
     }
 
     private record Need(ResourceCost entry, int onHand, int shortfall) {
@@ -102,7 +111,21 @@ public final class PlotTierUpgradeFunding {
         if (goldEnabled && nuggetBalance < goldTotal) {
             goldEnabled = false;
         }
-        return new Preview(entries, onHandEnabled, mixTotal, mixEnabled, goldTotal, goldEnabled);
+        int goldOnPlot = countAvailable(plotBoxes, net.minecraft.world.item.Items.GOLD_NUGGET);
+        return new Preview(entries, onHandEnabled, mixTotal, mixEnabled, goldTotal, goldEnabled, goldOnPlot, nuggetBalance);
+    }
+
+    private static int countAvailable(List<Container> boxes, net.minecraft.world.item.Item item) {
+        int total = 0;
+        for (Container box : boxes) {
+            for (int slot = 0; slot < box.getContainerSize(); slot++) {
+                ItemStack stack = box.getItem(slot);
+                if (stack.getItem() == item) {
+                    total += stack.getCount();
+                }
+            }
+        }
+        return total;
     }
 
     public static Result fund(ServerPlayer player, ServerLevel level, PlotRecord plot, UUID settlementCoreId, BlockPos originPos, FundingOption option) {
