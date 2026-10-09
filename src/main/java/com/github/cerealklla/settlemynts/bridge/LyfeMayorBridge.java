@@ -44,6 +44,11 @@ public final class LyfeMayorBridge {
         return Lyfe.mayorXpForPlotUpgrade(newTier);
     }
 
+    /** "Mayor should also gain xp for every 10 gold taxed" -- not called by anything yet, no tax system exists here to call it from (explicit user note); ready for whenever one does. */
+    public static int xpForGoldTaxed(int goldTaxed) {
+        return Lyfe.mayorXpForGoldTaxed(goldTaxed);
+    }
+
     public static int minMayorLevelForZoneType(Identifier zoneTypeId) {
         return Lyfe.minMayorLevelForZoneType(zoneTypeId);
     }
