@@ -1082,11 +1082,13 @@ public class SettlemyntsMod {
     }
 
     /**
-     * "Upgrade Plot" button click (2026-10-09, explicit request: "same options as upgrading
+     * "Upgrade Plot" funding button click (2026-10-09, explicit request: "same options as upgrading
      * structures") -- re-resolves the plot/{@code canManage} server-side, same precedent as every
-     * other sign button, then hands off to {@code bridge.BlueprintsConstructionBridge#requestUpgrade}
-     * to open the Blueprint picker for this plot's next Tier up. Available on every plot type (not
-     * just Town Hall) -- any plot with a Construction Box can be upgraded.
+     * other sign button, then funds raising {@code PlotRecord#tier} by one via {@code
+     * construction.PlotTierUpgradeFunding}. Deliberately never touches the Construction Box or its
+     * bound Blueprint -- see {@code zone.PlotRecord#tier}'s own class doc for why picking/rebuilding
+     * at a given Tier is a separate action (and cost) done through the Construction Box's own menu
+     * instead.
      */
     private static void requestUpgradePlot(com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
@@ -1103,11 +1105,27 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("You can't manage this plot."));
             return;
         }
-        if (plot.constructionBoxId().isEmpty() || !net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
+        if (plot.constructionBoxId().isEmpty()) {
             player.sendSystemMessage(Component.literal("This plot has no Construction Box to upgrade."));
             return;
         }
-        com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.requestUpgrade(serverLevel, plot.constructionBoxId().get(), player);
+        if (plot.tier() >= 5) {
+            player.sendSystemMessage(Component.literal("This plot is already at the maximum Tier."));
+            return;
+        }
+        com.github.cerealklla.settlemynts.construction.PlotTierUpgradeFunding.Result result =
+                com.github.cerealklla.settlemynts.construction.PlotTierUpgradeFunding.fund(
+                        player, serverLevel, plot, core.getUUID(), payload.signPos(), payload.option());
+        if (!result.success()) {
+            player.sendSystemMessage(Component.literal(result.message()));
+            return;
+        }
+        int newTier = plot.tier() + 1;
+        core.updatePlot(plot.withTier(newTier));
+        if (net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
+            com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.setAllowedTier(serverLevel, plot.constructionBoxId().get(), newTier);
+        }
+        player.sendSystemMessage(Component.literal("Plot upgraded to Tier " + newTier + "! Use the Construction Box to build at the new Tier."));
     }
 
     /** "Configure Garrison" button click -- re-resolves the plot/Guardhouse and re-checks {@code zone.PlotPermissions#canManage} server-side rather than trusting the client's earlier flag, same precedent as {@code relocatePlotSign}. */
@@ -1428,7 +1446,7 @@ public class SettlemyntsMod {
                     Map.of(Identifier.withDefaultNamespace("gold_nugget"), 1), 1L));
         }
 
-        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of());
+        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1);
         core.addPlot(plotRecord);
 
         // Plot Config Sign (design doc Section 14a) -- spawned unconditionally, next to the same

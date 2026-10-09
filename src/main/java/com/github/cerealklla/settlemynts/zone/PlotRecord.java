@@ -57,11 +57,20 @@ import net.minecraft.resources.Identifier;
  * SuppressedShopResource}'s own class doc for why this can't just live inside a real Yconomics
  * listing. Empty by default (including every pre-existing saved plot, via the codec's default-value
  * fallback).
+ *
+ * <p>{@code tier} (added 2026-10-09, explicit user correction) -- this plot's own unlocked
+ * construction-Tier *cap* (1-5), raised via "Upgrade Plot"'s {@code construction.PlotTierUpgradeFunding}
+ * -- deliberately independent of whichever Blueprint Tier is actually bound/built on the Construction
+ * Box right now: "you can upgrade the tier to tier 2 and still have a tier 1 building, as that's a
+ * separate cost to upgrade and should be done on the Construction Box menus instead." Defaults to 1
+ * (including every pre-existing saved plot). Pushed onto the Construction Box itself (via {@code
+ * api.Blueprynts#setConstructionBoxAllowedTier}) whenever it changes, so the box's own Blueprint
+ * picker knows how far up it's allowed to offer.
  */
 public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long cartographyrPlotEntityId,
                           long cartographyrBufferEntityId, Optional<BlockPos> boxPos, Optional<UUID> constructionBoxId,
                           Optional<UUID> owner, Optional<UUID> billId, Optional<UUID> shopId,
-                          List<SuppressedShopResource> suppressedShopResources) {
+                          List<SuppressedShopResource> suppressedShopResources, int tier) {
 
     public static final Codec<PlotRecord> CODEC = RecordCodecBuilder.create(i -> i.group(
             UUIDUtil.CODEC.fieldOf("plot_id").forGetter(PlotRecord::plotId),
@@ -74,18 +83,25 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
             UUIDUtil.CODEC.optionalFieldOf("owner").forGetter(PlotRecord::owner),
             UUIDUtil.CODEC.optionalFieldOf("bill_id").forGetter(PlotRecord::billId),
             UUIDUtil.CODEC.optionalFieldOf("shop_id").forGetter(PlotRecord::shopId),
-            SuppressedShopResource.CODEC.listOf().optionalFieldOf("suppressed_shop_resources", List.of()).forGetter(PlotRecord::suppressedShopResources)
+            SuppressedShopResource.CODEC.listOf().optionalFieldOf("suppressed_shop_resources", List.of()).forGetter(PlotRecord::suppressedShopResources),
+            Codec.INT.optionalFieldOf("tier", 1).forGetter(PlotRecord::tier)
     ).apply(i, PlotRecord::new));
 
     /** Stamps in a freshly-registered Shop id -- see this record's own class doc on when this happens. */
     public PlotRecord withShopId(UUID shopId) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources);
+                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier);
     }
 
     /** Overwrites the full Shop Config suppression set -- see {@code SettlemyntsMod#setShopListings}, the only caller. */
     public PlotRecord withSuppressedShopResources(List<SuppressedShopResource> suppressedShopResources) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources));
+                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier);
+    }
+
+    /** Raises (or sets) this plot's own unlocked construction-Tier cap -- see this record's own class doc. */
+    public PlotRecord withTier(int tier) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier);
     }
 }

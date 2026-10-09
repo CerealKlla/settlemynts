@@ -80,21 +80,14 @@ public final class BlueprintsConstructionBridge {
     }
 
     /**
-     * Opens the Blueprint picker for this plot's *next* Tier up -- added 2026-10-09 for the Plot
-     * Config Sign's new "Upgrade Plot" button ("same options as upgrading structures," mirroring
-     * Lyfe's crafting/cooking station upgrade). Thin pass-through to {@link
-     * Blueprynts#requestUpgradePicker} -- see that method's own doc for the eligibility checks and
-     * player-facing messaging, all of which live on the Blueprynts side since it alone knows the
-     * Construction Box's real state.
-     *
-     * @return {@code false} (with no chat message of its own) if this plot has no Construction Box
-     *         at all -- the caller is expected to message that case itself, since "no box" reads
-     *         differently per call site (e.g. "this plot has no Shop" elsewhere).
+     * Pushes a plot's newly-raised Tier cap onto its Construction Box -- added 2026-10-09 for
+     * "Upgrade Plot" ({@code construction.PlotTierUpgradeFunding}), called right after {@code
+     * zone.PlotRecord#tier} is raised. Thin pass-through to {@link Blueprynts#setConstructionBoxAllowedTier}
+     * -- see that method's own doc. No-op (silently) if this plot has no Construction Box at all.
      */
-    public static boolean requestUpgrade(ServerLevel level, UUID constructionBoxId, net.minecraft.server.level.ServerPlayer player) {
-        return Blueprynts.getConstructionBoxPos(level, constructionBoxId)
-                .map(pos -> Blueprynts.requestUpgradePicker(level, pos, player))
-                .orElse(false);
+    public static void setAllowedTier(ServerLevel level, UUID constructionBoxId, int tier) {
+        Blueprynts.getConstructionBoxPos(level, constructionBoxId)
+                .ifPresent(pos -> Blueprynts.setConstructionBoxAllowedTier(level, pos, tier));
     }
 
     /** The bounding box of every BLUE cell in {@code grid} -- {@code null} if somehow none exist (shouldn't happen given callers' own {@code hasValidArea} precondition). */

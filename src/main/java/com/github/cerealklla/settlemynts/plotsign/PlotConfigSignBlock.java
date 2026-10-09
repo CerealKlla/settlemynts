@@ -74,6 +74,7 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
         boolean hasGarrison = false;
         boolean isTownHall = false;
         boolean hasConstructionBox = false;
+        int tier = 1;
         if (sign.settlementCoreId() != null && serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core) {
             PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
             if (plot != null) {
@@ -81,9 +82,10 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
                 hasGarrison = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID);
                 isTownHall = plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID);
                 hasConstructionBox = plot.constructionBoxId().isPresent();
+                tier = plot.tier();
             }
         }
-        PacketDistributor.sendToPlayer(serverPlayer, new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox));
+        PacketDistributor.sendToPlayer(serverPlayer, new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier));
         return InteractionResult.SUCCESS_SERVER;
     }
 

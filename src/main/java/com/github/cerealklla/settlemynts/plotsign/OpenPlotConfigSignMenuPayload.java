@@ -19,10 +19,14 @@ import net.minecraft.resources.Identifier;
  * hasConstructionBox} (added 2026-10-09) gates the new "Upgrade Plot" button -- {@code true}
  * whenever this plot has a Building Supply Box at all (every plot type, including Town Hall/
  * Guardhouse, can have one), regardless of its current funding/completion state (the upgrade
- * request itself is re-validated server-side either way).
+ * request itself is re-validated server-side either way). {@code tier} (added the same day) is this
+ * plot's own current unlocked construction-Tier cap ({@code zone.PlotRecord#tier}) -- sent along so
+ * {@code client.UpgradePlotScreen} can compute/display the next Tier's cost without a server
+ * round-trip (the same pure, client-computable {@code construction.PlotTierUpgradeCost} table the
+ * server itself charges against).
  */
 public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage, boolean hasGarrison, boolean isTownHall,
-                                             boolean hasConstructionBox) implements CustomPacketPayload {
+                                             boolean hasConstructionBox, int tier) implements CustomPacketPayload {
 
     public static final Type<OpenPlotConfigSignMenuPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_plot_config_sign_menu"));
@@ -33,6 +37,7 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::hasGarrison,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::isTownHall,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::hasConstructionBox,
+            ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::tier,
             OpenPlotConfigSignMenuPayload::new);
 
     @Override

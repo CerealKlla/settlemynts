@@ -5,7 +5,6 @@ import com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestPlotDetailsPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestPlotManagementPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestShopPayload;
-import com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPayload;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -67,7 +66,7 @@ public final class PlotConfigSignMenuScreen extends Screen {
             y += 30;
         }
 
-        if (data.canManage() && data.hasConstructionBox()) {
+        if (data.canManage() && data.hasConstructionBox() && data.tier() < 5) {
             addRenderableWidget(Button.builder(Component.literal("Upgrade Plot"), b -> upgradePlot())
                     .bounds(centerX - 100, y, 200, 20).build());
             y += 30;
@@ -109,8 +108,7 @@ public final class PlotConfigSignMenuScreen extends Screen {
     }
 
     private void upgradePlot() {
-        send(new RequestUpgradePlotPayload(data.signPos()));
-        onClose();
+        Minecraft.getInstance().setScreen(new UpgradePlotScreen(data.signPos(), data.tier()));
     }
 
     private void send(CustomPacketPayload payload) {

@@ -234,7 +234,7 @@ public final class NaturalVillagePlotGenerator {
         UUID plotId = UUID.randomUUID();
         PlotRecord plotRecord = new PlotRecord(plotId, zoneType.get().label(), zoneTypeId,
                 plotEntity.id().value(), bufferEntity.id().value(),
-                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), List.of());
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), List.of(), 1);
         owner.addPlot(plotRecord);
 
         BlockPos anchor = box.getCenter();
@@ -320,7 +320,7 @@ public final class NaturalVillagePlotGenerator {
 
         PlotRecord upgraded = new PlotRecord(plot.plotId(), newZoneType.get().label(), byProfession.get(),
                 plot.cartographyrPlotEntityId(), plot.cartographyrBufferEntityId(), plot.boxPos(), plot.constructionBoxId(),
-                plot.owner(), plot.billId(), plot.shopId(), plot.suppressedShopResources());
+                plot.owner(), plot.billId(), plot.shopId(), plot.suppressedShopResources(), plot.tier());
         owner.updatePlot(upgraded);
         Cartography.setDesignation(level, new EntityId(plot.cartographyrPlotEntityId()), newZoneType.get().label());
         if (ShopSeeding.hasCatalog(byProfession.get())) {
