@@ -15,9 +15,14 @@ import net.minecraft.resources.Identifier;
  * Menu"). {@code canManage} is resolved once, server-side ({@code PlotConfigSignBlock#useWithoutItem}
  * via {@code zone.PlotPermissions#canManage}) -- the client never re-derives permission itself, it
  * only decides which buttons to show/enable based on this. {@code hasGarrison} (added 2026-09-30) is
- * {@code true} only for a Guardhouse-typed plot -- gates the "Configure Garrison" button.
+ * {@code true} only for a Guardhouse-typed plot -- gates the "Configure Garrison" button. {@code
+ * hasConstructionBox} (added 2026-10-09) gates the new "Upgrade Plot" button -- {@code true}
+ * whenever this plot has a Building Supply Box at all (every plot type, including Town Hall/
+ * Guardhouse, can have one), regardless of its current funding/completion state (the upgrade
+ * request itself is re-validated server-side either way).
  */
-public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage, boolean hasGarrison, boolean isTownHall) implements CustomPacketPayload {
+public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage, boolean hasGarrison, boolean isTownHall,
+                                             boolean hasConstructionBox) implements CustomPacketPayload {
 
     public static final Type<OpenPlotConfigSignMenuPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_plot_config_sign_menu"));
@@ -27,6 +32,7 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::canManage,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::hasGarrison,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::isTownHall,
+            ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::hasConstructionBox,
             OpenPlotConfigSignMenuPayload::new);
 
     @Override

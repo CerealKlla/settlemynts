@@ -491,6 +491,10 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.RequestPlotManagementPayload.STREAM_CODEC,
                 (payload, context) -> requestPlotManagement(payload, context));
 
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPayload.STREAM_CODEC,
+                (payload, context) -> requestUpgradePlot(payload, context));
+
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestPlotManagement(payload));
@@ -1075,6 +1079,35 @@ public class SettlemyntsMod {
             entries.add(new com.github.cerealklla.settlemynts.plotsign.PlotSummaryEntry(summary.plotName(), summary.ownerDisplay(), summary.billingStanding(), summary.issue()));
         }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload(entries));
+    }
+
+    /**
+     * "Upgrade Plot" button click (2026-10-09, explicit request: "same options as upgrading
+     * structures") -- re-resolves the plot/{@code canManage} server-side, same precedent as every
+     * other sign button, then hands off to {@code bridge.BlueprintsConstructionBridge#requestUpgrade}
+     * to open the Blueprint picker for this plot's next Tier up. Available on every plot type (not
+     * just Town Hall) -- any plot with a Construction Box can be upgraded.
+     */
+    private static void requestUpgradePlot(com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        if (plot.constructionBoxId().isEmpty() || !net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
+            player.sendSystemMessage(Component.literal("This plot has no Construction Box to upgrade."));
+            return;
+        }
+        com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.requestUpgrade(serverLevel, plot.constructionBoxId().get(), player);
     }
 
     /** "Configure Garrison" button click -- re-resolves the plot/Guardhouse and re-checks {@code zone.PlotPermissions#canManage} server-side rather than trusting the client's earlier flag, same precedent as {@code relocatePlotSign}. */

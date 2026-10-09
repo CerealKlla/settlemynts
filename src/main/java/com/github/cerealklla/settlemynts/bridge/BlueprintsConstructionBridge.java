@@ -79,6 +79,24 @@ public final class BlueprintsConstructionBridge {
                 .flatMap(pos -> Blueprynts.getConstructionBoxTier(level, pos));
     }
 
+    /**
+     * Opens the Blueprint picker for this plot's *next* Tier up -- added 2026-10-09 for the Plot
+     * Config Sign's new "Upgrade Plot" button ("same options as upgrading structures," mirroring
+     * Lyfe's crafting/cooking station upgrade). Thin pass-through to {@link
+     * Blueprynts#requestUpgradePicker} -- see that method's own doc for the eligibility checks and
+     * player-facing messaging, all of which live on the Blueprynts side since it alone knows the
+     * Construction Box's real state.
+     *
+     * @return {@code false} (with no chat message of its own) if this plot has no Construction Box
+     *         at all -- the caller is expected to message that case itself, since "no box" reads
+     *         differently per call site (e.g. "this plot has no Shop" elsewhere).
+     */
+    public static boolean requestUpgrade(ServerLevel level, UUID constructionBoxId, net.minecraft.server.level.ServerPlayer player) {
+        return Blueprynts.getConstructionBoxPos(level, constructionBoxId)
+                .map(pos -> Blueprynts.requestUpgradePicker(level, pos, player))
+                .orElse(false);
+    }
+
     /** The bounding box of every BLUE cell in {@code grid} -- {@code null} if somehow none exist (shouldn't happen given callers' own {@code hasValidArea} precondition). */
     private static BuildableArea blueBoundingBox(PlotValidity.Grid grid, int minX, int minZ, int maxX, int maxZ) {
         int blueMinX = Integer.MAX_VALUE, blueMaxX = Integer.MIN_VALUE, blueMinZ = Integer.MAX_VALUE, blueMaxZ = Integer.MIN_VALUE;
