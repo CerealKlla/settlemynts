@@ -84,11 +84,16 @@ public class RoadwayStakeEntity extends Display.BlockDisplay {
     // with no "only the child owns this" asymmetry left over from the old model.
     private List<ConnectionSnapshot> connectionSnapshots = List.of();
 
-    public record ConnectionSnapshot(UUID otherStakeId, List<RoadwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId) {
+    public record ConnectionSnapshot(UUID otherStakeId, List<RoadwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId,
+                                      List<net.minecraft.core.BlockPos> roadCells) {
+        // roadCells defaults to empty for any connection saved before 2026-10-09 (the Tier-visual
+        // feature) -- those simply won't be retroactively re-tiered by RoadwayTierTicker until the
+        // edge is re-paved, a deliberate, accepted gap (see decisions.md) rather than a migration.
         public static final Codec<ConnectionSnapshot> CODEC = RecordCodecBuilder.create(i -> i.group(
                 UUIDUtil.CODEC.fieldOf("other_stake_id").forGetter(ConnectionSnapshot::otherStakeId),
                 Codec.list(RoadwayPaver.SnapshotEntry.CODEC).fieldOf("snapshot").forGetter(ConnectionSnapshot::snapshot),
-                EntityId.CODEC.fieldOf("road_entity_id").forGetter(ConnectionSnapshot::roadEntityId)
+                EntityId.CODEC.fieldOf("road_entity_id").forGetter(ConnectionSnapshot::roadEntityId),
+                Codec.list(net.minecraft.core.BlockPos.CODEC).optionalFieldOf("road_cells", List.of()).forGetter(ConnectionSnapshot::roadCells)
         ).apply(i, ConnectionSnapshot::new));
     }
 
@@ -149,6 +154,11 @@ public class RoadwayStakeEntity extends Display.BlockDisplay {
         b.addConnectionId(a.getUUID());
     }
 
+    /** Every {@link ConnectionSnapshot} this stake currently holds -- used by {@link RoadwayTierTicker} to re-tier every road cell it owns. */
+    public List<ConnectionSnapshot> getConnectionSnapshots() {
+        return connectionSnapshots;
+    }
+
     /** The {@link ConnectionSnapshot} record (terrain snapshot + the connection's own registered Cartographyr road entity) for one specific connection, or {@code null} if none is recorded. */
     public ConnectionSnapshot getConnectionSnapshot(UUID otherStakeId) {
         for (ConnectionSnapshot entry : connectionSnapshots) {
@@ -159,15 +169,15 @@ public class RoadwayStakeEntity extends Display.BlockDisplay {
         return null;
     }
 
-    /** Stores (or replaces) this stake's own copy of one connection's restore snapshot and its Cartographyr road entity id -- see {@link RoadwayPaver#paveEdge}, which calls this on both ends. */
-    public void setSnapshotFor(UUID otherStakeId, List<RoadwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId) {
+    /** Stores (or replaces) this stake's own copy of one connection's restore snapshot, its Cartographyr road entity id, and (2026-10-09) its exact road-surface cell positions for {@link RoadwayTierTicker} -- see {@link RoadwayPaver#paveEdge}, which calls this on both ends. */
+    public void setSnapshotFor(UUID otherStakeId, List<RoadwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId, List<net.minecraft.core.BlockPos> roadCells) {
         List<ConnectionSnapshot> current = new ArrayList<>();
         for (ConnectionSnapshot entry : connectionSnapshots) {
             if (!entry.otherStakeId().equals(otherStakeId)) {
                 current.add(entry);
             }
         }
-        current.add(new ConnectionSnapshot(otherStakeId, snapshot, roadEntityId));
+        current.add(new ConnectionSnapshot(otherStakeId, snapshot, roadEntityId, roadCells));
         connectionSnapshots = current;
     }
 

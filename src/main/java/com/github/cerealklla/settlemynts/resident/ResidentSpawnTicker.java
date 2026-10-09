@@ -79,6 +79,10 @@ public final class ResidentSpawnTicker {
         UUID existing = sign.residentVillagerId();
         if (existing != null) {
             if (level.getEntity(existing) instanceof ResidentVillagerEntity living && living.isAlive()) {
+                // Idempotent backfill (2026-10-09) -- picks up the profession fix below for a
+                // resident that was already alive, spawned before this feature existed.
+                com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator.representativeProfessionFor(plot.zoneTypeId())
+                        .ifPresent(profession -> living.setVillagerData(living.getVillagerData().withProfession(level.registryAccess(), profession)));
                 return; // Already filled.
             }
             sign.setResidentVillagerId(null);

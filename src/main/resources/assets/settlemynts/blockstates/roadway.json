@@ -1,5 +1,9 @@
 {
   "variants": {
-    "": { "model": "settlemynts:block/roadway" }
+    "tier=1": { "model": "settlemynts:block/roadway_tier_1" },
+    "tier=2": { "model": "settlemynts:block/roadway_tier_2" },
+    "tier=3": { "model": "settlemynts:block/roadway_tier_3" },
+    "tier=4": { "model": "settlemynts:block/roadway_tier_4" },
+    "tier=5": { "model": "settlemynts:block/roadway_tier_5" }
   }
 }

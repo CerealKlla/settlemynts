@@ -5,8 +5,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-import com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity;
 import com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator;
+import com.github.cerealklla.settlemynts.zone.PlotNpc;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -78,18 +78,19 @@ public final class PlotShopProximityTicker {
             nearest = new ShopAnchor.Npc(villager.getId());
         }
 
-        // Player settlements' own NPC-plot resident (2026-10-09, explicit request: "I'd like the
-        // NPCs in player Settlements to grant players access to their shop the same way they do in
+        // Player settlements' own NPC-plot workers (2026-10-09, explicit request: "I'd like the NPCs
+        // in player Settlements to grant players access to their shop the same way they do in
         // natural settlements") -- same shape as the natural-village Villager scan above, just keyed
-        // off ResidentVillagerEntity's own plotId() field instead of a persistent-data tag.
-        for (ResidentVillagerEntity resident : level.getEntitiesOfClass(ResidentVillagerEntity.class, villagerSearch,
-                r -> r.plotId() != null)) {
-            double distSq = resident.distanceToSqr(player);
+        // off the shared PlotNpc marker (resident.ResidentVillagerEntity, farm.FarmerWorkerEntity,
+        // lumberyard.LumberjackWorkerEntity) instead of a persistent-data tag.
+        for (Villager worker : level.getEntitiesOfClass(Villager.class, villagerSearch,
+                v -> v instanceof PlotNpc npc && npc.plotId() != null)) {
+            double distSq = worker.distanceToSqr(player);
             if (distSq > radiusSq || distSq >= nearestDistSq) {
                 continue;
             }
             nearestDistSq = distSq;
-            nearest = new ShopAnchor.Npc(resident.getId());
+            nearest = new ShopAnchor.Npc(worker.getId());
         }
 
         UUID playerId = player.getUUID();

@@ -6,12 +6,12 @@ import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlock;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignRelocatorItem;
 import com.github.cerealklla.settlemynts.rope.RopeFencePostBlock;
 import com.github.cerealklla.settlemynts.rope.RopeFencePostItem;
+import com.github.cerealklla.settlemynts.roadway.TieredRoadwayBlock;
 
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.Item;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SoundType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.material.MapColor;
@@ -78,14 +78,14 @@ public final class ModBlocks {
                     .sound(SoundType.STONE)
                     .setId(ResourceKey.create(Registries.BLOCK, id))));
 
-    // Roadways Milestone 1 (added 2026-10-06) -- Tier 1 only so far (see roadway.RoadwayPaver's own
-    // doc). A plain vanilla Block, no custom subclass needed -- no block entity, no interaction
-    // behavior. Indestructible via the same bedrock-like properties as PLOT_CONFIG_SIGN/GUARDHOUSE
-    // above (this alone satisfies "nothing can damage a Roadway block," no Protectyons work needed).
-    // No default BlockItem -- only RoadwayPaver ever places one.
-    public static final DeferredBlock<Block> ROADWAY = BLOCKS.register(
+    // Roadways Milestone 1 (added 2026-10-06), widened to a 5-tier visual progression tied to a
+    // settlement's Town Hall Tier 2026-10-09 -- see roadway.TieredRoadwayBlock's own doc. Still no
+    // block entity, no interaction behavior. Indestructible via the same bedrock-like properties as
+    // PLOT_CONFIG_SIGN/GUARDHOUSE above (this alone satisfies "nothing can damage a Roadway block,"
+    // no Protectyons work needed). No default BlockItem -- only RoadwayPaver ever places one.
+    public static final DeferredBlock<TieredRoadwayBlock> ROADWAY = BLOCKS.register(
             "roadway",
-            id -> new Block(BlockBehaviour.Properties.of()
+            id -> new TieredRoadwayBlock(BlockBehaviour.Properties.of()
                     .mapColor(MapColor.STONE)
                     .strength(-1.0F, 3600000.0F)
                     .sound(SoundType.STONE)

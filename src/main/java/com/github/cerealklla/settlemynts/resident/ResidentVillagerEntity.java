@@ -63,7 +63,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * ResidentConversionGuard}, a {@code LivingConversionEvent.Pre} listener cancelling any conversion
  * targeting a {@code ResidentVillagerEntity}.
  */
-public class ResidentVillagerEntity extends Villager {
+public class ResidentVillagerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc {
 
     private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
 

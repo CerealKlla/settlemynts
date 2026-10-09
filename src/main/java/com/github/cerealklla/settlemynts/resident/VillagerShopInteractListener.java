@@ -3,6 +3,7 @@ package com.github.cerealklla.settlemynts.resident;
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.plotsign.ShopAnchor;
 import com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator;
+import com.github.cerealklla.settlemynts.zone.PlotNpc;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
@@ -20,10 +21,12 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
  * own trade screen is canceled so the two don't fight over the same click. Same event shape as
  * Lyfe's existing {@code knowledge.SignListener#onEntityInteract} (there, for an {@code ItemFrame}).
  *
- * <p><b>Widened 2026-10-09, explicit request</b> -- a player settlement's own NPC-plot {@link
- * ResidentVillagerEntity} gets identical treatment, resolved via its own {@link
- * ResidentVillagerEntity#plotId()} field directly (no persistent-data tag needed, unlike the natural-
- * village case, since this entity already carries its plot identity as real fields).
+ * <p><b>Widened 2026-10-09, explicit request</b> -- every player-settlement plot NPC ({@code
+ * resident.ResidentVillagerEntity}, {@code farm.FarmerWorkerEntity}, {@code
+ * lumberyard.LumberjackWorkerEntity} -- see the shared {@link PlotNpc} marker) gets identical
+ * treatment, resolved via its own {@code plotId()} field directly (no persistent-data tag needed,
+ * unlike the natural-village case, since these entities already carry their plot identity as real
+ * fields).
  */
 public final class VillagerShopInteractListener {
 
@@ -32,9 +35,9 @@ public final class VillagerShopInteractListener {
         if (!(event.getEntity() instanceof ServerPlayer player) || event.getHand() != InteractionHand.MAIN_HAND) {
             return;
         }
-        if (event.getTarget() instanceof ResidentVillagerEntity resident && resident.plotId() != null) {
+        if (event.getTarget() instanceof PlotNpc npc && npc.plotId() != null) {
             event.setCanceled(true);
-            SettlemyntsMod.handleRequestShop(player, new ShopAnchor.Npc(resident.getId()), false);
+            SettlemyntsMod.handleRequestShop(player, new ShopAnchor.Npc(event.getTarget().getId()), false);
             return;
         }
         if (!(event.getTarget() instanceof Villager villager) || villager.getClass() != Villager.class) {

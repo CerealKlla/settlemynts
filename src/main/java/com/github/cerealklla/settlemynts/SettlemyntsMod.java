@@ -190,6 +190,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.TownHallCoreLocatorTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.LocatorCancelListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotStakeTossGuard());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.roadway.RoadwayTierTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.roadway.RoadwayClearanceListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillagePlotListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerationTicker());
@@ -997,21 +998,21 @@ public class SettlemyntsMod {
             return java.util.Optional.of(new ShopContext(plot, core, pos));
         }
         com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc npc = (com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc) anchor;
-        // Player settlement's own NPC-plot resident (2026-10-09) -- resolved through the same
-        // settlementCoreId/plotId fields it already carries natively, mirroring the Sign case above,
-        // rather than the natural-village Npc path below (which depends on a persistent-data tag and
-        // NaturalSettlementPlotStore, neither of which a ResidentVillagerEntity has/uses).
-        if (level.getEntity(npc.entityId()) instanceof com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity resident
-                && resident.plotId() != null) {
-            UUID settlementCoreId = resident.settlementCoreId();
+        // Player settlement's own NPC-plot worker (2026-10-09) -- resolved through the same
+        // settlementCoreId/plotId fields every PlotNpc already carries natively, mirroring the Sign
+        // case above, rather than the natural-village Npc path below (which depends on a persistent-
+        // data tag and NaturalSettlementPlotStore, neither of which a PlotNpc has/uses).
+        if (level.getEntity(npc.entityId()) instanceof com.github.cerealklla.settlemynts.zone.PlotNpc plotNpc
+                && plotNpc.plotId() != null) {
+            UUID settlementCoreId = plotNpc.settlementCoreId();
             if (settlementCoreId == null || !(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
                 return java.util.Optional.empty();
             }
-            PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(resident.plotId())).findFirst().orElse(null);
+            PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotNpc.plotId())).findFirst().orElse(null);
             if (plot == null) {
                 return java.util.Optional.empty();
             }
-            return java.util.Optional.of(new ShopContext(plot, core, resident.blockPosition()));
+            return java.util.Optional.of(new ShopContext(plot, core, ((net.minecraft.world.entity.Entity) plotNpc).blockPosition()));
         }
         boolean foundEntity = level.getEntity(npc.entityId()) instanceof net.minecraft.world.entity.npc.villager.Villager;
         if (!foundEntity) {

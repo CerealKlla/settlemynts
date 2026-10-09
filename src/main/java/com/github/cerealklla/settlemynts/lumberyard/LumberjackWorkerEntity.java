@@ -35,7 +35,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * "Town Proper" buffer {@code ResidentPatrolGoal} uses -- planting/harvesting must stay strictly
  * inside the plot itself, not its outer padding.
  */
-public class LumberjackWorkerEntity extends Villager {
+public class LumberjackWorkerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc {
 
     private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
 
@@ -53,8 +53,14 @@ public class LumberjackWorkerEntity extends Villager {
         this.plotId = plotId;
     }
 
+    @Override
     public UUID plotId() {
         return plotId;
+    }
+
+    @Override
+    public UUID settlementCoreId() {
+        return settlementCoreId;
     }
 
     /** Same resolution chain as {@code resident.ResidentVillagerEntity#resolvePatrolArea}, but the real plot polygon, not the buffer. */

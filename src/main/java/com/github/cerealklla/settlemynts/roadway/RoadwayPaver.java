@@ -32,9 +32,10 @@ import java.util.Set;
 
 /**
  * Roadways Milestone 1's paving algorithm (added 2026-10-06) -- turns two connected {@link
- * RoadwayStakeEntity}s into a real, slope-limited, plot-avoiding Tier 1 road, immediately on
- * connection (not a batch Finalize step, per the user's own "once two Stakes are connected the
- * terrain... is transformed" spec).
+ * RoadwayStakeEntity}s into a real, slope-limited, plot-avoiding road, immediately on connection
+ * (not a batch Finalize step, per the user's own "once two Stakes are connected the terrain... is
+ * transformed" spec). The road's visual look (not its shape/path) is tied to the settlement's
+ * current Town Hall Tier as of 2026-10-09 -- see {@link RoadwayTierResolver}.
  *
  * <p><b>Slope limiting</b>: a two-pass forward/backward relaxation (see {@link
  * #slopeLimitedProfile}) pinned at both stakes' own placed elevations, clamping each step's
@@ -167,7 +168,9 @@ public final class RoadwayPaver {
         return false;
     }
 
+    /** Widened 2026-10-09 to pave at the settlement's current Town Hall Tier look (see {@link RoadwayTierResolver}) instead of a single fixed appearance. */
     public static void paveEdge(ServerLevel level, GhostTownHallCoreEntity core, RoadwayStakeEntity a, RoadwayStakeEntity b) {
+        int tier = RoadwayTierResolver.currentTier(level, core);
         int x1 = Mth.floor(a.getX());
         int z1 = Mth.floor(a.getZ());
         int x2 = Mth.floor(b.getX());
@@ -193,6 +196,7 @@ public final class RoadwayPaver {
         int[] profile = slopeLimitedProfile(medianSmooth(naturalY), Mth.floor(a.getY()) - 1, Mth.floor(b.getY()) - 1);
 
         List<SnapshotEntry> snapshot = new ArrayList<>();
+        List<BlockPos> roadCells = new ArrayList<>();
         Set<BlockPos> captured = new HashSet<>();
         int roadBlocksPlaced = 0;
         for (int i = 0; i < n; i++) {
@@ -217,7 +221,8 @@ public final class RoadwayPaver {
                 }
                 int natural = offset == 0 ? naturalY[i] : naturalSurfaceY(level, colX, colZ);
                 int targetY = profile[i];
-                paveColumn(level, colX, targetY, colZ, natural, snapshot, captured);
+                paveColumn(level, colX, targetY, colZ, natural, tier, snapshot, captured);
+                roadCells.add(new BlockPos(colX, targetY, colZ));
                 roadBlocksPlaced++;
             }
         }
@@ -225,8 +230,8 @@ public final class RoadwayPaver {
         var roadEntity = Cartography.createEntity(level, new EntityDefinition(
                 level.dimension(), Classification.CONSTRUCTED, EntityType.ROAD, Layer.ROADWAY_ID,
                 Optional.empty(), new Geometry.Path(centerline, PATH_HALF_WIDTH_BLOCKS), LifecycleState.REALIZED, Optional.empty()));
-        a.setSnapshotFor(b.getUUID(), snapshot, roadEntity.id());
-        b.setSnapshotFor(a.getUUID(), snapshot, roadEntity.id());
+        a.setSnapshotFor(b.getUUID(), snapshot, roadEntity.id(), roadCells);
+        b.setSnapshotFor(a.getUUID(), snapshot, roadEntity.id(), roadCells);
         RoadwayConnectionMarkerEntity.regenerateAll(level, core.getUUID());
 
         Set<BlockPos> distinctPositions = new HashSet<>();
@@ -279,8 +284,8 @@ public final class RoadwayPaver {
         level.setBlock(pos, desired, 3);
     }
 
-    private static void paveColumn(ServerLevel level, int x, int targetY, int z, int naturalY, List<SnapshotEntry> snapshot, Set<BlockPos> captured) {
-        BlockState roadState = ModBlocks.ROADWAY.get().defaultBlockState();
+    private static void paveColumn(ServerLevel level, int x, int targetY, int z, int naturalY, int tier, List<SnapshotEntry> snapshot, Set<BlockPos> captured) {
+        BlockState roadState = ModBlocks.ROADWAY.get().defaultBlockState().setValue(TieredRoadwayBlock.TIER, tier);
         if (targetY > naturalY) {
             // Causeway -- fill a solid support earthwork from natural terrain up to road level.
             for (int y = naturalY; y < targetY; y++) {

@@ -32,7 +32,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * see that class's own doc for why this mirrors {@code resident.ResidentVillagerEntity} but patrols/
  * works within the plot's *real* polygon, not its padded buffer.
  */
-public class FarmerWorkerEntity extends Villager {
+public class FarmerWorkerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc {
 
     private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
 
@@ -50,8 +50,14 @@ public class FarmerWorkerEntity extends Villager {
         this.plotId = plotId;
     }
 
+    @Override
     public UUID plotId() {
         return plotId;
+    }
+
+    @Override
+    public UUID settlementCoreId() {
+        return settlementCoreId;
     }
 
     public Optional<Geometry.Polygon> resolvePatrolArea(ServerLevel level) {
