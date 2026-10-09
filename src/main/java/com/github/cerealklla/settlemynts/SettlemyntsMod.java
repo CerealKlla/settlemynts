@@ -472,6 +472,11 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState.set(payload.present(), payload.anchor()));
 
+        // "Distance from Stake" readout for Plot Placement Stakes/Roadway Stakes (2026-10-09).
+        registrar.playToClient(com.github.cerealklla.settlemynts.founding.AnchorDistancePayload.TYPE,
+                com.github.cerealklla.settlemynts.founding.AnchorDistancePayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.founding.client.ClientAnchorDistanceState.set(payload.present(), payload.anchorPos()));
+
         // "Plot Details" (any plot's own sign) / "Plot Management" (Town Hall sign only) -- 2026-10-05.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestPlotDetailsPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.RequestPlotDetailsPayload.STREAM_CODEC,
@@ -992,6 +997,22 @@ public class SettlemyntsMod {
             return java.util.Optional.of(new ShopContext(plot, core, pos));
         }
         com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc npc = (com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc) anchor;
+        // Player settlement's own NPC-plot resident (2026-10-09) -- resolved through the same
+        // settlementCoreId/plotId fields it already carries natively, mirroring the Sign case above,
+        // rather than the natural-village Npc path below (which depends on a persistent-data tag and
+        // NaturalSettlementPlotStore, neither of which a ResidentVillagerEntity has/uses).
+        if (level.getEntity(npc.entityId()) instanceof com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity resident
+                && resident.plotId() != null) {
+            UUID settlementCoreId = resident.settlementCoreId();
+            if (settlementCoreId == null || !(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
+                return java.util.Optional.empty();
+            }
+            PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(resident.plotId())).findFirst().orElse(null);
+            if (plot == null) {
+                return java.util.Optional.empty();
+            }
+            return java.util.Optional.of(new ShopContext(plot, core, resident.blockPosition()));
+        }
         boolean foundEntity = level.getEntity(npc.entityId()) instanceof net.minecraft.world.entity.npc.villager.Villager;
         if (!foundEntity) {
             LOGGER.info("Natural village shop: Npc anchor entityId={} -- no Villager entity found at that id", npc.entityId());
@@ -1869,6 +1890,7 @@ public class SettlemyntsMod {
                 continue;
             }
             regenerateCarryPreview(player, serverLevel);
+            sendAnchorDistance(player, serverLevel);
             PlotSessionData session = resolveRoadAccessFlagSession(player);
             // Plot Stakes rework (2026-09-30) made PlotSessionData#plotSessionId nullable -- a
             // real server crash confirmed a Road Access Flag item can carry one with a null
@@ -1912,6 +1934,30 @@ public class SettlemyntsMod {
             return; // Nothing to clear per-player -- regenerateCarryPreview(level, core, session, null, null) at removal/finalize already handles that case.
         }
         GhostPlotFencePostEntity.regenerateCarryPreview(serverLevel, anchor.getOwnerCoreId(), anchor.getPlotSessionId(), anchor, player.position());
+    }
+
+    /**
+     * Drives {@code client.StakeDistanceOverlay}'s "Distance from Stake" readout for Plot Placement
+     * Stakes and Roadway Stakes (added 2026-10-09, explicit request: the same live readout Perimeter
+     * Stakes already have from the Town Hall, but from the currently-attached anchor stake instead).
+     * Piggybacks on the same 10-tick cadence as the carry-preview/Road-Access-Flag work above -- the
+     * anchor itself never moves once placed, so this only needs to be "fresh enough," not per-frame.
+     */
+    private static void sendAnchorDistance(ServerPlayer player, ServerLevel serverLevel) {
+        net.minecraft.core.BlockPos anchorPos = null;
+        if (player.getMainHandItem().is(ModItems.PLOT_PLACEMENT_STAKE.get())) {
+            GhostPlotStakeEntity anchor = RopeFenceLeash.resolveGhostAnchor(serverLevel, player.getUUID());
+            if (anchor != null) {
+                anchorPos = net.minecraft.core.BlockPos.containing(anchor.getX(), anchor.getY(), anchor.getZ());
+            }
+        } else if (player.getMainHandItem().is(ModItems.ROADWAY_STAKE.get())) {
+            com.github.cerealklla.settlemynts.roadway.RoadwayStakeEntity anchor =
+                    com.github.cerealklla.settlemynts.roadway.RoadwayStakeLeash.resolveGhostAnchor(serverLevel, player.getUUID());
+            if (anchor != null) {
+                anchorPos = net.minecraft.core.BlockPos.containing(anchor.getX(), anchor.getY(), anchor.getZ());
+            }
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.founding.AnchorDistancePayload(anchorPos != null, anchorPos == null ? net.minecraft.core.BlockPos.ZERO : anchorPos));
     }
 
     /**

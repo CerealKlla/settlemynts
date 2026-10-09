@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+import com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity;
 import com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator;
 
 import net.minecraft.core.BlockPos;
@@ -75,6 +76,20 @@ public final class PlotShopProximityTicker {
             }
             nearestDistSq = distSq;
             nearest = new ShopAnchor.Npc(villager.getId());
+        }
+
+        // Player settlements' own NPC-plot resident (2026-10-09, explicit request: "I'd like the
+        // NPCs in player Settlements to grant players access to their shop the same way they do in
+        // natural settlements") -- same shape as the natural-village Villager scan above, just keyed
+        // off ResidentVillagerEntity's own plotId() field instead of a persistent-data tag.
+        for (ResidentVillagerEntity resident : level.getEntitiesOfClass(ResidentVillagerEntity.class, villagerSearch,
+                r -> r.plotId() != null)) {
+            double distSq = resident.distanceToSqr(player);
+            if (distSq > radiusSq || distSq >= nearestDistSq) {
+                continue;
+            }
+            nearestDistSq = distSq;
+            nearest = new ShopAnchor.Npc(resident.getId());
         }
 
         UUID playerId = player.getUUID();

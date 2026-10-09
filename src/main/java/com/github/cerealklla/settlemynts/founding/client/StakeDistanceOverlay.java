@@ -1,5 +1,7 @@
 package com.github.cerealklla.settlemynts.founding.client;
 
+import java.util.Optional;
+
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModItems;
 
@@ -38,6 +40,15 @@ import net.neoforged.neoforge.client.gui.GuiLayer;
  * whatever's targeted), so the number shown is the number that will actually gate/measure the stake
  * that would be placed right now -- falls back to the player's own position if nothing is targeted
  * (looking at the sky, out of range, etc.), same as before.
+ *
+ * <p><b>Widened 2026-10-09, explicit request</b> -- Plot Placement Stakes and Roadway Stakes now get
+ * the same kind of live readout, but measured from whichever stake the player is currently attached
+ * to (their ghost leash anchor) rather than the Town Hall, since those two mechanics build a chain/
+ * graph of connections rather than one fixed-radius circle around a single core. The anchor's
+ * position arrives via {@code AnchorDistancePayload} (see its own doc) into {@link
+ * ClientAnchorDistanceState}, synced every ~10 ticks server-side -- plenty fresh since the anchor
+ * itself is static once placed; only the player's own live position (read directly here, same as the
+ * Town Hall case) needs to be continuous.
  */
 public final class StakeDistanceOverlay implements GuiLayer {
 
@@ -51,12 +62,30 @@ public final class StakeDistanceOverlay implements GuiLayer {
         Minecraft minecraft = Minecraft.getInstance();
         Player player = minecraft.player;
         ClientLevel level = minecraft.level;
-        if (player == null || level == null || !isHoldingStake(player)) {
+        if (player == null || level == null) {
             return;
         }
 
-        GhostTownHallCoreEntity nearestCore = findNearestCore(level, player);
-        if (nearestCore == null) {
+        double originX;
+        double originZ;
+        String label;
+        if (isHoldingPerimeterStake(player)) {
+            GhostTownHallCoreEntity nearestCore = findNearestCore(level, player);
+            if (nearestCore == null) {
+                return;
+            }
+            originX = nearestCore.getX();
+            originZ = nearestCore.getZ();
+            label = "Distance from Town Hall: ";
+        } else if (isHoldingChainStake(player)) {
+            Optional<BlockPos> anchorPos = ClientAnchorDistanceState.get();
+            if (anchorPos.isEmpty()) {
+                return;
+            }
+            originX = anchorPos.get().getX() + 0.5;
+            originZ = anchorPos.get().getZ() + 0.5;
+            label = "Distance from Stake: ";
+        } else {
             return;
         }
 
@@ -73,10 +102,10 @@ public final class StakeDistanceOverlay implements GuiLayer {
             targetX = player.getX();
             targetZ = player.getZ();
         }
-        double dx = nearestCore.getX() - targetX;
-        double dz = nearestCore.getZ() - targetZ;
+        double dx = originX - targetX;
+        double dz = originZ - targetZ;
         double distance = Math.sqrt(dx * dx + dz * dz);
-        String text = "Distance from Town Hall: " + Math.round(distance) + " blocks";
+        String text = label + Math.round(distance) + " blocks";
 
         Font font = minecraft.font;
         int textWidth = font.width(text);
@@ -89,9 +118,14 @@ public final class StakeDistanceOverlay implements GuiLayer {
         guiGraphics.text(font, text, left + PADDING, top + PADDING, TEXT_COLOR);
     }
 
-    private static boolean isHoldingStake(Player player) {
+    private static boolean isHoldingPerimeterStake(Player player) {
         return player.getMainHandItem().is(ModItems.PLANNED_PERIMETER_STAKE.get())
                 || player.getOffhandItem().is(ModItems.PLANNED_PERIMETER_STAKE.get());
+    }
+
+    private static boolean isHoldingChainStake(Player player) {
+        return player.getMainHandItem().is(ModItems.PLOT_PLACEMENT_STAKE.get())
+                || player.getMainHandItem().is(ModItems.ROADWAY_STAKE.get());
     }
 
     private static GhostTownHallCoreEntity findNearestCore(ClientLevel level, Player player) {

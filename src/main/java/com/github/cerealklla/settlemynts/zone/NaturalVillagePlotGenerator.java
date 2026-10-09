@@ -473,7 +473,7 @@ public final class NaturalVillagePlotGenerator {
      * is equally valid for {@link NaturalVillageShopLinkTicker}'s own matching, which only cares that
      * {@code zoneTypeForProfession} of whatever gets assigned resolves back to this Zone Type.
      */
-    static Optional<net.minecraft.resources.ResourceKey<VillagerProfession>> representativeProfessionFor(Identifier zoneTypeId) {
+    public static Optional<net.minecraft.resources.ResourceKey<VillagerProfession>> representativeProfessionFor(Identifier zoneTypeId) {
         String path = zoneTypeId.getPath();
         if (!zoneTypeId.getNamespace().equals("blueprynts")) {
             return Optional.empty();

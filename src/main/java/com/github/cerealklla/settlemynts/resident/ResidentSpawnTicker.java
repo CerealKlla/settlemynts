@@ -86,12 +86,19 @@ public final class ResidentSpawnTicker {
 
         // No finalizeSpawn call, deliberately -- that would let vanilla's own
         // assignProfessionWhenSpawned logic auto-claim a nearby job site/profession, which this
-        // resident should never do (left at the constructor's own VillagerType.PLAINS/
-        // VillagerProfession.NONE default, and the Brain that would act on a profession is never
-        // ticked anyway -- see ResidentVillagerEntity's own class doc).
+        // resident should never do (the Brain that would act on a profession is never ticked anyway
+        // -- see ResidentVillagerEntity's own class doc). The profession itself is still set directly
+        // below (2026-10-09, explicit request: "I'd like the NPCs... which are generated for a plot
+        // to have the 'Job' for that plot too... if there's a relevant model they should be using
+        // it") -- purely cosmetic (vanilla renders a profession-specific robe color off VillagerData
+        // alone), safe precisely because the Brain never runs, so it can never turn into real
+        // job-site-claiming or trading -- the same `representativeProfessionFor` lookup
+        // NaturalVillagePlotGenerator already uses for natural villages' own villagers.
         ResidentVillagerEntity resident = new ResidentVillagerEntity(ModEntities.RESIDENT_VILLAGER.get(), level);
         resident.setPos(signPos.getX() + 0.5, signPos.getY(), signPos.getZ() + 0.5);
         resident.setPlotIdentity(sign.settlementCoreId(), plotId);
+        com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator.representativeProfessionFor(plot.zoneTypeId())
+                .ifPresent(profession -> resident.setVillagerData(resident.getVillagerData().withProfession(level.registryAccess(), profession)));
         level.addFreshEntity(resident);
         sign.setResidentVillagerId(resident.getUUID());
     }

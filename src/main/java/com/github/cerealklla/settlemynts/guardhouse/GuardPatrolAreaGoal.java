@@ -113,8 +113,9 @@ public class GuardPatrolAreaGoal extends Goal {
 
     // "Reached" a waypoint -- checked explicitly rather than relying solely on vanilla's own
     // Navigation#isDone(), whose node-reach radius (derived from the guard's bounding box) left
-    // guards stopping noticeably short of the actual stake. 2 blocks (user-specified).
-    private static final double ARRIVE_DIST_SQ = 4.0;
+    // guards stopping noticeably short of the actual stake. 1 block (tightened from 2, 2026-10-09 --
+    // "they still don't seem to arrive close enough to the actual road vertex").
+    private static final double ARRIVE_DIST_SQ = 1.0;
 
     @Override
     public boolean canContinueToUse() {

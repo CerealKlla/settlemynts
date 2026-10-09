@@ -19,12 +19,22 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
  * all keep working exactly as vanilla) -- only the right-click interaction is redirected; vanilla's
  * own trade screen is canceled so the two don't fight over the same click. Same event shape as
  * Lyfe's existing {@code knowledge.SignListener#onEntityInteract} (there, for an {@code ItemFrame}).
+ *
+ * <p><b>Widened 2026-10-09, explicit request</b> -- a player settlement's own NPC-plot {@link
+ * ResidentVillagerEntity} gets identical treatment, resolved via its own {@link
+ * ResidentVillagerEntity#plotId()} field directly (no persistent-data tag needed, unlike the natural-
+ * village case, since this entity already carries its plot identity as real fields).
  */
 public final class VillagerShopInteractListener {
 
     @SubscribeEvent
     public void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
         if (!(event.getEntity() instanceof ServerPlayer player) || event.getHand() != InteractionHand.MAIN_HAND) {
+            return;
+        }
+        if (event.getTarget() instanceof ResidentVillagerEntity resident && resident.plotId() != null) {
+            event.setCanceled(true);
+            SettlemyntsMod.handleRequestShop(player, new ShopAnchor.Npc(resident.getId()), false);
             return;
         }
         if (!(event.getTarget() instanceof Villager villager) || villager.getClass() != Villager.class) {

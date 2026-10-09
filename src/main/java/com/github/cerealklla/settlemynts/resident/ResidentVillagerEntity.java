@@ -85,6 +85,10 @@ public class ResidentVillagerEntity extends Villager {
         return plotId;
     }
 
+    public UUID settlementCoreId() {
+        return settlementCoreId;
+    }
+
     /** Same resolution chain as {@code GuardEntity#resolvePatrolArea} -- see that method's own doc. */
     public Optional<Geometry.Polygon> resolvePatrolArea(ServerLevel level) {
         if (settlementCoreId == null || plotId == null) {
