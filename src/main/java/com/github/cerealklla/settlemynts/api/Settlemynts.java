@@ -138,6 +138,38 @@ public final class Settlemynts {
                 }
             }
         }
+        return findNaturalPlotAt(level, pos);
+    }
+
+    /**
+     * Natural (NPC-generated) village plots are never attached to a real {@link
+     * GhostTownHallCoreEntity} at all -- they live in {@code zone.NaturalSettlementPlotStore}
+     * instead (see that class's own doc) -- so the loop above never finds them, regardless of how
+     * similar a natural village "looks" in-game. Added 2026-10-09, real gap found via Lyfe's
+     * Recallcinite Totem feature: a player standing in a real natural-village "Residence" plot
+     * resolved no plot at all through {@link #findPlotAt}, even though {@code
+     * location.LocationTracker}'s own HUD (a separate, Cartographyr-direct lookup) correctly showed
+     * "Residence". A linear scan over every tracked natural settlement's plots, resolving each
+     * one's polygon the same way the regular path does -- same "whole-store scan, fine at this
+     * suite's scale" precedent {@code NaturalSettlementPlotStore#findByPlotId} already uses.
+     *
+     * <p>{@code settlementCoreId} has no real core entity to report for a natural village, so a
+     * stable id is derived deterministically from its {@code SettlementKey} instead -- unique and
+     * consistent across calls/sessions for the same settlement, which is all callers actually need
+     * it for (grouping/dedup keys, never an actual entity lookup).
+     */
+    private static Optional<PlotHandle> findNaturalPlotAt(ServerLevel level, BlockPos pos) {
+        var store = com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore.get(level.getServer());
+        for (var entry : store.all().entrySet()) {
+            com.github.cerealklla.settlemynts.zone.SettlementKey settlement = entry.getKey();
+            for (PlotRecord plot : entry.getValue()) {
+                Optional<Geometry.Polygon> polygon = resolvePolygon(level, plot);
+                if (polygon.isPresent() && polygon.get().contains(pos.getX(), pos.getZ())) {
+                    UUID settlementCoreId = new UUID(settlement.worldSeed(), settlement.settlementEntityId());
+                    return Optional.of(new PlotHandle(plot.plotId(), plot.zoneTypeId(), plot.owner(), settlementCoreId, polygon.get(), plot.tier()));
+                }
+            }
+        }
         return Optional.empty();
     }
 
