@@ -140,11 +140,13 @@ public final class ShopScreen extends Screen {
         Minecraft.getInstance().getConnection().send(new ServerboundCustomPayloadPacket(payload));
     }
 
-    /** "Buy (5)", or "Buy (5) (4)" in green when this player's Merchant bonus makes the real price different -- see class doc. */
+    /** "Buy (5g)", or "Buy (5g) (4g)" in green when this player's Merchant bonus makes the real price
+     * different -- see class doc. The "g" suffix (added 2026-10-09, real report: a player thought the
+     * number was a quantity to buy, not its gold cost) makes clear every number here is a price. */
     private static Component priceLabel(String verb, int rawPrice, int effectivePrice) {
-        Component label = Component.literal(verb + " (" + rawPrice + ")");
+        Component label = Component.literal(verb + " (" + rawPrice + "g)");
         if (effectivePrice != rawPrice) {
-            label = label.copy().append(Component.literal(" (" + effectivePrice + ")").withStyle(ChatFormatting.GREEN));
+            label = label.copy().append(Component.literal(" (" + effectivePrice + "g)").withStyle(ChatFormatting.GREEN));
         }
         return label;
     }
