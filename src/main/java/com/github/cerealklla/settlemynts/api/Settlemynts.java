@@ -347,12 +347,27 @@ public final class Settlemynts {
                 .map(Geometry.Polygon.class::cast);
     }
 
+    /**
+     * Fixed 2026-10-09 -- real report: a player listed logs in a Manage Shop screen (which always
+     * lists by the specific item physically found in a box, e.g. {@code oak_log}, never a tag), but
+     * {@code PlotTierMarketPurchasing}'s search for the "Logs" cost entry (a {@code generic_wood}
+     * tag-based {@link ShopResource}) never matched it -- this method used to require both sides be
+     * the SAME kind (both tag or both item), so a tag-based search could never find an item-based
+     * listing no matter what. Now also matches cross-type, via {@link ShopResource#matches(ItemStack)}
+     * -- does the item-based side's item actually fall under the tag-based side's tag.
+     */
     private static boolean sameResource(ShopResource a, ShopResource b) {
         if (a.tag().isPresent() && b.tag().isPresent()) {
             return a.tag().get().equals(b.tag().get());
         }
         if (a.itemId().isPresent() && b.itemId().isPresent()) {
             return a.itemId().get().equals(b.itemId().get());
+        }
+        if (a.tag().isPresent() && b.itemId().isPresent()) {
+            return a.matches(new ItemStack(BuiltInRegistries.ITEM.getValue(b.itemId().get())));
+        }
+        if (b.tag().isPresent() && a.itemId().isPresent()) {
+            return b.matches(new ItemStack(BuiltInRegistries.ITEM.getValue(a.itemId().get())));
         }
         return false;
     }
