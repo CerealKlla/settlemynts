@@ -23,10 +23,13 @@ import net.minecraft.resources.Identifier;
  * plot's own current unlocked construction-Tier cap ({@code zone.PlotRecord#tier}) -- sent along so
  * {@code client.UpgradePlotScreen} can compute/display the next Tier's cost without a server
  * round-trip (the same pure, client-computable {@code construction.PlotTierUpgradeCost} table the
- * server itself charges against).
+ * server itself charges against). {@code maxPlotTier} (added 2026-10-09, explicit request: "I'd like
+ * the Town Hall Plot Tier to be the limit for individual Plot Tiers") is 5 for the Town Hall plot
+ * itself, or the settlement's Town Hall plot's own current {@code tier} for every other plot -- gates
+ * whether "Upgrade Plot" is even shown.
  */
 public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage, boolean hasGarrison, boolean isTownHall,
-                                             boolean hasConstructionBox, int tier) implements CustomPacketPayload {
+                                             boolean hasConstructionBox, int tier, int maxPlotTier) implements CustomPacketPayload {
 
     public static final Type<OpenPlotConfigSignMenuPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_plot_config_sign_menu"));
@@ -38,6 +41,7 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::isTownHall,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::hasConstructionBox,
             ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::tier,
+            ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::maxPlotTier,
             OpenPlotConfigSignMenuPayload::new);
 
     @Override

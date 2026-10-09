@@ -220,6 +220,17 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
                 .filter(plot -> TOWN_HALL_ZONE_TYPE_ID.equals(plot.zoneTypeId()));
     }
 
+    /**
+     * The settlement's one Town-Hall-typed plot (if finalized at all) -- unlike {@link
+     * #findTownHallPlot}, this is a plain zone-type lookup over {@link #getPlots()}, with no
+     * position/polygon dependency, so it stays correct even if the Core itself has been repositioned
+     * off the Town Hall plot's own footprint. Added 2026-10-09 for "the Town Hall Plot Tier [is] the
+     * limit for individual Plot Tiers."
+     */
+    public java.util.Optional<PlotRecord> townHallPlot() {
+        return getPlots().stream().filter(plot -> TOWN_HALL_ZONE_TYPE_ID.equals(plot.zoneTypeId())).findFirst();
+    }
+
     public boolean isShowPlotPerimeters() {
         return showPlotPerimeters;
     }

@@ -66,7 +66,7 @@ public final class PlotConfigSignMenuScreen extends Screen {
             y += 30;
         }
 
-        if (data.canManage() && data.hasConstructionBox() && data.tier() < 5) {
+        if (data.canManage() && data.hasConstructionBox() && data.tier() < 5 && data.tier() < data.maxPlotTier()) {
             addRenderableWidget(Button.builder(Component.literal("Upgrade Plot"), b -> upgradePlot())
                     .bounds(centerX - 100, y, 200, 20).build());
             y += 30;

@@ -1113,7 +1113,9 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("You can't manage this plot."));
             return;
         }
-        if (plot.constructionBoxId().isEmpty() || plot.tier() >= 5) {
+        int maxPlotTier = plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)
+                ? 5 : core.townHallPlot().map(PlotRecord::tier).orElse(5);
+        if (plot.constructionBoxId().isEmpty() || plot.tier() >= 5 || plot.tier() >= maxPlotTier) {
             return; // Button shouldn't have been shown at all -- no message needed, same as other stale-state guards.
         }
         com.github.cerealklla.settlemynts.construction.PlotTierUpgradeFunding.Preview preview =
@@ -1162,6 +1164,12 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("This plot is already at the maximum Tier."));
             return;
         }
+        boolean isTownHall = plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID);
+        int maxPlotTier = isTownHall ? 5 : core.townHallPlot().map(PlotRecord::tier).orElse(5);
+        if (plot.tier() >= maxPlotTier) {
+            player.sendSystemMessage(Component.literal("This plot can't be upgraded past the Town Hall's own Tier (" + maxPlotTier + ") yet."));
+            return;
+        }
         com.github.cerealklla.settlemynts.construction.PlotTierUpgradeFunding.Result result =
                 com.github.cerealklla.settlemynts.construction.PlotTierUpgradeFunding.fund(
                         player, serverLevel, plot, core.getUUID(), payload.signPos(), payload.option());
@@ -1174,7 +1182,33 @@ public class SettlemyntsMod {
         if (net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
             com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.setAllowedTier(serverLevel, plot.constructionBoxId().get(), newTier);
         }
+        grantMayorSkillXpForPlotUpgrade(serverLevel.getServer(), core, newTier);
         player.sendSystemMessage(Component.literal("Plot upgraded to Tier " + newTier + "! Use the Construction Box to build at the new Tier."));
+    }
+
+    /**
+     * "Gains XP any time a plot in a Settlement you are the mayor of is upgraded. Gain half xp if you
+     * are a Town Planner for that town but not the Mayor" (Lyfe's Mayor skill, added 2026-10-09) --
+     * passive, so this always grants to every qualifying player regardless of who actually clicked
+     * "Upgrade Plot," not just the acting player.
+     */
+    private static void grantMayorSkillXpForPlotUpgrade(net.minecraft.server.MinecraftServer server, GhostTownHallCoreEntity core, int newTier) {
+        if (!com.github.cerealklla.settlemynts.bridge.LyfeMayorBridge.isLoaded()) {
+            return;
+        }
+        int baseXp = com.github.cerealklla.settlemynts.bridge.LyfeMayorBridge.xpForPlotUpgrade(newTier);
+        if (baseXp <= 0) {
+            return;
+        }
+        UUID founderId = core.getFounderId();
+        if (founderId != null) {
+            com.github.cerealklla.settlemynts.bridge.LyfeMayorBridge.grantMayorXp(server, founderId, baseXp);
+        }
+        for (UUID plannerId : core.getTownPlanners()) {
+            if (!plannerId.equals(founderId)) {
+                com.github.cerealklla.settlemynts.bridge.LyfeMayorBridge.grantMayorXp(server, plannerId, baseXp / 2);
+            }
+        }
     }
 
     /** "Configure Garrison" button click -- re-resolves the plot/Guardhouse and re-checks {@code zone.PlotPermissions#canManage} server-side rather than trusting the client's earlier flag, same precedent as {@code relocatePlotSign}. */
@@ -1348,6 +1382,17 @@ public class SettlemyntsMod {
      * the result on the core, clears the session's stakes, and resets any Plot Stakes item still
      * carrying this plot's CurrentPlotID back to blank (see {@link #clearPlotStakeItems}).
      */
+    /** Tier1=5/Tier2=10/Tier3=20/Tier4=35/Tier5=50 total plots (Town Hall included) -- explicit spec, 2026-10-09. */
+    private static int maxPlotsForTownHallTier(int tier) {
+        return switch (tier) {
+            case 1 -> 5;
+            case 2 -> 10;
+            case 3 -> 20;
+            case 4 -> 35;
+            default -> 50;
+        };
+    }
+
     private static void finalizePlot(FinalizePlotPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player)) {
             return;
@@ -1415,6 +1460,47 @@ public class SettlemyntsMod {
                     && PlotGeometry.overlaps(plotPolygon, otherPolygon)) {
                 player.sendSystemMessage(Component.literal(
                         "This plot overlaps plot \"" + other.name() + "\" -- adjust your stakes and try again."));
+                return;
+            }
+        }
+
+        // Added 2026-10-09, explicit request: "I'd like each tier to grant additional plots" -- caps
+        // the settlement's TOTAL plot count (Town Hall included) by the Town Hall's own current Tier.
+        // A settlement founding its very first plot (the Town Hall itself) has no Town Hall plot
+        // record yet to read a Tier from -- it starts at Tier 1 like every other plot.
+        boolean thisIsTownHall = zoneTypeId.equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID);
+        if (!thisIsTownHall && core.townHallPlot().isEmpty()) {
+            player.sendSystemMessage(Component.literal("Found this settlement's Town Hall plot before any other Zone Type."));
+            return;
+        }
+        int townHallTierForCap = thisIsTownHall ? 1 : core.townHallPlot().map(PlotRecord::tier).orElse(1);
+        int maxPlots = maxPlotsForTownHallTier(townHallTierForCap);
+        if (core.getPlots().size() >= maxPlots) {
+            player.sendSystemMessage(Component.literal(
+                    "This settlement is at its plot limit (" + maxPlots + ") for a Tier " + townHallTierForCap + " Town Hall -- upgrade the Town Hall to allow more plots."));
+            return;
+        }
+
+        // Added 2026-10-09, explicit spec: "the town hall's tier itself allows a mayor to place those
+        // zone types... a Tier 1 town can't have a Guardhouse at all" -- separate from (and checked
+        // before) the Mayor-skill-level gate below.
+        int minTownHallTier = com.github.cerealklla.settlemynts.zone.ZoneTypeUnlocks.minTownHallTierForZoneType(zoneTypeId);
+        if (!thisIsTownHall && townHallTierForCap < minTownHallTier) {
+            player.sendSystemMessage(Component.literal(
+                    "This Zone Type needs a Tier " + minTownHallTier + " Town Hall (currently Tier " + townHallTierForCap + ")."));
+            return;
+        }
+
+        // Added 2026-10-09, explicit spec: "the Mayor skill will be how certain plot types are
+        // unlocked" -- gated against the settlement's own Mayor (founder), not whichever Town Planner
+        // happens to be the one finalizing this particular plot, since the unlock is a settlement-wide
+        // leadership concept.
+        if (!thisIsTownHall && com.github.cerealklla.settlemynts.bridge.LyfeMayorBridge.isLoaded()) {
+            int minMayorLevel = com.github.cerealklla.settlemynts.bridge.LyfeMayorBridge.minMayorLevelForZoneType(zoneTypeId);
+            int founderMayorLevel = com.github.cerealklla.settlemynts.bridge.LyfeMayorBridge.getMayorLevel(serverLevel.getServer(), core.getFounderId());
+            if (founderMayorLevel < minMayorLevel) {
+                player.sendSystemMessage(Component.literal(
+                        "This Zone Type needs the settlement's Mayor to reach Mayor level " + minMayorLevel + " (currently level " + founderMayorLevel + ")."));
                 return;
             }
         }
