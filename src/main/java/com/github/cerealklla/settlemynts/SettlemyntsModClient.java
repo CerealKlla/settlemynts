@@ -15,12 +15,14 @@ import com.github.cerealklla.settlemynts.guardhouse.client.GuardhouseFoodScreen;
 import com.github.cerealklla.settlemynts.guardhouse.client.SelectKytScreen;
 import com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests;
 import com.github.cerealklla.settlemynts.plotsign.RequestShopPayload;
+import com.github.cerealklla.settlemynts.plotsign.RequestShopWishlistPayload;
 import com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotConfigSignMenuScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotDetailsScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotManagementScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.ShopPromptOverlay;
 import com.github.cerealklla.settlemynts.plotsign.client.ShopScreen;
+import com.github.cerealklla.settlemynts.plotsign.client.WishlistScreen;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.registration.ModMenus;
 import com.github.cerealklla.settlemynts.zone.client.PlotStakeScreen;
@@ -56,9 +58,16 @@ public class SettlemyntsModClient {
     public static final KeyMapping OPEN_SHOP = new KeyMapping(
             "key.settlemynts.open_shop", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G, KeyMapping.Category.MISC);
 
+    // "Press H to chat" (2026-10-10, public shop wishlist -- see zone.ShopWishlist's own doc). "H"
+    // is free across the whole suite the same way "G" was -- flagged as an easy-to-rebind
+    // placeholder like every other keybind in this project.
+    public static final KeyMapping TALK = new KeyMapping(
+            "key.settlemynts.talk", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_H, KeyMapping.Category.MISC);
+
     @SubscribeEvent
     static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(OPEN_SHOP);
+        event.register(TALK);
     }
 
     @SubscribeEvent
@@ -171,6 +180,15 @@ public class SettlemyntsModClient {
             }
         }
 
+        // "Press H to chat" (2026-10-10) -- only offered while ClientShopPromptState.hasWishlist(),
+        // same "server resolves eligibility, client just reacts to the last snapshot" shape as the
+        // "Press G to open shop" prompt above.
+        while (TALK.consumeClick()) {
+            if (Minecraft.getInstance().screen == null && ClientShopPromptState.hasWishlist()) {
+                ClientShopPromptState.get().ifPresent(anchor -> send(new RequestShopWishlistPayload(anchor)));
+            }
+        }
+
         ClientPlotSignRequests.takePendingUpgradePlotPreview().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
                 Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.UpgradePlotScreen(request));
@@ -204,6 +222,17 @@ public class SettlemyntsModClient {
         // Same pattern as the gold-update patch above, for the "Shop Stock" column (real report,
         // 2026-10-10: "When buying/selling from a store the shop stock number is not changing") --
         // see ShopStockUpdatePayload's own doc.
+        // Opens the WishlistScreen on "Press H to chat," or refreshes it in place if a "Sell" click
+        // on that same screen just re-sent fresh data (same dual-purpose shape as the gold/stock
+        // patches above vs. the "open a new screen" pattern everything else here uses).
+        ClientPlotSignRequests.takePendingWishlist().ifPresent(update -> {
+            if (Minecraft.getInstance().screen instanceof WishlistScreen wishlistScreen) {
+                wishlistScreen.refresh(update);
+            } else if (Minecraft.getInstance().screen == null) {
+                Minecraft.getInstance().setScreen(new WishlistScreen(update));
+            }
+        });
+
         ClientPlotSignRequests.takePendingStockUpdate().ifPresent(update -> {
             if (Minecraft.getInstance().screen instanceof ShopScreen shopScreen) {
                 shopScreen.updateListings(update.listings());

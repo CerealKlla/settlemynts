@@ -72,10 +72,11 @@ public final class PlotShopProximityTicker {
         for (Villager villager : level.getEntitiesOfClass(Villager.class, villagerSearch,
                 v -> v.getClass() == Villager.class && v.getPersistentData().contains(NaturalVillagePlotGenerator.PLOT_ID_TAG))) {
             double distSq = villager.distanceToSqr(player);
+            ShopAnchor.Npc candidate = new ShopAnchor.Npc(villager.getId());
+            updateWishlistNameplate(level, villager, candidate);
             if (distSq > radiusSq || distSq >= nearestDistSq) {
                 continue;
             }
-            ShopAnchor.Npc candidate = new ShopAnchor.Npc(villager.getId());
             if (!SettlemyntsMod.npcHasOpenableShop(level, candidate)) {
                 continue; // Tagged, but its plot has no Shop (or doesn't resolve) -- not worth prompting for.
             }
@@ -96,10 +97,11 @@ public final class PlotShopProximityTicker {
         for (Villager worker : level.getEntitiesOfClass(Villager.class, villagerSearch,
                 v -> v instanceof PlotNpc npc && npc.plotId() != null)) {
             double distSq = worker.distanceToSqr(player);
+            ShopAnchor.Npc candidate = new ShopAnchor.Npc(worker.getId());
+            updateWishlistNameplate(level, worker, candidate);
             if (distSq > radiusSq || distSq >= nearestDistSq) {
                 continue;
             }
-            ShopAnchor.Npc candidate = new ShopAnchor.Npc(worker.getId());
             if (!SettlemyntsMod.npcHasOpenableShop(level, candidate)) {
                 continue;
             }
@@ -114,10 +116,35 @@ public final class PlotShopProximityTicker {
         }
         if (nearest != null) {
             lastSent.put(playerId, nearest);
-            PacketDistributor.sendToPlayer(player, new PlotShopPromptPayload(true, nearest));
+            boolean hasWishlist = SettlemyntsMod.anchorHasWishlist(level, nearest);
+            PacketDistributor.sendToPlayer(player, new PlotShopPromptPayload(true, nearest, hasWishlist));
         } else {
             lastSent.remove(playerId);
-            PacketDistributor.sendToPlayer(player, new PlotShopPromptPayload(false, new ShopAnchor.Sign(BlockPos.ZERO)));
+            PacketDistributor.sendToPlayer(player, new PlotShopPromptPayload(false, new ShopAnchor.Sign(BlockPos.ZERO), false));
+        }
+    }
+
+    private static final net.minecraft.network.chat.Component WISHLIST_MARKER =
+            net.minecraft.network.chat.Component.literal("!").withStyle(net.minecraft.ChatFormatting.YELLOW, net.minecraft.ChatFormatting.BOLD);
+
+    /**
+     * Sets/clears a plain vanilla nameplate ("!") above an NPC whose plot currently has an unmet
+     * Planned Inventory deficit (2026-10-10, "if they have needs they'd have a ! floating over their
+     * heads") -- reuses vanilla's own nametag rendering entirely, no new client rendering code
+     * needed. Public (visible to every player, not just whoever's asking), server-authoritative,
+     * computed only for NPCs this method is already iterating for proximity detection -- no
+     * additional world scanning beyond what this ticker already does every interval.
+     */
+    private static void updateWishlistNameplate(ServerLevel level, Villager npc, ShopAnchor.Npc anchor) {
+        boolean hasWishlist = SettlemyntsMod.anchorHasWishlist(level, anchor);
+        if (hasWishlist) {
+            if (!WISHLIST_MARKER.equals(npc.getCustomName())) {
+                npc.setCustomName(WISHLIST_MARKER);
+                npc.setCustomNameVisible(true);
+            }
+        } else if (npc.getCustomName() != null) {
+            npc.setCustomName(null);
+            npc.setCustomNameVisible(false);
         }
     }
 }

@@ -35,15 +35,24 @@ public final class ShopPromptOverlay implements GuiLayer {
 
         String keyName = SettlemyntsModClient.OPEN_SHOP.getTranslatedKeyMessage().getString();
         String text = "Press " + keyName + " to open shop";
+        // "Press <key> to chat" (2026-10-10, public shop wishlist) -- only shown when this shop
+        // actually has something to ask about, see ClientShopPromptState#hasWishlist's own doc.
+        String chatText = ClientShopPromptState.hasWishlist()
+                ? "Press " + SettlemyntsModClient.TALK.getTranslatedKeyMessage().getString() + " to chat"
+                : null;
 
         Font font = minecraft.font;
-        int textWidth = font.width(text);
+        int textWidth = Math.max(font.width(text), chatText != null ? font.width(chatText) : 0);
         int left = guiGraphics.guiWidth() / 2 - textWidth / 2 - PADDING;
         int right = left + textWidth + PADDING * 2;
+        int lineCount = chatText != null ? 2 : 1;
         int bottom = guiGraphics.guiHeight() - MARGIN_FROM_BOTTOM;
-        int top = bottom - font.lineHeight - PADDING * 2;
+        int top = bottom - font.lineHeight * lineCount - PADDING * 2;
 
         guiGraphics.fill(left, top, right, bottom, BACKGROUND_COLOR);
         guiGraphics.text(font, text, left + PADDING, top + PADDING, TEXT_COLOR);
+        if (chatText != null) {
+            guiGraphics.text(font, chatText, left + PADDING, top + PADDING + font.lineHeight, TEXT_COLOR);
+        }
     }
 }

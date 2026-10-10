@@ -14,15 +14,21 @@ import com.github.cerealklla.settlemynts.plotsign.ShopAnchor;
 public final class ClientShopPromptState {
 
     private static volatile Optional<ShopAnchor> nearest = Optional.empty();
+    private static volatile boolean hasWishlist = false;
 
     private ClientShopPromptState() {
     }
 
-    public static void set(boolean present, ShopAnchor anchor) {
+    public static void set(boolean present, ShopAnchor anchor, boolean hasWishlist) {
         nearest = present ? Optional.of(anchor) : Optional.empty();
+        ClientShopPromptState.hasWishlist = present && hasWishlist;
     }
 
     public static Optional<ShopAnchor> get() {
         return nearest;
+    }
+
+    public static boolean hasWishlist() {
+        return hasWishlist;
     }
 }

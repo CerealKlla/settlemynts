@@ -477,6 +477,19 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.SetShopListingsPayload.STREAM_CODEC,
                 (payload, context) -> setShopListings(payload, context));
 
+        // Public shop wishlist (2026-10-10) -- see zone.ShopWishlist's own doc.
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestShopWishlistPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestShopWishlistPayload.STREAM_CODEC,
+                (payload, context) -> requestShopWishlist(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestWishlist(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SellToShopWishlistPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SellToShopWishlistPayload.STREAM_CODEC,
+                (payload, context) -> sellToShopWishlist(payload, context));
+
         // Planned Inventory (2026-10-09) -- see zone.PlannedInventoryClearing's own doc.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload.STREAM_CODEC,
@@ -493,7 +506,7 @@ public class SettlemyntsMod {
         // "Press G to open shop" proximity prompt (2026-10-05) -- see PlotShopProximityTicker's own doc.
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.STREAM_CODEC,
-                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState.set(payload.present(), payload.anchor()));
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState.set(payload.present(), payload.anchor(), payload.hasWishlist()));
 
         // "Distance from Stake" readout for Plot Placement Stakes/Roadway Stakes (2026-10-09).
         registrar.playToClient(com.github.cerealklla.settlemynts.founding.AnchorDistancePayload.TYPE,
@@ -1049,6 +1062,140 @@ public class SettlemyntsMod {
     }
 
     /**
+     * "Press &lt;key&gt; to chat" -- the public wishlist request (2026-10-10, see {@code
+     * zone.ShopWishlist}'s own doc). Any player, not just the plot's own owner, can ask -- that's the
+     * whole point ("public wishlist"). Also grants a temporary premium-sell offer for everything
+     * listed, via {@code zone.WishlistOfferTracker}.
+     */
+    private static void requestShopWishlist(com.github.cerealklla.settlemynts.plotsign.RequestShopWishlistPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, payload.anchor());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        long expiresAt = serverLevel.getGameTime() + com.github.cerealklla.settlemynts.zone.ShopWishlist.OFFER_WINDOW_TICKS;
+        for (com.github.cerealklla.settlemynts.zone.ShopWishlist.DeficitEntry deficit :
+                com.github.cerealklla.settlemynts.zone.ShopWishlist.computeDeficits(serverLevel, plot)) {
+            com.github.cerealklla.settlemynts.zone.WishlistOfferTracker.grant(player.getUUID(), plot.plotId(), deficit.resource(), expiresAt);
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
+                payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos())));
+    }
+
+    /** Shared row-assembly for {@link #requestShopWishlist} and {@link #sellToShopWishlist}'s own post-sale refresh. */
+    private static java.util.List<com.github.cerealklla.settlemynts.plotsign.WishlistEntry> buildWishlistEntries(
+            ServerLevel level, PlotRecord plot, net.minecraft.core.BlockPos anchorPos) {
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.WishlistEntry> entries = new java.util.ArrayList<>();
+        for (com.github.cerealklla.settlemynts.zone.ShopWishlist.DeficitEntry deficit :
+                com.github.cerealklla.settlemynts.zone.ShopWishlist.computeDeficits(level, plot)) {
+            com.github.cerealklla.settlemynts.zone.ShopResource resource = deficit.resource();
+            int normalPrice = com.github.cerealklla.settlemynts.zone.ShopWishlist.normalPriceFor(level, plot, anchorPos, resource);
+            net.minecraft.resources.Identifier key = resource.itemId().orElseGet(() -> resource.tag().orElseThrow().location());
+            entries.add(new com.github.cerealklla.settlemynts.plotsign.WishlistEntry(
+                    key, resource.tag().isPresent(), deficit.quantityNeeded(), normalPrice,
+                    com.github.cerealklla.settlemynts.zone.ShopWishlist.premiumPrice(normalPrice)));
+        }
+        entries.sort(java.util.Comparator.comparing(com.github.cerealklla.settlemynts.plotsign.WishlistEntry::label));
+        return entries;
+    }
+
+    /**
+     * "Sell" on one {@code client.WishlistScreen} row -- a direct, premium-priced sale against the
+     * shop's own Planned Inventory deficit (see {@code zone.ShopWishlist}'s own doc). Only valid
+     * while {@code zone.WishlistOfferTracker#isActive}; the deficit, player stock, and shop's own
+     * gold are all re-resolved live here rather than trusting anything the client remembered from
+     * when it asked. The offer is cleared the instant any sale through here succeeds -- "that
+     * temporary option to sell it to him would then go away" (explicit user spec) -- regardless of
+     * whether it fully covered the remaining deficit.
+     */
+    private static void sellToShopWishlist(com.github.cerealklla.settlemynts.plotsign.SellToShopWishlistPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, payload.anchor());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
+                ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
+                : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
+
+        if (!com.github.cerealklla.settlemynts.zone.WishlistOfferTracker.isActive(player.getUUID(), plot.plotId(), resource, serverLevel.getGameTime())) {
+            player.sendSystemMessage(Component.literal("Ask what this shop needs again before selling at that price."));
+            return;
+        }
+
+        com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget target = plot.plannedInventory().stream()
+                .filter(t -> t.isTag() == payload.isTag() && t.resourceKey().equals(payload.resourceKey()))
+                .findFirst().orElse(null);
+        java.util.List<net.minecraft.world.Container> boxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, plot.plotId());
+        int remainingDeficit = target == null ? 0
+                : target.targetCount() - com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, resource);
+        if (remainingDeficit <= 0) {
+            player.sendSystemMessage(Component.literal("This shop doesn't need any more of that right now."));
+            com.github.cerealklla.settlemynts.zone.WishlistOfferTracker.clear(player.getUUID(), plot.plotId(), resource);
+            return;
+        }
+
+        net.minecraft.world.entity.player.Inventory inventory = player.getInventory();
+        int playerStock = 0;
+        java.util.List<Integer> matchingSlots = new java.util.ArrayList<>();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            net.minecraft.world.item.ItemStack stack = inventory.getItem(slot);
+            if (stack.isEmpty() || !resource.matches(stack)) {
+                continue;
+            }
+            playerStock += stack.getCount();
+            matchingSlots.add(slot);
+        }
+        if (playerStock <= 0) {
+            player.sendSystemMessage(Component.literal("You don't have any of that to sell."));
+            return;
+        }
+
+        int premiumPrice = com.github.cerealklla.settlemynts.zone.ShopWishlist.premiumPrice(
+                com.github.cerealklla.settlemynts.zone.ShopWishlist.normalPriceFor(serverLevel, plot, resolved.get().anchorPos(), resource));
+        com.github.cerealklla.settlemynts.zone.ShopResource goldResource = com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET));
+        int affordable = com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, goldResource) / premiumPrice;
+        int quantity = Math.min(Math.max(1, payload.quantity()), Math.min(remainingDeficit, Math.min(playerStock, affordable)));
+        if (quantity <= 0) {
+            player.sendSystemMessage(Component.literal("The shop can't afford to buy that right now."));
+            return;
+        }
+
+        int remaining = quantity;
+        for (int slot : matchingSlots) {
+            if (remaining <= 0) {
+                break;
+            }
+            int take = Math.min(remaining, inventory.getItem(slot).getCount());
+            inventory.removeItem(slot, take);
+            remaining -= take;
+        }
+        com.github.cerealklla.settlemynts.zone.ContainerDeposit.depositIntoAny(boxes,
+                new net.minecraft.world.item.ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(payload.resourceKey()), quantity));
+        int nuggetsOwed = quantity * premiumPrice;
+        for (net.minecraft.world.item.ItemStack stack : com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(boxes, goldResource, nuggetsOwed)) {
+            if (!player.getInventory().add(stack)) {
+                player.drop(stack, false);
+            }
+        }
+        player.sendSystemMessage(Component.literal("Sold " + quantity + " for " + nuggetsOwed + " nuggets."));
+        com.github.cerealklla.settlemynts.zone.WishlistOfferTracker.clear(player.getUUID(), plot.plotId(), resource);
+
+        sendShopGoldUpdate(player, serverLevel, plot.plotId());
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
+                payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos())));
+    }
+
+    /**
      * "Save Changes" on {@code client.ManageShopScreen} (2026-10-08, replacing the old held-item-add
      * plus price +/-1/+/-10 click-spam flow entirely -- real feedback: "having to close the UI, put
      * something in your hand, then go to the manage screen to add an item is clunky"). One batch
@@ -1272,6 +1419,13 @@ public class SettlemyntsMod {
                             && !plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)
                             && plot.shopId().isPresent();
                 })
+                .orElse(false);
+    }
+
+    /** Does the shop behind {@code anchor} (sign or NPC alike) currently have any unmet Planned Inventory deficit -- see {@code zone.ShopWishlist}'s own doc. Used by {@code plotsign.PlotShopProximityTicker} for both the "Press &lt;key&gt; to chat" prompt and the floating "!" nameplate. */
+    public static boolean anchorHasWishlist(ServerLevel level, com.github.cerealklla.settlemynts.plotsign.ShopAnchor anchor) {
+        return resolveShopContext(level, anchor)
+                .map(ctx -> com.github.cerealklla.settlemynts.zone.ShopWishlist.hasAnyDeficit(level, ctx.plot()))
                 .orElse(false);
     }
 
