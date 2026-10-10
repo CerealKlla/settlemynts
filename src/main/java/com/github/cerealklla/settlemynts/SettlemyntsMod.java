@@ -791,7 +791,13 @@ public class SettlemyntsMod {
         java.util.List<net.minecraft.world.Container> boxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, plotId);
         com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.PurchaseResult result =
                 com.github.cerealklla.settlemynts.api.Settlemynts.purchaseFromSettlementShop(serverLevel, plotId, shopId.get(), resource, payload.quantity(), boxes);
-        if (result.filled() <= 0) {
+        // Captured once, up front -- real report, 2026-10-09: "Buying 0 for # gold." PurchaseResult#
+        // filled() isn't a stored count, it re-sums itemsReceived()'s own ItemStacks every call, and
+        // player.getInventory().add(stack) below mutates those same stack instances in place (vanilla
+        // shrinks a stack to empty as it's deposited) -- so every filled() call AFTER that loop saw 0,
+        // including the chat message and (silently, no visible symptom) the Merchant rebate check.
+        int filled = result.filled();
+        if (filled <= 0) {
             player.sendSystemMessage(Component.literal("Out of stock."));
             return;
         }
@@ -833,11 +839,11 @@ public class SettlemyntsMod {
         // effectiveSellPayout are a matched pair that guarantee the sell payout is always strictly
         // less than the buy cost for the same price/bonus, closing that loop by construction.
         int rebate = 0;
-        if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded() && result.filled() > 0) {
-            int pricePerUnit = result.nuggetsCharged() / result.filled();
+        if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()) {
+            int pricePerUnit = result.nuggetsCharged() / filled;
             double fraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player);
             int effectiveCostPerUnit = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveBuyCost(pricePerUnit, fraction);
-            rebate = Math.max(0, result.nuggetsCharged() - effectiveCostPerUnit * result.filled());
+            rebate = Math.max(0, result.nuggetsCharged() - effectiveCostPerUnit * filled);
         }
         if (rebate > 0) {
             net.minecraft.world.item.ItemStack reward = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.GOLD_NUGGET, rebate);
@@ -845,7 +851,7 @@ public class SettlemyntsMod {
                 player.drop(reward, false);
             }
         }
-        player.sendSystemMessage(Component.literal("Bought " + result.filled() + " for " + result.nuggetsCharged() + " nuggets."));
+        player.sendSystemMessage(Component.literal("Bought " + filled + " for " + result.nuggetsCharged() + " nuggets."));
     }
 
     /**
@@ -1140,6 +1146,28 @@ public class SettlemyntsMod {
             LOGGER.info("Natural village shop: Npc anchor entityId={} plotId={} -- tag present but no matching plot found in the store", npc.entityId(), plotId.get());
         }
         return resolved;
+    }
+
+    /**
+     * Would {@code handleRequestShop(player, anchor, false)} actually open a Shop right now -- same
+     * "doesn't have a Shop" condition that method itself falls back to, exposed read-only so {@code
+     * plotsign.PlotShopProximityTicker}/{@code resident.VillagerShopInteractListener} can skip
+     * offering the "Press G"/right-click interaction at all for an NPC whose plot has no Shop, rather
+     * than offering it and then dead-ending with "This plot doesn't have a Shop." Real report,
+     * 2026-10-09: a plain {@code resident.ResidentVillagerEntity} (the ambient decorative NPC spawned
+     * on an NPC-owned, shopless plot like Private Residence) already has a real {@code plotId}, so it
+     * was never caught by the existing "does this NPC even have a plot" checks those two classes
+     * already had -- this is the real, narrower condition both actually need.
+     */
+    public static boolean npcHasOpenableShop(ServerLevel level, com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc anchor) {
+        return resolveShopContext(level, anchor)
+                .map(ctx -> {
+                    PlotRecord plot = ctx.plot();
+                    return !plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)
+                            && !plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)
+                            && plot.shopId().isPresent();
+                })
+                .orElse(false);
     }
 
     private static java.util.Optional<PlotRecordAndCore> resolvePlotForManage(ServerLevel level, net.minecraft.core.BlockPos signPos, UUID playerId) {

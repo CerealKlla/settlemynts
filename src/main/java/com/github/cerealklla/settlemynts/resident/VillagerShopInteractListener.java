@@ -35,9 +35,20 @@ public final class VillagerShopInteractListener {
         if (!(event.getEntity() instanceof ServerPlayer player) || event.getHand() != InteractionHand.MAIN_HAND) {
             return;
         }
+        if (!(player.level() instanceof net.minecraft.server.level.ServerLevel level)) {
+            return;
+        }
         if (event.getTarget() instanceof PlotNpc npc && npc.plotId() != null) {
-            event.setCanceled(true);
-            SettlemyntsMod.handleRequestShop(player, new ShopAnchor.Npc(event.getTarget().getId()), false);
+            ShopAnchor.Npc anchor = new ShopAnchor.Npc(event.getTarget().getId());
+            // Real report, 2026-10-09: a plain ResidentVillagerEntity (the ambient decorative NPC on
+            // an NPC-owned, shopless plot like Private Residence) has a real plotId, so it used to
+            // pass this check and still redirect into a dead-end "This plot doesn't have a Shop" --
+            // npcHasOpenableShop is the real, narrower condition; falling through here leaves vanilla's
+            // own interaction (e.g. a plain trade screen) untouched for a shopless worker.
+            if (SettlemyntsMod.npcHasOpenableShop(level, anchor)) {
+                event.setCanceled(true);
+                SettlemyntsMod.handleRequestShop(player, anchor, false);
+            }
             return;
         }
         if (!(event.getTarget() instanceof Villager villager) || villager.getClass() != Villager.class) {
@@ -46,7 +57,11 @@ public final class VillagerShopInteractListener {
         if (!villager.getPersistentData().contains(NaturalVillagePlotGenerator.PLOT_ID_TAG)) {
             return;
         }
+        ShopAnchor.Npc anchor = new ShopAnchor.Npc(villager.getId());
+        if (!SettlemyntsMod.npcHasOpenableShop(level, anchor)) {
+            return;
+        }
         event.setCanceled(true);
-        SettlemyntsMod.handleRequestShop(player, new ShopAnchor.Npc(villager.getId()), false);
+        SettlemyntsMod.handleRequestShop(player, anchor, false);
     }
 }

@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
+import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator;
 import com.github.cerealklla.settlemynts.zone.PlotNpc;
 
@@ -74,8 +75,12 @@ public final class PlotShopProximityTicker {
             if (distSq > radiusSq || distSq >= nearestDistSq) {
                 continue;
             }
+            ShopAnchor.Npc candidate = new ShopAnchor.Npc(villager.getId());
+            if (!SettlemyntsMod.npcHasOpenableShop(level, candidate)) {
+                continue; // Tagged, but its plot has no Shop (or doesn't resolve) -- not worth prompting for.
+            }
             nearestDistSq = distSq;
-            nearest = new ShopAnchor.Npc(villager.getId());
+            nearest = candidate;
         }
 
         // Player settlements' own NPC-plot workers (2026-10-09, explicit request: "I'd like the NPCs
@@ -83,14 +88,23 @@ public final class PlotShopProximityTicker {
         // natural settlements") -- same shape as the natural-village Villager scan above, just keyed
         // off the shared PlotNpc marker (resident.ResidentVillagerEntity, farm.FarmerWorkerEntity,
         // lumberyard.LumberjackWorkerEntity) instead of a persistent-data tag.
+        //
+        // Real report, 2026-10-09: a plain ResidentVillagerEntity (the ambient decorative NPC on an
+        // NPC-owned, shopless plot like Private Residence) has a real plotId, so it passed the old
+        // "has a plot" check and still got offered a "Press G to open shop" prompt that dead-ended --
+        // npcHasOpenableShop below is the real, narrower condition both scans need.
         for (Villager worker : level.getEntitiesOfClass(Villager.class, villagerSearch,
                 v -> v instanceof PlotNpc npc && npc.plotId() != null)) {
             double distSq = worker.distanceToSqr(player);
             if (distSq > radiusSq || distSq >= nearestDistSq) {
                 continue;
             }
+            ShopAnchor.Npc candidate = new ShopAnchor.Npc(worker.getId());
+            if (!SettlemyntsMod.npcHasOpenableShop(level, candidate)) {
+                continue;
+            }
             nearestDistSq = distSq;
-            nearest = new ShopAnchor.Npc(worker.getId());
+            nearest = candidate;
         }
 
         UUID playerId = player.getUUID();
