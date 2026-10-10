@@ -185,7 +185,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.ResidentSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.ResidentConversionGuard());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.ShopMidnightRestockTicker());
-        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotCraftingTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.lumberyard.LumberjackSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.farm.FarmerSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.TownHallCoreLocatorTicker());
@@ -857,6 +857,9 @@ public class SettlemyntsMod {
         }
         player.sendSystemMessage(Component.literal("Bought " + filled + " for " + result.nuggetsCharged() + " nuggets."));
         sendShopGoldUpdate(player, serverLevel, plotId);
+        // 2026-10-10 redesign: check this one shop for auto-crafting opportunities once it's gone
+        // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
+        com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
     }
 
     /**
@@ -964,6 +967,9 @@ public class SettlemyntsMod {
         }
         player.sendSystemMessage(Component.literal("Sold " + result.itemsSold() + " for " + nuggetsOwed + " nuggets."));
         sendShopGoldUpdate(player, serverLevel, plotId);
+        // 2026-10-10 redesign: check this one shop for auto-crafting opportunities once it's gone
+        // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
+        com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
     }
 
     /**

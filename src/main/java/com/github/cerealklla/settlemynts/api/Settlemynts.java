@@ -393,7 +393,16 @@ public final class Settlemynts {
         if (polygon.isEmpty()) {
             return com.github.cerealklla.settlemynts.zone.NaturalShopVault.resolveBoxesForPlot(level, plotId);
         }
-        for (UUID boxId : Cartography.getBoxesAt(level, polygon.get())) {
+        return resolveBoxesForPolygon(level, polygon.get());
+    }
+
+    /**
+     * Same as the tail of {@link #resolvePlotBoxes}, but for a polygon the caller already has in hand
+     * -- added 2026-10-10 alongside {@link #resolvePolygonDirect}, see that method's own doc for why.
+     */
+    public static List<Container> resolveBoxesForPolygon(ServerLevel level, Geometry.Polygon polygon) {
+        List<Container> containers = new ArrayList<>();
+        for (UUID boxId : Cartography.getBoxesAt(level, polygon)) {
             Cartography.resolveBoxContainer(level, boxId).ifPresent(containers::add);
         }
         return containers;
@@ -408,6 +417,42 @@ public final class Settlemynts {
      */
     public static Optional<Geometry.Polygon> resolvePlotPolygon(ServerLevel level, UUID plotId) {
         return findPolygonForPlot(level, plotId);
+    }
+
+    /**
+     * Same as {@link #resolvePlotPolygon}, but for a {@link PlotRecord} the caller already has in
+     * hand (e.g. from {@code core.getPlots()}) -- skips {@link #findPolygonForPlot}'s own full-world
+     * {@code GhostTownHallCoreEntity} scan entirely, going straight to the cheap per-entity-id lookup.
+     * Added 2026-10-10 for NPC plot crafting's group-triggered pass ({@code
+     * zone.PlannedInventoryClearing#craftFromOwnStockForGroup}), which already iterates a known
+     * core's own plots directly -- re-discovering "which core owns this plot" from scratch via
+     * {@link #resolvePlotPolygon} would be pure waste there.
+     */
+    public static Optional<Geometry.Polygon> resolvePolygonDirect(ServerLevel level, PlotRecord plot) {
+        return resolvePolygon(level, plot);
+    }
+
+    /**
+     * The current {@link PlotRecord} for {@code plotId} within {@code level} specifically, if any --
+     * added 2026-10-10 for {@code zone.ShopCraftingDebounceTicker}'s debounced per-shop auto-crafting
+     * check: it only ever has a bare {@code plotId} (plus the {@code level} it was raised on) to work
+     * from, not a {@link PlotRecord} in hand, and needs the record's *current* state (Planned
+     * Inventory may have changed since the triggering trade). Still a full-world
+     * {@code GhostTownHallCoreEntity} scan under the hood ({@link #findPolygonForPlot}'s own sibling)
+     * -- fine here since it only runs once per debounce fire (10s of inactivity on one specific shop),
+     * nothing like the old time-based ticker's every-second/every-plot cost.
+     */
+    public static Optional<PlotRecord> findPlotRecord(ServerLevel level, UUID plotId) {
+        AABB worldBounds = new AABB(-WORLD_SCAN_RADIUS, level.getMinY(), -WORLD_SCAN_RADIUS,
+                WORLD_SCAN_RADIUS, level.getMaxY(), WORLD_SCAN_RADIUS);
+        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+            for (PlotRecord plot : core.getPlots()) {
+                if (plot.plotId().equals(plotId)) {
+                    return Optional.of(plot);
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     private static Optional<Geometry.Polygon> findPolygonForPlot(ServerLevel level, UUID plotId) {

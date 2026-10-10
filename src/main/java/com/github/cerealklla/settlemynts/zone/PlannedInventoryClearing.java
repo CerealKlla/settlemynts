@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.LyfeCraftingBridge;
@@ -58,6 +59,7 @@ public final class PlannedInventoryClearing {
     }
 
     private static final ShopResource GOLD_NUGGETS = ShopResource.ofItem(BuiltInRegistries.ITEM.getKey(Items.GOLD_NUGGET));
+    private static final int MAX_CRAFTS_PER_PLOT_PER_TARGET = 64;
 
     private record Participant(PlotRecord plot, List<Container> boxes) {
     }
@@ -93,6 +95,75 @@ public final class PlannedInventoryClearing {
         }
         double ms = (System.nanoTime() - start) / 1_000_000.0;
         SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: midnight settlement pass finished in {}ms", String.format("%.1f", ms));
+    }
+
+    /**
+     * "Use what you already have" production pass -- replaces the old time-based, whole-world-
+     * scanning {@code zone.PlotCraftingTicker} (removed 2026-10-10, explicit user redesign: "Why
+     * would the shop be checking the entire server?... it should only check the trade route list for
+     * the settlement... not the whole world"). For every plot in {@code plots} with a sufficiently-
+     * tiered crafting structure, cranks out as many units of each Planned Inventory target with a
+     * known recipe as its own current box contents allow. Never buys from anywhere else -- that's
+     * {@link #settleResource}/{@link #settleCraftableResource}'s job, already correctly scoped to
+     * {@code plots} (this one settlement's own list, never a world scan). Called as the explicit
+     * third step by {@code ShopMidnightRestockTicker}, right after {@link #settleGroup} -- so
+     * materials that just changed hands via inter-plot trading get turned into finished goods the
+     * same night -- and per-shop by {@code ShopCraftingDebounceTicker} after a player Buy/Sell has
+     * gone quiet on that one shop for 10 seconds.
+     */
+    public static void craftFromOwnStockForGroup(ServerLevel level, List<PlotRecord> plots) {
+        if (!LyfeCraftingBridge.isLoaded()) {
+            return;
+        }
+        for (PlotRecord plot : plots) {
+            if (plot.shopId().isEmpty() || plot.plannedInventory().isEmpty()) {
+                continue;
+            }
+            Optional<Geometry.Polygon> polygon = Settlemynts.resolvePolygonDirect(level, plot);
+            if (polygon.isEmpty()) {
+                continue; // Natural-village plot, or otherwise unresolvable -- no Lyfe structure can exist there anyway.
+            }
+            List<Container> boxes = Settlemynts.resolveBoxesForPolygon(level, polygon.get());
+            craftFromOwnStock(level, plot, polygon.get(), boxes);
+        }
+    }
+
+    /** Single-plot entry point -- see {@link #craftFromOwnStockForGroup}'s own doc for the full story. */
+    public static int craftFromOwnStock(ServerLevel level, PlotRecord plot, Geometry.Polygon polygon, List<Container> boxes) {
+        if (!LyfeCraftingBridge.isLoaded() || boxes.isEmpty()) {
+            return 0;
+        }
+        int structureTier = -1; // Lazily resolved once -- -1 means "not checked yet."
+        int crafted = 0;
+        for (PlannedInventoryTarget target : plot.plannedInventory()) {
+            if (target.isTag()) {
+                continue; // A crafting recipe's output is always a concrete item.
+            }
+            Optional<LyfeCraftingBridge.RecipeInfo> recipeOpt = LyfeCraftingBridge.getRecipe(target.resourceKey());
+            if (recipeOpt.isEmpty()) {
+                continue;
+            }
+            if (structureTier < 0) {
+                structureTier = PlotCraftingStructures.maxCraftingStructureTier(level, polygon);
+            }
+            LyfeCraftingBridge.RecipeInfo recipe = recipeOpt.get();
+            if (structureTier < recipe.tier()) {
+                continue; // No sufficiently-tiered crafting structure present on this plot.
+            }
+            for (int i = 0; i < MAX_CRAFTS_PER_PLOT_PER_TARGET; i++) {
+                Map<Identifier, Integer> available = Settlemynts.scanItemStock(boxes);
+                int currentStock = available.getOrDefault(target.resourceKey(), 0);
+                if (currentStock >= target.targetCount() || !CraftingExecutor.canCraftOne(available, recipe)) {
+                    break;
+                }
+                CraftingExecutor.craftOne(boxes, recipe);
+                crafted++;
+            }
+        }
+        if (crafted > 0) {
+            SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} crafted {} item(s) from its own stock", plot.plotId(), crafted);
+        }
+        return crafted;
     }
 
     private record ResourceKey(Identifier id, boolean isTag) {

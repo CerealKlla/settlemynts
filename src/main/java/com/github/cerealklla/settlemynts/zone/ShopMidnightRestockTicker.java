@@ -62,6 +62,9 @@ public final class ShopMidnightRestockTicker {
         for (GhostTownHallCoreEntity core : cores) {
             if (core.level() instanceof ServerLevel level) {
                 PlannedInventoryClearing.settleGroup(level, core.getPlots());
+                // Explicit third step (2026-10-10 redesign): turn whatever just changed hands above
+                // into finished goods, for this same settlement only -- see that method's own doc.
+                PlannedInventoryClearing.craftFromOwnStockForGroup(level, core.getPlots());
             }
         }
         restockNaturalSettlementShops(server);

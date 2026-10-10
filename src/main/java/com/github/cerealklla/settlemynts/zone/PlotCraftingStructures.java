@@ -38,7 +38,14 @@ public final class PlotCraftingStructures {
         if (polygon.isEmpty()) {
             return 0;
         }
-        Geometry.Polygon area = polygon.get();
+        return maxCraftingStructureTier(level, polygon.get());
+    }
+
+    /** Same as {@link #maxCraftingStructureTier(ServerLevel, UUID)}, for a polygon the caller already has in hand -- avoids its own world scan. */
+    public static int maxCraftingStructureTier(ServerLevel level, Geometry.Polygon area) {
+        if (!LyfeCraftingBridge.isLoaded()) {
+            return 0;
+        }
         int minX = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
         for (Geometry.Polygon.Vertex v : area.vertices()) {
             minX = Math.min(minX, v.x());
