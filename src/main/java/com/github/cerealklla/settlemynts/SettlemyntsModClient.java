@@ -190,6 +190,16 @@ public class SettlemyntsModClient {
                 Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.PlannedInventoryScreen(request));
             }
         });
+
+        // Patches the currently-open Shop screen's gold totals in place after a Buy/Sell (real
+        // report, 2026-10-10) -- deliberately NOT routed through the "open a screen" pattern above,
+        // since every one of those is a no-op while a screen is already open, which is exactly the
+        // case here (the Shop screen itself is what's open when this fires).
+        ClientPlotSignRequests.takePendingGoldUpdate().ifPresent(update -> {
+            if (Minecraft.getInstance().screen instanceof ShopScreen shopScreen) {
+                shopScreen.updateGold(update.shopGoldNuggets(), update.playerGoldNuggets());
+            }
+        });
     }
 
     private static void send(CustomPacketPayload payload) {

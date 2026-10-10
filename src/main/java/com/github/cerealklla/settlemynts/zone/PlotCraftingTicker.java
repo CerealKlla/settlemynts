@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.LyfeCraftingBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
@@ -50,23 +51,41 @@ public final class PlotCraftingTicker {
         if (server.getTickCount() % SCAN_INTERVAL_TICKS != 0) {
             return;
         }
+        // Temporary debug logging (2026-10-10, real report: "the server seems very laggy right now")
+        // -- every scan pass is logged with its own timing so a lag spike can be correlated against
+        // this ticker specifically rather than guessed at.
+        long passStart = System.nanoTime();
+        int coresScanned = 0;
+        int plotsChecked = 0;
+        int totalCrafted = 0;
         for (ServerLevel level : server.getAllLevels()) {
             AABB worldBounds = new AABB(-WORLD_SCAN_RADIUS, level.getMinY(), -WORLD_SCAN_RADIUS,
                     WORLD_SCAN_RADIUS, level.getMaxY(), WORLD_SCAN_RADIUS);
             for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds,
                     GhostTownHallCoreEntity::isFinalized)) {
+                coresScanned++;
                 for (PlotRecord plot : core.getPlots()) {
                     if (plot.shopId().isPresent() && !plot.plannedInventory().isEmpty()) {
-                        craftForPlot(level, plot);
+                        plotsChecked++;
+                        totalCrafted += craftForPlot(level, plot);
                     }
                 }
             }
         }
+        double passMs = (System.nanoTime() - passStart) / 1_000_000.0;
+        if (totalCrafted > 0 || passMs > 20.0) {
+            SettlemyntsMod.LOGGER.info(
+                    "PlotCraftingTicker: scanned {} core(s)/{} eligible plot(s) in {}ms, crafted {} item(s) total",
+                    coresScanned, plotsChecked, String.format("%.1f", passMs), totalCrafted);
+        }
     }
 
-    private void craftForPlot(ServerLevel level, PlotRecord plot) {
+    /** @return how many individual crafts this plot actually performed this pass. */
+    private int craftForPlot(ServerLevel level, PlotRecord plot) {
+        long plotStart = System.nanoTime();
         List<Container> boxes = null;
         int structureTier = -1; // Lazily resolved once per plot -- -1 means "not checked yet."
+        int craftedThisPlot = 0;
         for (PlannedInventoryTarget target : plot.plannedInventory()) {
             if (target.isTag()) {
                 continue; // A crafting recipe's output is always a concrete item.
@@ -85,7 +104,7 @@ public final class PlotCraftingTicker {
             if (boxes == null) {
                 boxes = Settlemynts.resolvePlotBoxes(level, plot.plotId());
                 if (boxes.isEmpty()) {
-                    return;
+                    return craftedThisPlot;
                 }
             }
             for (int crafted = 0; crafted < MAX_CRAFTS_PER_PLOT_PER_TARGET; crafted++) {
@@ -95,7 +114,15 @@ public final class PlotCraftingTicker {
                     break;
                 }
                 CraftingExecutor.craftOne(boxes, recipe);
+                craftedThisPlot++;
             }
         }
+        if (craftedThisPlot > 0) {
+            double plotMs = (System.nanoTime() - plotStart) / 1_000_000.0;
+            SettlemyntsMod.LOGGER.info(
+                    "PlotCraftingTicker: plot {} crafted {} item(s) in {}ms (structure tier {})",
+                    plot.plotId(), craftedThisPlot, String.format("%.1f", plotMs), structureTier);
+        }
+        return craftedThisPlot;
     }
 }

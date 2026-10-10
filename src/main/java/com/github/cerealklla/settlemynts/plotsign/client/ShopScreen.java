@@ -75,10 +75,24 @@ public final class ShopScreen extends Screen {
 
     private final OpenShopPayload data;
     private int scrollOffset;
+    // Mutable, unlike everything else `data` carries -- updated in place by a ShopGoldUpdatePayload
+    // after a Buy/Sell (real report, 2026-10-10: these totals never changed after a purchase, since
+    // `data` itself is just a one-time snapshot from whenever the screen opened). Every render reads
+    // these two fields instead of `data.shopGoldNuggets()`/`data.playerGoldNuggets()` directly.
+    private int shopGoldNuggets;
+    private int playerGoldNuggets;
 
     public ShopScreen(OpenShopPayload data) {
         super(Component.literal("Shop"));
         this.data = data;
+        this.shopGoldNuggets = data.shopGoldNuggets();
+        this.playerGoldNuggets = data.playerGoldNuggets();
+    }
+
+    /** Called by {@code SettlemyntsModClient} when a {@code ShopGoldUpdatePayload} arrives while this screen is open. */
+    public void updateGold(int shopGoldNuggets, int playerGoldNuggets) {
+        this.shopGoldNuggets = shopGoldNuggets;
+        this.playerGoldNuggets = playerGoldNuggets;
     }
 
     @Override
@@ -180,7 +194,7 @@ public final class ShopScreen extends Screen {
         int titleWidth = font.width(title);
         graphics.text(font, title, centerX - titleWidth / 2, 20, 0xFFFFFFFF);
 
-        String goldLine = "Merchant Gold: " + data.shopGoldNuggets() + "    Player Gold: " + data.playerGoldNuggets();
+        String goldLine = "Merchant Gold: " + shopGoldNuggets + "    Player Gold: " + playerGoldNuggets;
         graphics.text(font, goldLine, centerX - font.width(goldLine) / 2, 36, 0xFFFFD700);
 
         graphics.text(font, "Item", centerX + COL_NAME_X, VIEWPORT_TOP - 16, 0xFFAAAAAA);

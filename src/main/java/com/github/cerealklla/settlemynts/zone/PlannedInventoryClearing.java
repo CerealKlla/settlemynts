@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.LyfeCraftingBridge;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
@@ -62,6 +63,10 @@ public final class PlannedInventoryClearing {
     }
 
     public static void settleGroup(ServerLevel level, List<PlotRecord> plots) {
+        // Temporary debug logging (2026-10-10, real report: "the server seems very laggy right now")
+        // -- this is the once-a-day midnight auto-purchase/auto-craft pass; timed end to end so a lag
+        // spike around a day boundary can be attributed to this specifically rather than guessed at.
+        long start = System.nanoTime();
         List<Participant> participants = new ArrayList<>();
         for (PlotRecord plot : plots) {
             if (plot.shopId().isEmpty() || plot.plannedInventory().isEmpty()) {
@@ -80,9 +85,14 @@ public final class PlannedInventoryClearing {
             }
         }
 
+        SettlemyntsMod.LOGGER.info(
+                "PlannedInventoryClearing: starting midnight settlement pass -- {} participant(s), {} resource(s)",
+                participants.size(), resourceKeys.size());
         for (ResourceKey key : resourceKeys) {
             settleResource(level, participants, key);
         }
+        double ms = (System.nanoTime() - start) / 1_000_000.0;
+        SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: midnight settlement pass finished in {}ms", String.format("%.1f", ms));
     }
 
     private record ResourceKey(Identifier id, boolean isTag) {
@@ -153,6 +163,8 @@ public final class PlannedInventoryClearing {
                 }
                 remainingDeficit -= units;
                 sellers.set(si, new Seller(seller.participant(), seller.remainingSurplus() - units, seller.pricePerUnit()));
+                SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} bought {}x {} from plot {} for {} nuggets",
+                        buyer.participant().plot().plotId(), units, key.id(), seller.participant().plot().plotId(), cost);
             }
             buyers.set(bi, new Buyer(buyer.participant(), remainingDeficit));
         }
@@ -332,6 +344,8 @@ public final class PlannedInventoryClearing {
             for (ItemStack stack : ContainerWithdraw.drain(buyer.boxes(), GOLD_NUGGETS, price)) {
                 ContainerDeposit.depositIntoAny(seller.boxes(), stack);
             }
+            SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} direct-bought 1x {} from plot {} for {} nuggets (craftable resource)",
+                    buyer.plot().plotId(), key.id(), seller.plot().plotId(), price);
             return true;
         }
         return false;
@@ -374,6 +388,8 @@ public final class PlannedInventoryClearing {
             return false; // Shouldn't normally happen given the top-ups above -- defensive guard.
         }
         CraftingExecutor.craftOne(buyer.boxes(), recipe);
+        SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} crafted 1x {} (structure tier {})",
+                buyer.plot().plotId(), recipe.resultId(), buyerTier);
         return true;
     }
 

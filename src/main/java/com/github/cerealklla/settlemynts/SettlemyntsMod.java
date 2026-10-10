@@ -457,6 +457,10 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.OpenShopPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestShop(payload));
 
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.ShopGoldUpdatePayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.ShopGoldUpdatePayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestGoldUpdate(payload));
+
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload.STREAM_CODEC,
                 (payload, context) -> buyFromShop(payload, context));
@@ -852,6 +856,22 @@ public class SettlemyntsMod {
             }
         }
         player.sendSystemMessage(Component.literal("Bought " + filled + " for " + result.nuggetsCharged() + " nuggets."));
+        sendShopGoldUpdate(player, serverLevel, plotId);
+    }
+
+    /**
+     * Pushes a fresh {@code ShopGoldUpdatePayload} so an already-open Shop screen's "Merchant Gold" /
+     * "Player Gold" totals actually reflect a just-completed Buy/Sell (real report, 2026-10-10) --
+     * recomputes both exactly the way {@code handleRequestShop} does when first opening the screen.
+     */
+    private static void sendShopGoldUpdate(ServerPlayer player, ServerLevel level, UUID plotId) {
+        java.util.Map<net.minecraft.resources.Identifier, Integer> stock =
+                com.github.cerealklla.settlemynts.api.Settlemynts.scanPlotItemStock(level, plotId);
+        int shopGoldNuggets = stock.getOrDefault(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET), 0);
+        int playerGoldNuggets = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.isAvailable()
+                ? com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getNuggetBalance(player)
+                : 0;
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.ShopGoldUpdatePayload(shopGoldNuggets, playerGoldNuggets));
     }
 
     /**
@@ -943,6 +963,7 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.grantMerchantXp(player, nuggetsOwed);
         }
         player.sendSystemMessage(Component.literal("Sold " + result.itemsSold() + " for " + nuggetsOwed + " nuggets."));
+        sendShopGoldUpdate(player, serverLevel, plotId);
     }
 
     /**

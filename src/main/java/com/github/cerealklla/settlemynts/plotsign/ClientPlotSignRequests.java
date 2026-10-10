@@ -13,6 +13,7 @@ public final class ClientPlotSignRequests {
     private static volatile OpenPlotDetailsPayload pendingPlotDetails;
     private static volatile OpenPlotManagementPayload pendingPlotManagement;
     private static volatile OpenShopPayload pendingShop;
+    private static volatile ShopGoldUpdatePayload pendingGoldUpdate;
     private static volatile UpgradePlotPreviewPayload pendingUpgradePlotPreview;
     private static volatile OpenPlannedInventoryPayload pendingPlannedInventory;
 
@@ -56,6 +57,16 @@ public final class ClientPlotSignRequests {
     public static Optional<OpenShopPayload> takePendingShop() {
         OpenShopPayload request = pendingShop;
         pendingShop = null;
+        return Optional.ofNullable(request);
+    }
+
+    public static void requestGoldUpdate(ShopGoldUpdatePayload payload) {
+        pendingGoldUpdate = payload;
+    }
+
+    public static Optional<ShopGoldUpdatePayload> takePendingGoldUpdate() {
+        ShopGoldUpdatePayload request = pendingGoldUpdate;
+        pendingGoldUpdate = null;
         return Optional.ofNullable(request);
     }
 
