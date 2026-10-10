@@ -1190,6 +1190,11 @@ public class SettlemyntsMod {
         }
         player.sendSystemMessage(Component.literal("Sold " + quantity + " for " + nuggetsOwed + " nuggets."));
         com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plot.plotId());
+        // Real report, 2026-10-10: "I sold the armorer everything he wanted but he never crafted the
+        // items I wanted him to craft" -- buyFromShop/sellToShop both nudge this debounce ticker so a
+        // plot actually attempts crafting shortly after receiving materials, instead of waiting for
+        // the next midnight tick; this handler was missing the same call entirely.
+        com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plot.plotId());
 
         sendShopGoldUpdate(player, serverLevel, plot.plotId());
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
