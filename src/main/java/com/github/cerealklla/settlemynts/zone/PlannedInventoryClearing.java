@@ -162,6 +162,7 @@ public final class PlannedInventoryClearing {
         }
         if (crafted > 0) {
             SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} crafted {} item(s) from its own stock", plot.plotId(), crafted);
+            ShopWishlistCache.invalidate(plot.plotId());
         }
         return crafted;
     }
@@ -249,6 +250,8 @@ public final class PlannedInventoryClearing {
                 sellers.set(si, new Seller(seller.participant(), seller.remainingSurplus() - split.totalUnits(), seller.pricePerUnit()));
                 SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} bought {}x {} from plot {} for {} nuggets",
                         buyer.participant().plot().plotId(), split.totalUnits(), key.id(), seller.participant().plot().plotId(), split.totalCost());
+                ShopWishlistCache.invalidate(buyer.participant().plot().plotId());
+                ShopWishlistCache.invalidate(seller.participant().plot().plotId());
             }
             buyers.set(bi, new Buyer(buyer.participant(), remainingDeficit));
         }
@@ -506,6 +509,8 @@ public final class PlannedInventoryClearing {
             }
             SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} direct-bought 1x {} from plot {} for {} nuggets (craftable resource)",
                     buyer.plot().plotId(), key.id(), seller.plot().plotId(), realPrice.get());
+            ShopWishlistCache.invalidate(buyer.plot().plotId());
+            ShopWishlistCache.invalidate(seller.plot().plotId());
             return true;
         }
         return false;
@@ -554,6 +559,7 @@ public final class PlannedInventoryClearing {
         CraftingExecutor.craftOne(buyer.boxes(), recipe);
         SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} crafted 1x {} (structure tier {})",
                 buyer.plot().plotId(), recipe.resultId(), buyerTier);
+        ShopWishlistCache.invalidate(buyer.plot().plotId());
         return true;
     }
 

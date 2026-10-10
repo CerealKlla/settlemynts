@@ -946,6 +946,7 @@ public class SettlemyntsMod {
         // 2026-10-10 redesign: check this one shop for auto-crafting opportunities once it's gone
         // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
         com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
+        com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plotId);
     }
 
     /**
@@ -1059,6 +1060,7 @@ public class SettlemyntsMod {
         // 2026-10-10 redesign: check this one shop for auto-crafting opportunities once it's gone
         // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
         com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
+        com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plotId);
     }
 
     /**
@@ -1189,6 +1191,7 @@ public class SettlemyntsMod {
         }
         player.sendSystemMessage(Component.literal("Sold " + quantity + " for " + nuggetsOwed + " nuggets."));
         com.github.cerealklla.settlemynts.zone.WishlistOfferTracker.clear(player.getUUID(), plot.plotId(), resource);
+        com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plot.plotId());
 
         sendShopGoldUpdate(player, serverLevel, plot.plotId());
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
@@ -1249,6 +1252,7 @@ public class SettlemyntsMod {
         if (suppressionChanged) {
             resolved.get().core().updatePlot(plot.withSuppressedShopResources(suppressed));
         }
+        com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plot.plotId());
         player.sendSystemMessage(Component.literal("Shop listings updated."));
     }
 
@@ -1329,6 +1333,7 @@ public class SettlemyntsMod {
             }
         }
         resolved.get().core().updatePlot(resolved.get().plot().withPlannedInventory(targets));
+        com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(resolved.get().plot().plotId());
         player.sendSystemMessage(Component.literal("Planned Inventory updated."));
     }
 
@@ -1425,7 +1430,7 @@ public class SettlemyntsMod {
     /** Does the shop behind {@code anchor} (sign or NPC alike) currently have any unmet Planned Inventory deficit -- see {@code zone.ShopWishlist}'s own doc. Used by {@code plotsign.PlotShopProximityTicker} for both the "Press &lt;key&gt; to chat" prompt and the floating "!" nameplate. */
     public static boolean anchorHasWishlist(ServerLevel level, com.github.cerealklla.settlemynts.plotsign.ShopAnchor anchor) {
         return resolveShopContext(level, anchor)
-                .map(ctx -> com.github.cerealklla.settlemynts.zone.ShopWishlist.hasAnyDeficit(level, ctx.plot()))
+                .map(ctx -> com.github.cerealklla.settlemynts.zone.ShopWishlistCache.hasWishlist(level, ctx.plot()))
                 .orElse(false);
     }
 
