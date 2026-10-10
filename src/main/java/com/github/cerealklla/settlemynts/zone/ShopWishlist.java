@@ -50,9 +50,6 @@ public final class ShopWishlist {
     private ShopWishlist() {
     }
 
-    /** 10 minutes -- how long {@link WishlistOfferTracker#grant} keeps the player-initiated premium-sell offer open once asked for. */
-    public static final long OFFER_WINDOW_TICKS = 20L * 60 * 10;
-
     /** 10% above {@code normalPricePerUnit}, always at least 1 higher so a cheap item still has a real premium. */
     public static int premiumPrice(int normalPricePerUnit) {
         return normalPricePerUnit + Math.max(1, Math.round(normalPricePerUnit * 0.10F));

@@ -20,13 +20,14 @@ import net.minecraft.world.item.ItemStack;
  * zone.ShopWishlist}'s own doc for the full feature). Same table/scroll shape as {@link ShopScreen}
  * (one row per deficit: Item Name | Needed | Player Stock | "Sell (Ng)" selling 1 unit per click at
  * the premium price), deliberately not merged with that screen since this is a different data
- * source (Planned Inventory deficits, not real Shop listings) with a different, time-limited
- * selling permission behind it.
+ * source (Planned Inventory deficits, not real Shop listings).
  *
- * <p>Opening this screen also grants the temporary premium-sell offer server-side (see {@code
- * zone.WishlistOfferTracker}) -- a successful "Sell" click re-opens this same screen in place with
- * fresh data (a now-smaller or vanished deficit row), same refresh pattern {@link ShopScreen} uses
- * for its own gold/stock updates after a Buy/Sell.
+ * <p>Selling repeatedly from this same open screen is deliberately unrestricted -- a time-limited
+ * "ask again before each sale" gate existed briefly and was removed the same day, explicit feedback:
+ * "the 'ask what he wants' blocking repeated selling is tedious." A successful "Sell" click
+ * re-opens this same screen in place with fresh data (a now-smaller or vanished deficit row, and a
+ * live-recomputed price), same refresh pattern {@link ShopScreen} uses for its own gold/stock
+ * updates after a Buy/Sell.
  */
 public final class WishlistScreen extends Screen {
 
@@ -137,7 +138,7 @@ public final class WishlistScreen extends Screen {
         int titleWidth = font.width(title);
         graphics.text(font, title, centerX - titleWidth / 2, 20, 0xFFFFFFFF);
 
-        String subtitle = "Sell at a 10% premium -- this offer fades if you don't use it soon.";
+        String subtitle = "Sell at a 10% premium -- prices and amounts needed update live as you sell.";
         graphics.text(font, subtitle, centerX - font.width(subtitle) / 2, 36, 0xFFFFD700);
 
         graphics.text(font, "Item", centerX + COL_NAME_X, VIEWPORT_TOP - 16, 0xFFAAAAAA);

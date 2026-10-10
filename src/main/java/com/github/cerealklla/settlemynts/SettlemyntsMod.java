@@ -1066,8 +1066,7 @@ public class SettlemyntsMod {
     /**
      * "Press &lt;key&gt; to chat" -- the public wishlist request (2026-10-10, see {@code
      * zone.ShopWishlist}'s own doc). Any player, not just the plot's own owner, can ask -- that's the
-     * whole point ("public wishlist"). Also grants a temporary premium-sell offer for everything
-     * listed, via {@code zone.WishlistOfferTracker}.
+     * whole point ("public wishlist").
      */
     private static void requestShopWishlist(com.github.cerealklla.settlemynts.plotsign.RequestShopWishlistPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
@@ -1079,11 +1078,6 @@ public class SettlemyntsMod {
             return;
         }
         PlotRecord plot = resolved.get().plot();
-        long expiresAt = serverLevel.getGameTime() + com.github.cerealklla.settlemynts.zone.ShopWishlist.OFFER_WINDOW_TICKS;
-        for (com.github.cerealklla.settlemynts.zone.ShopWishlist.DeficitEntry deficit :
-                com.github.cerealklla.settlemynts.zone.ShopWishlist.computeDeficits(serverLevel, plot)) {
-            com.github.cerealklla.settlemynts.zone.WishlistOfferTracker.grant(player.getUUID(), plot.plotId(), deficit.resource(), expiresAt);
-        }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos())));
     }
@@ -1107,12 +1101,12 @@ public class SettlemyntsMod {
 
     /**
      * "Sell" on one {@code client.WishlistScreen} row -- a direct, premium-priced sale against the
-     * shop's own Planned Inventory deficit (see {@code zone.ShopWishlist}'s own doc). Only valid
-     * while {@code zone.WishlistOfferTracker#isActive}; the deficit, player stock, and shop's own
-     * gold are all re-resolved live here rather than trusting anything the client remembered from
-     * when it asked. The offer is cleared the instant any sale through here succeeds -- "that
-     * temporary option to sell it to him would then go away" (explicit user spec) -- regardless of
-     * whether it fully covered the remaining deficit.
+     * shop's own Planned Inventory deficit (see {@code zone.ShopWishlist}'s own doc). No separate
+     * "ask first" gate any more (removed 2026-10-10, explicit user feedback: "the 'ask what he wants'
+     * blocking repeated selling is tedious" -- the real-time deficit/price recompute below is the
+     * actual anti-exploit guard; a time-limited offer on top of that was just friction, not safety).
+     * The deficit, player stock, and shop's own gold are all re-resolved live here rather than
+     * trusting anything the client remembered from when it last asked.
      */
     private static void sellToShopWishlist(com.github.cerealklla.settlemynts.plotsign.SellToShopWishlistPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
@@ -1127,11 +1121,6 @@ public class SettlemyntsMod {
         com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
                 ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
                 : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
-
-        if (!com.github.cerealklla.settlemynts.zone.WishlistOfferTracker.isActive(player.getUUID(), plot.plotId(), resource, serverLevel.getGameTime())) {
-            player.sendSystemMessage(Component.literal("Ask what this shop needs again before selling at that price."));
-            return;
-        }
 
         // Re-resolved from ShopWishlist itself, not a raw PlannedInventoryTarget lookup (real bug,
         // 2026-10-10: "I tried to sell an item to the shop that it was asking for and it said it
@@ -1152,7 +1141,6 @@ public class SettlemyntsMod {
                 .orElse(0);
         if (remainingDeficit <= 0) {
             player.sendSystemMessage(Component.literal("This shop doesn't need any more of that right now."));
-            com.github.cerealklla.settlemynts.zone.WishlistOfferTracker.clear(player.getUUID(), plot.plotId(), resource);
             return;
         }
 
@@ -1201,7 +1189,6 @@ public class SettlemyntsMod {
             }
         }
         player.sendSystemMessage(Component.literal("Sold " + quantity + " for " + nuggetsOwed + " nuggets."));
-        com.github.cerealklla.settlemynts.zone.WishlistOfferTracker.clear(player.getUUID(), plot.plotId(), resource);
         com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plot.plotId());
 
         sendShopGoldUpdate(player, serverLevel, plot.plotId());
