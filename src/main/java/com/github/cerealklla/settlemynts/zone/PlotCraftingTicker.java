@@ -108,7 +108,12 @@ public final class PlotCraftingTicker {
                 }
             }
             for (int crafted = 0; crafted < MAX_CRAFTS_PER_PLOT_PER_TARGET; crafted++) {
-                Map<Identifier, Integer> available = Settlemynts.scanPlotItemStock(level, plot.plotId());
+                // Scans the boxes already resolved above directly -- real lag fix, 2026-10-10:
+                // Settlemynts.scanPlotItemStock(level, plotId) re-resolves the whole box list from
+                // scratch (a full-world GhostTownHallCoreEntity scan under the hood), redundant with
+                // `boxes` right here. This ran once per craft-check, per target, per plot, every
+                // second -- see api.Settlemynts#scanItemStock's own doc for the full story.
+                Map<Identifier, Integer> available = Settlemynts.scanItemStock(boxes);
                 int currentStock = available.getOrDefault(target.resourceKey(), 0);
                 if (currentStock >= target.targetCount() || !CraftingExecutor.canCraftOne(available, recipe)) {
                     break;

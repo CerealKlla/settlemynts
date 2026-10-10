@@ -361,7 +361,11 @@ public final class PlannedInventoryClearing {
      */
     private static boolean executeCraftOne(ServerLevel level, List<Participant> participants, Participant buyer,
                                             LyfeCraftingBridge.RecipeInfo recipe, int buyerTier, Set<Identifier> visiting) {
-        Map<Identifier, Integer> available = Settlemynts.scanPlotItemStock(level, buyer.plot().plotId());
+        // Scans the Participant's own already-resolved boxes directly -- same real lag fix as
+        // zone.PlotCraftingTicker (see api.Settlemynts#scanItemStock's own doc): scanPlotItemStock(
+        // level, plotId) redundantly re-resolves the whole box list (a full-world entity scan) when
+        // this method already has `buyer.boxes()` in hand.
+        Map<Identifier, Integer> available = Settlemynts.scanItemStock(buyer.boxes());
 
         for (Map.Entry<Identifier, Integer> entry : recipe.specificComponents().entrySet()) {
             int need = entry.getValue() - available.getOrDefault(entry.getKey(), 0);
@@ -383,7 +387,7 @@ public final class PlannedInventoryClearing {
             }
         }
 
-        Map<Identifier, Integer> finalAvailable = Settlemynts.scanPlotItemStock(level, buyer.plot().plotId());
+        Map<Identifier, Integer> finalAvailable = Settlemynts.scanItemStock(buyer.boxes());
         if (!CraftingExecutor.canCraftOne(finalAvailable, recipe)) {
             return false; // Shouldn't normally happen given the top-ups above -- defensive guard.
         }

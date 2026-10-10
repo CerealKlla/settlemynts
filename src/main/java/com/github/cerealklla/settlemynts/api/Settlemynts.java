@@ -352,8 +352,22 @@ public final class Settlemynts {
      * the caller, since this method has no way to know which tag(s) an owner might care about.
      */
     public static Map<Identifier, Integer> scanPlotItemStock(ServerLevel level, UUID plotId) {
+        return scanItemStock(resolvePlotBoxes(level, plotId));
+    }
+
+    /**
+     * Same as {@link #scanPlotItemStock}, but over an already-resolved box list -- added 2026-10-10
+     * after a live lag report traced to {@code zone.PlotCraftingTicker}: {@code resolvePlotBoxes}
+     * (via {@link #findPolygonForPlot}) does a full-world {@code GhostTownHallCoreEntity} scan every
+     * call, and that ticker was calling {@code scanPlotItemStock(level, plotId)} once per planned-
+     * inventory target *on top of* the `boxes` it had already resolved itself for the same plot --
+     * a full extra world scan per target, per plot, every second. {@code zone.PlannedInventoryClearing
+     * #executeCraftOne} had the identical redundancy. Both now call this overload with their own
+     * already-resolved {@code List<Container>} instead.
+     */
+    public static Map<Identifier, Integer> scanItemStock(List<Container> boxes) {
         Map<Identifier, Integer> counts = new LinkedHashMap<>();
-        for (Container box : resolvePlotBoxes(level, plotId)) {
+        for (Container box : boxes) {
             for (int slot = 0; slot < box.getContainerSize(); slot++) {
                 ItemStack stack = box.getItem(slot);
                 if (!stack.isEmpty()) {
