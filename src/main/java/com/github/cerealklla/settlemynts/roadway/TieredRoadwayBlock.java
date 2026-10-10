@@ -24,8 +24,9 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * state's own TIER property is new.
  *
  * <p>{@link RoadwayTierResolver} computes the correct tier at both pave-time ({@code
- * RoadwayPaver#paveEdge}) and retroactively ({@code RoadwayTierTicker}, whenever a settlement's
- * Town Hall Tier changes) -- this class itself has no logic beyond the blockstate property.
+ * RoadwayPaver#paveEdge}) and retroactively ({@code RoadwayRetier}, called directly from the
+ * "Upgrade Plot" handler whenever a Town Hall plot's own Tier is raised, event-triggered -- not a
+ * poll, see RoadwayRetier's own doc) -- this class itself has no logic beyond the blockstate property.
  */
 public class TieredRoadwayBlock extends Block {
 

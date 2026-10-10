@@ -87,7 +87,7 @@ public class RoadwayStakeEntity extends Display.BlockDisplay {
     public record ConnectionSnapshot(UUID otherStakeId, List<RoadwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId,
                                       List<net.minecraft.core.BlockPos> roadCells) {
         // roadCells defaults to empty for any connection saved before 2026-10-09 (the Tier-visual
-        // feature) -- those simply won't be retroactively re-tiered by RoadwayTierTicker until the
+        // feature) -- those simply won't be retroactively re-tiered by RoadwayRetier until the
         // edge is re-paved, a deliberate, accepted gap (see decisions.md) rather than a migration.
         public static final Codec<ConnectionSnapshot> CODEC = RecordCodecBuilder.create(i -> i.group(
                 UUIDUtil.CODEC.fieldOf("other_stake_id").forGetter(ConnectionSnapshot::otherStakeId),
@@ -154,7 +154,7 @@ public class RoadwayStakeEntity extends Display.BlockDisplay {
         b.addConnectionId(a.getUUID());
     }
 
-    /** Every {@link ConnectionSnapshot} this stake currently holds -- used by {@link RoadwayTierTicker} to re-tier every road cell it owns. */
+    /** Every {@link ConnectionSnapshot} this stake currently holds -- used by {@code RoadwayRetier} to re-tier every road cell it owns. */
     public List<ConnectionSnapshot> getConnectionSnapshots() {
         return connectionSnapshots;
     }
@@ -169,7 +169,7 @@ public class RoadwayStakeEntity extends Display.BlockDisplay {
         return null;
     }
 
-    /** Stores (or replaces) this stake's own copy of one connection's restore snapshot, its Cartographyr road entity id, and (2026-10-09) its exact road-surface cell positions for {@link RoadwayTierTicker} -- see {@link RoadwayPaver#paveEdge}, which calls this on both ends. */
+    /** Stores (or replaces) this stake's own copy of one connection's restore snapshot, its Cartographyr road entity id, and (2026-10-09) its exact road-surface cell positions for {@code RoadwayRetier} -- see {@link RoadwayPaver#paveEdge}, which calls this on both ends. */
     public void setSnapshotFor(UUID otherStakeId, List<RoadwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId, List<net.minecraft.core.BlockPos> roadCells) {
         List<ConnectionSnapshot> current = new ArrayList<>();
         for (ConnectionSnapshot entry : connectionSnapshots) {

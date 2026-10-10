@@ -191,7 +191,6 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.TownHallCoreLocatorTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.LocatorCancelListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotStakeTossGuard());
-        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.roadway.RoadwayTierTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.roadway.RoadwayClearanceListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillagePlotListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerationTicker());
@@ -1572,6 +1571,12 @@ public class SettlemyntsMod {
         core.updatePlot(plot.withTier(newTier));
         if (net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
             com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.setAllowedTier(serverLevel, plot.constructionBoxId().get(), newTier);
+        }
+        // Event-triggered road re-tiering (2026-10-10, replacing the old RoadwayTierTicker poll) --
+        // only the Town Hall plot's own Tier drives road appearance (see RoadwayTierResolver), and
+        // this is the only place that Tier can ever change, so there's nothing left to poll for.
+        if (isTownHall) {
+            com.github.cerealklla.settlemynts.roadway.RoadwayRetier.repaintSettlementRoads(serverLevel, core.getUUID(), newTier);
         }
         grantMayorSkillXpForPlotUpgrade(serverLevel.getServer(), core, newTier);
         player.sendSystemMessage(Component.literal("Plot upgraded to Tier " + newTier + "! Use the Construction Box to build at the new Tier."));
