@@ -6,6 +6,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
+import net.minecraft.world.level.pathfinder.PathComputationType;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
@@ -62,5 +63,17 @@ public class TieredRoadwayBlock extends Block {
     @Override
     protected boolean useShapeForLightOcclusion(BlockState state) {
         return state.getValue(TIER) == 1;
+    }
+
+    // Real live bug, 2026-10-09: guards got stuck/hesitated at a Tier 1 road's edge after the shape
+    // override above shipped. Root cause -- BlockBehaviour's own default isPathfindable(LAND)
+    // evaluates to !isCollisionShapeFullBlock(...), which treats a non-full-cube shape as OPEN space
+    // (no floor there) rather than solid ground, exactly backwards for an actual walkable surface.
+    // Vanilla's own DirtPathBlock hits the same thing and fixes it by hardcoding this override to
+    // always report false (solid, not open) regardless of PathComputationType -- mirrored here.
+    // Harmless for tiers 2-5: they're genuine full cubes, so the default formula already agreed.
+    @Override
+    protected boolean isPathfindable(BlockState state, PathComputationType type) {
+        return false;
     }
 }
