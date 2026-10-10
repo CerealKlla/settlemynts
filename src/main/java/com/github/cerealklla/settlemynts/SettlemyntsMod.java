@@ -461,6 +461,10 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.ShopGoldUpdatePayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestGoldUpdate(payload));
 
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.ShopStockUpdatePayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.ShopStockUpdatePayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestStockUpdate(payload));
+
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload.STREAM_CODEC,
                 (payload, context) -> buyFromShop(payload, context));
@@ -748,10 +752,25 @@ public class SettlemyntsMod {
             return;
         }
 
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, stock);
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
+                anchor, plot.plotId(), false, listings, java.util.List.of(), shopGoldNuggets, playerGoldNuggets));
+    }
+
+    /**
+     * Builds the buy-mode listing table rows (price + live stock, per-player Merchant-adjusted
+     * prices) -- factored out of {@link #handleRequestShop} (2026-10-10) so {@link
+     * #sendShopStockUpdate} can rebuild the same rows with fresh stock after a Buy/Sell without
+     * duplicating this logic.
+     */
+    private static java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> buildBuyListings(
+            ServerPlayer player,
+            java.util.List<com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView> views,
+            java.util.Map<net.minecraft.resources.Identifier, Integer> stock) {
         double merchantBonusFraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()
                 ? com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player)
                 : 0.0;
-        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = views.stream()
+        return views.stream()
                 .map(l -> {
                     net.minecraft.resources.Identifier key = l.resource().tag().map(t -> t.location()).orElseGet(() -> l.resource().itemId().get());
                     boolean isTag = l.resource().tag().isPresent();
@@ -769,8 +788,21 @@ public class SettlemyntsMod {
                         .comparing((com.github.cerealklla.settlemynts.plotsign.ShopListingEntry e) -> e.shopStock() <= 0)
                         .thenComparing(com.github.cerealklla.settlemynts.plotsign.ShopListingEntry::label))
                 .toList();
-        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
-                anchor, plot.plotId(), false, listings, java.util.List.of(), shopGoldNuggets, playerGoldNuggets));
+    }
+
+    /**
+     * Pushes a fresh {@code ShopStockUpdatePayload} so an already-open buy-mode Shop screen's "Shop
+     * Stock" column actually reflects a just-completed Buy/Sell (real report, 2026-10-10: "When
+     * buying/selling from a store the shop stock number is not changing") -- same root cause and
+     * same fix shape as {@link #sendShopGoldUpdate}.
+     */
+    private static void sendShopStockUpdate(ServerPlayer player, ServerLevel level, UUID plotId, UUID shopId) {
+        java.util.List<com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView> views =
+                com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(level, shopId);
+        java.util.Map<net.minecraft.resources.Identifier, Integer> stock =
+                com.github.cerealklla.settlemynts.api.Settlemynts.scanPlotItemStock(level, plotId);
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, stock);
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.ShopStockUpdatePayload(listings));
     }
 
     /** "Buy N" click on the real Shop screen -- charges the buyer only for whatever was actually filled. */
@@ -857,6 +889,7 @@ public class SettlemyntsMod {
         }
         player.sendSystemMessage(Component.literal("Bought " + filled + " for " + result.nuggetsCharged() + " nuggets."));
         sendShopGoldUpdate(player, serverLevel, plotId);
+        sendShopStockUpdate(player, serverLevel, plotId, shopId.get());
         // 2026-10-10 redesign: check this one shop for auto-crafting opportunities once it's gone
         // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
         com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
@@ -967,6 +1000,7 @@ public class SettlemyntsMod {
         }
         player.sendSystemMessage(Component.literal("Sold " + result.itemsSold() + " for " + nuggetsOwed + " nuggets."));
         sendShopGoldUpdate(player, serverLevel, plotId);
+        sendShopStockUpdate(player, serverLevel, plotId, shopId.get());
         // 2026-10-10 redesign: check this one shop for auto-crafting opportunities once it's gone
         // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
         com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);

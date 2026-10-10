@@ -81,18 +81,29 @@ public final class ShopScreen extends Screen {
     // these two fields instead of `data.shopGoldNuggets()`/`data.playerGoldNuggets()` directly.
     private int shopGoldNuggets;
     private int playerGoldNuggets;
+    // Same story for the "Shop Stock" column (real report, 2026-10-10: the number never changed
+    // after a Buy/Sell either) -- updated in place by a ShopStockUpdatePayload instead of reading
+    // `data.listings()` directly.
+    private List<ShopListingEntry> listings;
 
     public ShopScreen(OpenShopPayload data) {
         super(Component.literal("Shop"));
         this.data = data;
         this.shopGoldNuggets = data.shopGoldNuggets();
         this.playerGoldNuggets = data.playerGoldNuggets();
+        this.listings = data.listings();
     }
 
     /** Called by {@code SettlemyntsModClient} when a {@code ShopGoldUpdatePayload} arrives while this screen is open. */
     public void updateGold(int shopGoldNuggets, int playerGoldNuggets) {
         this.shopGoldNuggets = shopGoldNuggets;
         this.playerGoldNuggets = playerGoldNuggets;
+    }
+
+    /** Called by {@code SettlemyntsModClient} when a {@code ShopStockUpdatePayload} arrives while this screen is open. */
+    public void updateListings(List<ShopListingEntry> listings) {
+        this.listings = listings;
+        rebuildShopWidgets();
     }
 
     @Override
@@ -107,7 +118,7 @@ public final class ShopScreen extends Screen {
 
     private int maxScrollOffset() {
         int viewport = footerTop() - VIEWPORT_TOP;
-        return Math.max(0, data.listings().size() * ROW_HEIGHT - viewport);
+        return Math.max(0, listings.size() * ROW_HEIGHT - viewport);
     }
 
     private void rebuildShopWidgets() {
@@ -115,7 +126,6 @@ public final class ShopScreen extends Screen {
         int centerX = width / 2;
         int footerTop = footerTop();
 
-        List<ShopListingEntry> listings = data.listings();
         for (int i = 0; i < listings.size(); i++) {
             ShopListingEntry listing = listings.get(i);
             int rowY = VIEWPORT_TOP + i * ROW_HEIGHT - scrollOffset;
@@ -201,7 +211,6 @@ public final class ShopScreen extends Screen {
         graphics.text(font, "Shop Stock", centerX + COL_SHOP_STOCK_X, VIEWPORT_TOP - 16, 0xFFAAAAAA);
         graphics.text(font, "Player Stock", centerX + COL_PLAYER_STOCK_X, VIEWPORT_TOP - 16, 0xFFAAAAAA);
 
-        List<ShopListingEntry> listings = data.listings();
         int footerTop = footerTop();
         if (listings.isEmpty()) {
             String message = "Nothing for sale here yet.";

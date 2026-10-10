@@ -200,6 +200,15 @@ public class SettlemyntsModClient {
                 shopScreen.updateGold(update.shopGoldNuggets(), update.playerGoldNuggets());
             }
         });
+
+        // Same pattern as the gold-update patch above, for the "Shop Stock" column (real report,
+        // 2026-10-10: "When buying/selling from a store the shop stock number is not changing") --
+        // see ShopStockUpdatePayload's own doc.
+        ClientPlotSignRequests.takePendingStockUpdate().ifPresent(update -> {
+            if (Minecraft.getInstance().screen instanceof ShopScreen shopScreen) {
+                shopScreen.updateListings(update.listings());
+            }
+        });
     }
 
     private static void send(CustomPacketPayload payload) {

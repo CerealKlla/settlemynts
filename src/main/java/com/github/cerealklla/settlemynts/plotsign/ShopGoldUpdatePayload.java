@@ -17,10 +17,10 @@ import net.minecraft.resources.Identifier;
  * after a Buy/Sell). Sent right after a successful {@code BuyFromShopPayload}/{@code
  * SellToShopPayload} completes, with both totals freshly recomputed the same way {@code
  * SettlemyntsMod#requestShop} does. Deliberately not a full re-send of {@link OpenShopPayload} --
- * that would also need to rebuild every listing/stock row for no real benefit, and the client's own
- * "open a shop screen" poll-once handoff only ever acts while no screen is already open (see {@code
- * SettlemyntsModClient}), so it would silently do nothing while the Shop screen itself is what's
- * open -- exactly the case this needs to handle.
+ * the client's own "open a shop screen" poll-once handoff only ever acts while no screen is already
+ * open (see {@code SettlemyntsModClient}), so it would silently do nothing while the Shop screen
+ * itself is what's open -- exactly the case this needs to handle. The listing/stock rows get their
+ * own equivalent sibling payload, {@link ShopStockUpdatePayload} -- see its own doc.
  */
 public record ShopGoldUpdatePayload(int shopGoldNuggets, int playerGoldNuggets) implements CustomPacketPayload {
 
