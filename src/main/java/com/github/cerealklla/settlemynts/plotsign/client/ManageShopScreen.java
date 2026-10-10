@@ -8,6 +8,7 @@ import com.github.cerealklla.settlemynts.plotsign.OpenShopPayload;
 import com.github.cerealklla.settlemynts.plotsign.SetShopListingsPayload;
 import com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry;
 import com.github.cerealklla.settlemynts.plotsign.ShopListingUpdate;
+import com.github.cerealklla.settlemynts.zone.ShopResource;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -16,7 +17,6 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
-import net.minecraft.resources.Identifier;
 
 /**
  * Manage Shop screen (2026-10-08, split out of {@code ShopScreen} -- real feedback: "having to close
@@ -48,7 +48,10 @@ public final class ManageShopScreen extends Screen {
     private static final int BACKGROUND_COLOR = 0xC0101010;
 
     private final OpenShopPayload data;
-    private final Map<Identifier, String> pendingValues = new LinkedHashMap<>();
+    // Keyed by the full exact resource (item id + tag-ness + custom name), not just resourceKey --
+    // 2026-10-10, per-quality Shop listings: two different quality variants of the same item share
+    // a resourceKey, and would otherwise collide into one shared pending edit.
+    private final Map<ShopResource, String> pendingValues = new LinkedHashMap<>();
     private int scrollOffset;
 
     public ManageShopScreen(OpenShopPayload data) {
@@ -56,8 +59,17 @@ public final class ManageShopScreen extends Screen {
         this.data = data;
         for (ShopInventoryEntry entry : data.inventory()) {
             int prefill = entry.listedPrice() > 0 ? entry.listedPrice() : entry.suggestedPrice();
-            pendingValues.put(entry.resourceKey(), prefill > 0 ? Integer.toString(prefill) : "");
+            pendingValues.put(keyFor(entry), prefill > 0 ? Integer.toString(prefill) : "");
         }
+    }
+
+    private static ShopResource keyFor(ShopInventoryEntry entry) {
+        if (entry.isTag()) {
+            return ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, entry.resourceKey()));
+        }
+        return entry.customName().isPresent()
+                ? ShopResource.ofExactItem(entry.resourceKey(), entry.customName().get())
+                : ShopResource.ofItem(entry.resourceKey());
     }
 
     @Override
@@ -90,8 +102,8 @@ public final class ManageShopScreen extends Screen {
             EditBox priceBox = new EditBox(font, centerX + 120, rowY, 90, 20, Component.literal("Sell Cost"));
             priceBox.setMaxLength(9);
             priceBox.setFilter(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
-            priceBox.setValue(pendingValues.getOrDefault(entry.resourceKey(), ""));
-            priceBox.setResponder(value -> pendingValues.put(entry.resourceKey(), value));
+            priceBox.setValue(pendingValues.getOrDefault(keyFor(entry), ""));
+            priceBox.setResponder(value -> pendingValues.put(keyFor(entry), value));
             addRenderableWidget(priceBox);
         }
 
@@ -115,9 +127,9 @@ public final class ManageShopScreen extends Screen {
     private void saveChanges() {
         List<ShopListingUpdate> updates = data.inventory().stream()
                 .map(entry -> {
-                    String raw = pendingValues.getOrDefault(entry.resourceKey(), "").trim();
+                    String raw = pendingValues.getOrDefault(keyFor(entry), "").trim();
                     int price = raw.isEmpty() ? 0 : Integer.parseInt(raw);
-                    return new ShopListingUpdate(entry.resourceKey(), entry.isTag(), price);
+                    return new ShopListingUpdate(entry.resourceKey(), entry.isTag(), entry.customName(), price);
                 })
                 .toList();
         // Manage mode is sign-only (see ShopAnchor's own doc -- a natural village's auto-generated

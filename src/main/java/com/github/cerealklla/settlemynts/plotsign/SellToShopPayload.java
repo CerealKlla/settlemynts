@@ -1,5 +1,7 @@
 package com.github.cerealklla.settlemynts.plotsign;
 
+import java.util.Optional;
+
 import io.netty.buffer.ByteBuf;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
@@ -14,9 +16,11 @@ import net.minecraft.resources.Identifier;
  * BuyFromShopPayload}). {@code resourceKey}/{@code isTag} identify which existing listing is being
  * sold back (a shop only ever buys back something it already sells, see {@code
  * api.Yconomics#sellToShop}'s own doc) -- the concrete item actually sold is resolved server-side
- * from the seller's own held stack rather than trusting anything sent from the client.
+ * from the seller's own held stack rather than trusting anything sent from the client. {@code
+ * customName} (added 2026-10-10, per-quality Shop listings) narrows that resolution to stacks of
+ * exactly this crafted-quality variant -- empty for a plain listing.
  */
-public record SellToShopPayload(ShopAnchor anchor, Identifier resourceKey, boolean isTag, int quantity) implements CustomPacketPayload {
+public record SellToShopPayload(ShopAnchor anchor, Identifier resourceKey, boolean isTag, Optional<String> customName, int quantity) implements CustomPacketPayload {
 
     public static final Type<SellToShopPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "sell_to_shop"));
@@ -25,6 +29,7 @@ public record SellToShopPayload(ShopAnchor anchor, Identifier resourceKey, boole
             ShopAnchor.STREAM_CODEC, SellToShopPayload::anchor,
             ByteBufCodecs.fromCodec(Identifier.CODEC), SellToShopPayload::resourceKey,
             ByteBufCodecs.BOOL, SellToShopPayload::isTag,
+            ByteBufCodecs.optional(ByteBufCodecs.STRING_UTF8), SellToShopPayload::customName,
             ByteBufCodecs.VAR_INT, SellToShopPayload::quantity,
             SellToShopPayload::new);
 

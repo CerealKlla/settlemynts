@@ -116,14 +116,26 @@ public final class YconomicsShopBridge {
 
     private static ShopListingView toLocal(ShopListing listing) {
         com.github.cerealklla.yconomics.shop.ShopResource r = listing.resource();
-        ShopResource local = r.tag().isPresent() ? ShopResource.ofTag(r.tag().get()) : ShopResource.ofItem(r.itemId().get());
+        ShopResource local = toLocalResource(r);
         return new ShopListingView(local, listing.pricePerUnit(),
                 com.github.cerealklla.yconomics.shop.ShopPricing.deriveBuyPrice(listing.pricePerUnit()));
     }
 
+    public static ShopResource toLocalResource(com.github.cerealklla.yconomics.shop.ShopResource r) {
+        if (r.tag().isPresent()) {
+            return ShopResource.ofTag(r.tag().get());
+        }
+        return r.customName().isPresent()
+                ? ShopResource.ofExactItem(r.itemId().get(), r.customName().get())
+                : ShopResource.ofItem(r.itemId().get());
+    }
+
     private static com.github.cerealklla.yconomics.shop.ShopResource toYconomics(ShopResource resource) {
-        return resource.tag().isPresent()
-                ? com.github.cerealklla.yconomics.shop.ShopResource.ofTag(resource.tag().get())
+        if (resource.tag().isPresent()) {
+            return com.github.cerealklla.yconomics.shop.ShopResource.ofTag(resource.tag().get());
+        }
+        return resource.customName().isPresent()
+                ? com.github.cerealklla.yconomics.shop.ShopResource.ofExactItem(resource.itemId().get(), resource.customName().get())
                 : com.github.cerealklla.yconomics.shop.ShopResource.ofItem(resource.itemId().get());
     }
 }

@@ -700,7 +700,19 @@ public class SettlemyntsMod {
             // recommends (so a brand-new plot/item shows a sensible starting price). A row's
             // suggestedPrice (a pure UI pre-fill hint, see ShopInventoryEntry's own doc) is only ever
             // non-zero when the row is neither really listed nor already explicitly suppressed.
-            java.util.Map<net.minecraft.resources.Identifier, Integer> listedPriceByItem = new java.util.LinkedHashMap<>();
+            //
+            // Per-quality variants (2026-10-10, e.g. Lyfe's crafted food baked at different Cook/
+            // structure quality) -- grouped by exact {@code zone.ShopResource} (item id + the stack's
+            // own custom name when present, see ShopResource#ofExactItem) instead of plain item id, so
+            // two different qualities of the same base item get their own independent row/price. Only
+            // concrete (non-tag) resources ever carry a variant -- a tag listing stays generic, same
+            // as a Planned Inventory target.
+            java.util.List<net.minecraft.world.Container> manageBoxes =
+                    com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, plot.plotId());
+            java.util.Map<com.github.cerealklla.settlemynts.zone.ShopResource, com.github.cerealklla.settlemynts.api.Settlemynts.VariantStock> stockByVariant =
+                    com.github.cerealklla.settlemynts.api.Settlemynts.scanItemStockByVariant(manageBoxes);
+
+            java.util.Map<com.github.cerealklla.settlemynts.zone.ShopResource, Integer> listedPriceByResource = new java.util.LinkedHashMap<>();
             java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry> tagRows = new java.util.ArrayList<>();
             for (com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView view : views) {
                 if (view.resource().tag().isPresent()) {
@@ -708,15 +720,17 @@ public class SettlemyntsMod {
                     int tagStock = stock.entrySet().stream()
                             .filter(e -> view.resource().matches(new net.minecraft.world.item.ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(e.getKey()))))
                             .mapToInt(java.util.Map.Entry::getValue).sum();
-                    tagRows.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(tag.location(), true, tagStock, view.pricePerUnit(), 0));
+                    tagRows.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(tag.location(), true, java.util.Optional.empty(), tagStock, view.pricePerUnit(), 0));
                 } else {
-                    listedPriceByItem.put(view.resource().itemId().get(), view.pricePerUnit());
+                    listedPriceByResource.put(view.resource(), view.pricePerUnit());
                 }
             }
 
-            java.util.Set<net.minecraft.resources.Identifier> suppressedItems = plot.suppressedShopResources().stream()
+            java.util.Set<com.github.cerealklla.settlemynts.zone.ShopResource> suppressedSet = plot.suppressedShopResources().stream()
                     .filter(s -> !s.isTag())
-                    .map(com.github.cerealklla.settlemynts.zone.SuppressedShopResource::resourceKey)
+                    .map(s -> s.customName().isPresent()
+                            ? com.github.cerealklla.settlemynts.zone.ShopResource.ofExactItem(s.resourceKey(), s.customName().get())
+                            : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(s.resourceKey()))
                     .collect(java.util.stream.Collectors.toSet());
 
             java.util.Map<net.minecraft.resources.Identifier, Integer> catalogDefaultByItem = new java.util.LinkedHashMap<>();
@@ -724,22 +738,36 @@ public class SettlemyntsMod {
                 seed.listingResource().itemId().ifPresent(itemId -> catalogDefaultByItem.put(itemId, seed.pricePerUnit()));
             }
 
-            java.util.Set<net.minecraft.resources.Identifier> allKeys = new java.util.LinkedHashSet<>();
-            allKeys.addAll(stock.keySet());
-            allKeys.addAll(listedPriceByItem.keySet());
-            allKeys.addAll(suppressedItems);
-            allKeys.addAll(catalogDefaultByItem.keySet());
+            net.minecraft.resources.Identifier goldNuggetId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET);
+            java.util.Set<com.github.cerealklla.settlemynts.zone.ShopResource> allKeys = new java.util.LinkedHashSet<>();
+            allKeys.addAll(stockByVariant.keySet());
+            allKeys.addAll(listedPriceByResource.keySet());
+            allKeys.addAll(suppressedSet);
+            for (net.minecraft.resources.Identifier catalogItem : catalogDefaultByItem.keySet()) {
+                allKeys.add(com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(catalogItem));
+            }
             // Gold Nuggets are the shop's own currency, not merchandise -- never a row here, same as
             // the sell-mode listing table already (correctly) excludes it.
-            allKeys.remove(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET));
+            allKeys.remove(com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(goldNuggetId));
 
             java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry> inventory = new java.util.ArrayList<>(tagRows);
-            for (net.minecraft.resources.Identifier key : allKeys) {
-                int listedPrice = listedPriceByItem.getOrDefault(key, 0);
-                boolean alreadyConfigured = listedPrice > 0 || suppressedItems.contains(key);
-                int suggestedPrice = alreadyConfigured ? 0 : catalogDefaultByItem.getOrDefault(key, 0);
+            for (com.github.cerealklla.settlemynts.zone.ShopResource key : allKeys) {
+                com.github.cerealklla.settlemynts.api.Settlemynts.VariantStock variantStock = stockByVariant.get(key);
+                int shopStock = variantStock != null ? variantStock.count() : 0;
+                int listedPrice = listedPriceByResource.getOrDefault(key, 0);
+                boolean alreadyConfigured = listedPrice > 0 || suppressedSet.contains(key);
+                int suggestedPrice = 0;
+                if (!alreadyConfigured) {
+                    int catalogBase = catalogDefaultByItem.getOrDefault(key.itemId().get(), 0);
+                    if (key.customName().isPresent() && variantStock != null && com.github.cerealklla.settlemynts.bridge.LyfeCookingBridge.isLoaded()) {
+                        suggestedPrice = catalogBase + com.github.cerealklla.settlemynts.bridge.LyfeCookingBridge.getIcons(variantStock.sample())
+                                .map(icons -> (int) Math.floor(icons)).orElse(0);
+                    } else {
+                        suggestedPrice = catalogBase;
+                    }
+                }
                 inventory.add(new com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry(
-                        key, false, stock.getOrDefault(key, 0), listedPrice, suggestedPrice));
+                        key.itemId().get(), false, key.customName(), shopStock, listedPrice, suggestedPrice));
             }
             // In-stock items first (explicit request, 2026-10-08: "I'd like the list sorted so that
             // the items that the shop plot has in stock are always at the top"), alphabetical within
@@ -752,21 +780,32 @@ public class SettlemyntsMod {
             return;
         }
 
-        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, stock);
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, manageBoxesFor(serverLevel, plot));
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
                 anchor, plot.plotId(), false, listings, java.util.List.of(), shopGoldNuggets, playerGoldNuggets));
+    }
+
+    private static java.util.List<net.minecraft.world.Container> manageBoxesFor(ServerLevel level, PlotRecord plot) {
+        return com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plot.plotId());
     }
 
     /**
      * Builds the buy-mode listing table rows (price + live stock, per-player Merchant-adjusted
      * prices) -- factored out of {@link #handleRequestShop} (2026-10-10) so {@link
      * #sendShopStockUpdate} can rebuild the same rows with fresh stock after a Buy/Sell without
-     * duplicating this logic.
+     * duplicating this logic. {@code boxes} (changed 2026-10-10 from a flat item-id stock map, for
+     * per-quality listings) is scanned via {@code api.Settlemynts#scanItemStockByVariant} so a
+     * listing's "Shop Stock" column reflects only its own exact quality variant's stock, not every
+     * quality of the item combined -- a *plain* (non-variant) listing still naturally sums across
+     * every quality, since {@code ShopResource#matches} only checks the custom name when the
+     * listing's own resource carries one.
      */
     private static java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> buildBuyListings(
             ServerPlayer player,
             java.util.List<com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView> views,
-            java.util.Map<net.minecraft.resources.Identifier, Integer> stock) {
+            java.util.List<net.minecraft.world.Container> boxes) {
+        java.util.Map<com.github.cerealklla.settlemynts.zone.ShopResource, com.github.cerealklla.settlemynts.api.Settlemynts.VariantStock> stockByVariant =
+                com.github.cerealklla.settlemynts.api.Settlemynts.scanItemStockByVariant(boxes);
         double merchantBonusFraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()
                 ? com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player)
                 : 0.0;
@@ -774,15 +813,14 @@ public class SettlemyntsMod {
                 .map(l -> {
                     net.minecraft.resources.Identifier key = l.resource().tag().map(t -> t.location()).orElseGet(() -> l.resource().itemId().get());
                     boolean isTag = l.resource().tag().isPresent();
-                    int shopStock = isTag
-                            ? stock.entrySet().stream()
-                                .filter(e -> l.resource().matches(new net.minecraft.world.item.ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(e.getKey()))))
-                                .mapToInt(java.util.Map.Entry::getValue).sum()
-                            : stock.getOrDefault(key, 0);
+                    int shopStock = stockByVariant.entrySet().stream()
+                            .filter(e -> l.resource().matches(e.getValue().sample()))
+                            .mapToInt(e -> e.getValue().count())
+                            .sum();
                     int effectiveBuyPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveBuyCost(l.pricePerUnit(), merchantBonusFraction);
                     int effectiveSellPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveSellPayout(l.pricePerUnit(), merchantBonusFraction);
                     return new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(
-                            key, isTag, l.pricePerUnit(), l.buyPricePerUnit(), shopStock, effectiveBuyPrice, effectiveSellPrice);
+                            key, isTag, l.resource().customName(), l.pricePerUnit(), l.buyPricePerUnit(), shopStock, effectiveBuyPrice, effectiveSellPrice);
                 })
                 .sorted(java.util.Comparator
                         .comparing((com.github.cerealklla.settlemynts.plotsign.ShopListingEntry e) -> e.shopStock() <= 0)
@@ -799,9 +837,9 @@ public class SettlemyntsMod {
     private static void sendShopStockUpdate(ServerPlayer player, ServerLevel level, UUID plotId, UUID shopId) {
         java.util.List<com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView> views =
                 com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(level, shopId);
-        java.util.Map<net.minecraft.resources.Identifier, Integer> stock =
-                com.github.cerealklla.settlemynts.api.Settlemynts.scanPlotItemStock(level, plotId);
-        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, stock);
+        java.util.List<net.minecraft.world.Container> boxes =
+                com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plotId);
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, boxes);
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.ShopStockUpdatePayload(listings));
     }
 
@@ -823,7 +861,9 @@ public class SettlemyntsMod {
         }
         com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
                 ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
-                : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
+                : payload.customName().isPresent()
+                    ? com.github.cerealklla.settlemynts.zone.ShopResource.ofExactItem(payload.resourceKey(), payload.customName().get())
+                    : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
         java.util.List<net.minecraft.world.Container> boxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, plotId);
         com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.PurchaseResult result =
                 com.github.cerealklla.settlemynts.api.Settlemynts.purchaseFromSettlementShop(serverLevel, plotId, shopId.get(), resource, payload.quantity(), boxes);
@@ -941,7 +981,9 @@ public class SettlemyntsMod {
         }
         com.github.cerealklla.settlemynts.zone.ShopResource resource = payload.isTag()
                 ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, payload.resourceKey()))
-                : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
+                : payload.customName().isPresent()
+                    ? com.github.cerealklla.settlemynts.zone.ShopResource.ofExactItem(payload.resourceKey(), payload.customName().get())
+                    : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
         net.minecraft.world.entity.player.Inventory inventory = player.getInventory();
         net.minecraft.resources.Identifier itemId = null;
         int available = 0;
@@ -1039,9 +1081,11 @@ public class SettlemyntsMod {
         for (com.github.cerealklla.settlemynts.plotsign.ShopListingUpdate update : payload.updates()) {
             com.github.cerealklla.settlemynts.zone.ShopResource resource = update.isTag()
                     ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, update.resourceKey()))
-                    : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(update.resourceKey());
+                    : update.customName().isPresent()
+                        ? com.github.cerealklla.settlemynts.zone.ShopResource.ofExactItem(update.resourceKey(), update.customName().get())
+                        : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(update.resourceKey());
             com.github.cerealklla.settlemynts.zone.SuppressedShopResource marker =
-                    new com.github.cerealklla.settlemynts.zone.SuppressedShopResource(update.resourceKey(), update.isTag());
+                    new com.github.cerealklla.settlemynts.zone.SuppressedShopResource(update.resourceKey(), update.isTag(), update.customName());
             if (update.price() <= 0) {
                 com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.removeListing(serverLevel, shopId, resource);
                 if (!suppressed.contains(marker)) {

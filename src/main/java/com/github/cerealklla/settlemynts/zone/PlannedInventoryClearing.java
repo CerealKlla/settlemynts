@@ -217,28 +217,104 @@ public final class PlannedInventoryClearing {
                 if (seller.remainingSurplus() <= 0 || seller.participant() == buyer.participant()) {
                     continue;
                 }
-                int buyerGold = ContainerWithdraw.countAvailable(buyer.participant().boxes(), GOLD_NUGGETS);
-                int affordable = buyerGold / seller.pricePerUnit();
-                int units = Math.min(remainingDeficit, Math.min(seller.remainingSurplus(), affordable));
-                if (units <= 0) {
+                int units = Math.min(remainingDeficit, seller.remainingSurplus());
+                List<ItemStack> goods = ContainerWithdraw.drain(seller.participant().boxes(), resource, units);
+                if (goods.isEmpty()) {
                     continue;
                 }
-                List<ItemStack> goods = ContainerWithdraw.drain(seller.participant().boxes(), resource, units);
-                for (ItemStack stack : goods) {
+                // Priced per actual stack drained, not a single flat pricePerUnit (2026-10-10, "an
+                // npc vendor will always buy any kind of bread it sees and [pay] at that specific
+                // listing price") -- a generic resource key (plain item id, no quality) still matches
+                // any quality variant for *counting/draining* purposes, but a seller with several
+                // quality-specific listings for the same base item must be paid each unit's own real
+                // listing price, not one price for the whole batch. See PriceSplit's own doc.
+                List<YconomicsShopBridge.ShopListingView> sellerListings =
+                        YconomicsShopBridge.getListings(level, seller.participant().plot().shopId().orElseThrow());
+                int buyerGold = ContainerWithdraw.countAvailable(buyer.participant().boxes(), GOLD_NUGGETS);
+                PriceSplit split = priceWithinBudget(goods, sellerListings, buyerGold);
+                for (ItemStack back : split.unaffordableOrUnpriced()) {
+                    ContainerDeposit.depositIntoAny(seller.participant().boxes(), back);
+                }
+                if (split.totalUnits() <= 0) {
+                    continue;
+                }
+                for (ItemStack stack : split.toDeliver()) {
                     ContainerDeposit.depositIntoAny(buyer.participant().boxes(), stack);
                 }
-                int cost = units * seller.pricePerUnit();
-                List<ItemStack> payment = ContainerWithdraw.drain(buyer.participant().boxes(), GOLD_NUGGETS, cost);
+                List<ItemStack> payment = ContainerWithdraw.drain(buyer.participant().boxes(), GOLD_NUGGETS, (int) split.totalCost());
                 for (ItemStack stack : payment) {
                     ContainerDeposit.depositIntoAny(seller.participant().boxes(), stack);
                 }
-                remainingDeficit -= units;
-                sellers.set(si, new Seller(seller.participant(), seller.remainingSurplus() - units, seller.pricePerUnit()));
+                remainingDeficit -= split.totalUnits();
+                sellers.set(si, new Seller(seller.participant(), seller.remainingSurplus() - split.totalUnits(), seller.pricePerUnit()));
                 SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} bought {}x {} from plot {} for {} nuggets",
-                        buyer.participant().plot().plotId(), units, key.id(), seller.participant().plot().plotId(), cost);
+                        buyer.participant().plot().plotId(), split.totalUnits(), key.id(), seller.participant().plot().plotId(), split.totalCost());
             }
             buyers.set(bi, new Buyer(buyer.participant(), remainingDeficit));
         }
+    }
+
+    private record PriceSplit(List<ItemStack> toDeliver, List<ItemStack> unaffordableOrUnpriced, int totalUnits, long totalCost) {
+    }
+
+    /**
+     * Splits {@code drained} (real stacks just pulled from a seller's boxes, each carrying its own
+     * real quality/variant) into what the buyer can actually afford at each stack's own real listing
+     * price, greedily in list order -- the real per-unit pricing {@link #settleResource} needs (see
+     * its own doc). A stack with no matching listing at all (shouldn't normally happen -- it was only
+     * drained because a *different* variant's listing made the resource "sellable" at all) is treated
+     * as unaffordable and handed back untouched, same as a stack that simply doesn't fit the budget.
+     */
+    private static PriceSplit priceWithinBudget(List<ItemStack> drained, List<YconomicsShopBridge.ShopListingView> sellerListings, int buyerGold) {
+        List<ItemStack> toDeliver = new ArrayList<>();
+        List<ItemStack> leftover = new ArrayList<>();
+        int totalUnits = 0;
+        long totalCost = 0;
+        long remainingBudget = buyerGold;
+        for (ItemStack stack : drained) {
+            Optional<Integer> price = priceForStack(sellerListings, stack);
+            if (price.isEmpty() || price.get() <= 0) {
+                leftover.add(stack);
+                continue;
+            }
+            int affordable = (int) Math.min(stack.getCount(), remainingBudget / price.get());
+            if (affordable <= 0) {
+                leftover.add(stack);
+                continue;
+            }
+            if (affordable < stack.getCount()) {
+                leftover.add(stack.copyWithCount(stack.getCount() - affordable));
+            }
+            toDeliver.add(stack.copyWithCount(affordable));
+            totalUnits += affordable;
+            long cost = (long) price.get() * affordable;
+            totalCost += cost;
+            remainingBudget -= cost;
+        }
+        return new PriceSplit(toDeliver, leftover, totalUnits, totalCost);
+    }
+
+    /**
+     * The real price {@code stack} would sell for against {@code listings} -- prefers an exact
+     * quality-variant listing (one whose own resource carries a matching custom name) over a plain,
+     * no-variant listing, since the exact match is always the more specific/authoritative price; among
+     * several plain listings that all generically match (shouldn't normally happen -- a shop only ever
+     * has one plain listing per item), the cheapest. Empty if nothing listed covers this stack at all.
+     */
+    private static Optional<Integer> priceForStack(List<YconomicsShopBridge.ShopListingView> listings, ItemStack stack) {
+        Integer genericPrice = null;
+        for (YconomicsShopBridge.ShopListingView view : listings) {
+            if (!view.resource().matches(stack)) {
+                continue;
+            }
+            if (view.resource().customName().isPresent()) {
+                return Optional.of(view.pricePerUnit());
+            }
+            if (genericPrice == null || view.pricePerUnit() < genericPrice) {
+                genericPrice = view.pricePerUnit();
+            }
+        }
+        return Optional.ofNullable(genericPrice);
     }
 
     private static PlannedInventoryTarget findTarget(PlotRecord plot, ResourceKey key) {
@@ -409,14 +485,27 @@ public final class PlannedInventoryClearing {
             if (goods.isEmpty()) {
                 continue;
             }
+            // Re-priced against the exact stack actually drained (2026-10-10, same "pay at that
+            // specific listing price" fix as settleResource's own doc) -- `price` above was only
+            // ever a pre-drain heuristic for sorting/affordability, generic across every quality
+            // variant this seller might list.
+            List<YconomicsShopBridge.ShopListingView> sellerListings =
+                    YconomicsShopBridge.getListings(level, seller.plot().shopId().get());
+            Optional<Integer> realPrice = priceForStack(sellerListings, goods.get(0));
+            if (realPrice.isEmpty() || realPrice.get() <= 0 || ContainerWithdraw.countAvailable(buyer.boxes(), GOLD_NUGGETS) < realPrice.get()) {
+                for (ItemStack stack : goods) {
+                    ContainerDeposit.depositIntoAny(seller.boxes(), stack);
+                }
+                continue;
+            }
             for (ItemStack stack : goods) {
                 ContainerDeposit.depositIntoAny(buyer.boxes(), stack);
             }
-            for (ItemStack stack : ContainerWithdraw.drain(buyer.boxes(), GOLD_NUGGETS, price)) {
+            for (ItemStack stack : ContainerWithdraw.drain(buyer.boxes(), GOLD_NUGGETS, realPrice.get())) {
                 ContainerDeposit.depositIntoAny(seller.boxes(), stack);
             }
             SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} direct-bought 1x {} from plot {} for {} nuggets (craftable resource)",
-                    buyer.plot().plotId(), key.id(), seller.plot().plotId(), price);
+                    buyer.plot().plotId(), key.id(), seller.plot().plotId(), realPrice.get());
             return true;
         }
         return false;

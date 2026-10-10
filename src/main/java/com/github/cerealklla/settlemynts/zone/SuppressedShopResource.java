@@ -1,5 +1,7 @@
 package com.github.cerealklla.settlemynts.zone;
 
+import java.util.Optional;
+
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
@@ -20,10 +22,11 @@ import net.minecraft.resources.Identifier;
  * listing" and "is in this set" as the two ways a resource counts as "already configured" -- only a
  * resource in neither state gets a catalog-suggested default price shown.
  */
-public record SuppressedShopResource(Identifier resourceKey, boolean isTag) {
+public record SuppressedShopResource(Identifier resourceKey, boolean isTag, Optional<String> customName) {
 
     public static final Codec<SuppressedShopResource> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(SuppressedShopResource::resourceKey),
-            Codec.BOOL.fieldOf("is_tag").forGetter(SuppressedShopResource::isTag)
+            Codec.BOOL.fieldOf("is_tag").forGetter(SuppressedShopResource::isTag),
+            Codec.STRING.optionalFieldOf("custom_name").forGetter(SuppressedShopResource::customName)
     ).apply(i, SuppressedShopResource::new));
 }

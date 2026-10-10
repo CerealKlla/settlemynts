@@ -1,6 +1,7 @@
 package com.github.cerealklla.settlemynts.plotsign;
 
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import com.mojang.serialization.Codec;
@@ -34,12 +35,13 @@ import net.minecraft.world.item.Items;
  * {@code bridge.YconomicsShopBridge#effectiveBuyCost}/{@code #effectiveSellPayout} -- equal to the
  * raw price whenever Lyfe isn't loaded or this player's Merchant bonus is currently zero.
  */
-public record ShopListingEntry(Identifier resourceKey, boolean isTag, int pricePerUnit, int buyPricePerUnit, int shopStock,
+public record ShopListingEntry(Identifier resourceKey, boolean isTag, Optional<String> customName, int pricePerUnit, int buyPricePerUnit, int shopStock,
                                 int effectiveBuyPrice, int effectiveSellPrice) {
 
     public static final Codec<ShopListingEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(ShopListingEntry::resourceKey),
             Codec.BOOL.fieldOf("is_tag").forGetter(ShopListingEntry::isTag),
+            Codec.STRING.optionalFieldOf("custom_name").forGetter(ShopListingEntry::customName),
             Codec.INT.fieldOf("price_per_unit").forGetter(ShopListingEntry::pricePerUnit),
             Codec.INT.fieldOf("buy_price_per_unit").forGetter(ShopListingEntry::buyPricePerUnit),
             Codec.INT.fieldOf("shop_stock").forGetter(ShopListingEntry::shopStock),
@@ -55,6 +57,9 @@ public record ShopListingEntry(Identifier resourceKey, boolean isTag, int priceP
      * own loaded language, same as every other in-game item name.
      */
     public String label() {
+        if (customName.isPresent()) {
+            return customName.get();
+        }
         if (isTag) {
             String readable = Arrays.stream(resourceKey.getPath().replace('_', ' ').split(" "))
                     .map(w -> w.isEmpty() ? w : Character.toUpperCase(w.charAt(0)) + w.substring(1))
@@ -73,6 +78,9 @@ public record ShopListingEntry(Identifier resourceKey, boolean isTag, int priceP
         if (isTag) {
             return stack.is(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, resourceKey));
         }
-        return BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(resourceKey);
+        if (!BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(resourceKey)) {
+            return false;
+        }
+        return customName.isEmpty() || customName.get().equals(stack.getHoverName().getString());
     }
 }

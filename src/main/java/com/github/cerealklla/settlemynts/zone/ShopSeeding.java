@@ -344,6 +344,70 @@ public final class ShopSeeding {
     }
 
     /**
+     * The suggested price for one exact crafted-quality variant of {@code plainResource}'s item
+     * (2026-10-10, per-quality Shop listings) -- the plain item's own catalog suggestion ({@link
+     * #suggestedPriceFor}) plus 1 gold per whole icon of quality baked into {@code sample} (explicit
+     * user formula: "base + 1 per [#]... a 2.75 would be 2 + 2"), i.e. {@code base + floor(icons)}.
+     * Falls back to the plain suggestion unchanged if Lyfe isn't loaded or {@code sample} isn't a
+     * Lyfe crafted-food item at all.
+     */
+    public static int suggestedPriceForVariant(ServerLevel level, PlotRecord plot, BlockPos plotAnchor, ShopResource plainResource, ItemStack sample) {
+        int base = suggestedPriceFor(level, plot, plotAnchor, plainResource);
+        if (!com.github.cerealklla.settlemynts.bridge.LyfeCookingBridge.isLoaded()) {
+            return base;
+        }
+        return com.github.cerealklla.settlemynts.bridge.LyfeCookingBridge.getIcons(sample)
+                .map(icons -> base + (int) Math.floor(icons))
+                .orElse(base);
+    }
+
+    /**
+     * Auto-lists every Lyfe crafted-food quality variant physically sitting in an NPC-owned (no
+     * player owner) plot's boxes that isn't already listed or explicitly suppressed (2026-10-10,
+     * explicit follow-up request: "that way npc villages could automatically list food separated by
+     * value") -- the no-curator-needed counterpart to {@code client.ManageShopScreen}'s own
+     * per-quality rows, for an NPC-owned plot nobody will necessarily ever open Manage Shop for.
+     * Price is the same base+floor(icons) formula that screen shows as a pure suggestion ({@code
+     * suggestedPriceFor} plus one gold per whole icon of quality); the real stored listing still
+     * floor-clamps to the shop system's own minimum regardless. Respects {@code
+     * plot.suppressedShopResources()} same as every other auto-listing path here -- a variant the
+     * plot's own Mayor/Town Planners have explicitly blanked via Manage Shop is never relisted.
+     * Called once per midnight settlement pass, right after {@code
+     * zone.PlannedInventoryClearing#craftFromOwnStockForGroup} produces whatever it's going to
+     * produce that night -- see {@code ShopMidnightRestockTicker}'s own call site.
+     */
+    public static void autoListCraftedFoodVariants(ServerLevel level, PlotRecord plot, BlockPos plotAnchor) {
+        if (!YconomicsShopBridge.isAvailable() || plot.shopId().isEmpty()
+                || !com.github.cerealklla.settlemynts.bridge.LyfeCookingBridge.isLoaded()) {
+            return;
+        }
+        List<Container> boxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plot.plotId());
+        if (boxes.isEmpty()) {
+            return;
+        }
+        UUID shopId = plot.shopId().get();
+        java.util.Set<ShopResource> alreadyListed = YconomicsShopBridge.getListings(level, shopId).stream()
+                .map(YconomicsShopBridge.ShopListingView::resource)
+                .collect(java.util.stream.Collectors.toSet());
+        java.util.Set<ShopResource> suppressed = plot.suppressedShopResources().stream()
+                .filter(s -> !s.isTag())
+                .map(s -> s.customName().isPresent()
+                        ? ShopResource.ofExactItem(s.resourceKey(), s.customName().get())
+                        : ShopResource.ofItem(s.resourceKey()))
+                .collect(java.util.stream.Collectors.toSet());
+        for (java.util.Map.Entry<ShopResource, com.github.cerealklla.settlemynts.api.Settlemynts.VariantStock> entry :
+                com.github.cerealklla.settlemynts.api.Settlemynts.scanItemStockByVariant(boxes).entrySet()) {
+            ShopResource variant = entry.getKey();
+            if (variant.customName().isEmpty() || alreadyListed.contains(variant) || suppressed.contains(variant)) {
+                continue;
+            }
+            ShopResource plain = ShopResource.ofItem(variant.itemId().get());
+            int price = suggestedPriceForVariant(level, plot, plotAnchor, plain, entry.getValue().sample());
+            YconomicsShopBridge.setListingPrice(level, shopId, variant, price);
+        }
+    }
+
+    /**
      * Every {@link SeedListing} this plot's Zone Type's catalog recommends at its current Tier, or
      * an empty list if it has none -- the full candidate set {@code client.ManageShopScreen} shows a
      * row for even with zero box stock and no real listing (added 2026-10-08, real follow-up report:

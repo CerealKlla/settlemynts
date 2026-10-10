@@ -1,6 +1,7 @@
 package com.github.cerealklla.settlemynts.plotsign;
 
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import com.mojang.serialization.Codec;
@@ -29,18 +30,28 @@ import net.minecraft.world.item.Items;
  * value so a brand-new item isn't blank with no guidance -- it has no effect at all once a real
  * listing exists ({@code listedPrice > 0}) or once the owner has explicitly saved it blank.
  */
-public record ShopInventoryEntry(Identifier resourceKey, boolean isTag, int shopStock, int listedPrice, int suggestedPrice) {
+public record ShopInventoryEntry(Identifier resourceKey, boolean isTag, Optional<String> customName, int shopStock, int listedPrice, int suggestedPrice) {
 
     public static final Codec<ShopInventoryEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(ShopInventoryEntry::resourceKey),
             Codec.BOOL.fieldOf("is_tag").forGetter(ShopInventoryEntry::isTag),
+            Codec.STRING.optionalFieldOf("custom_name").forGetter(ShopInventoryEntry::customName),
             Codec.INT.fieldOf("shop_stock").forGetter(ShopInventoryEntry::shopStock),
             Codec.INT.fieldOf("listed_price").forGetter(ShopInventoryEntry::listedPrice),
             Codec.INT.fieldOf("suggested_price").forGetter(ShopInventoryEntry::suggestedPrice)
     ).apply(i, ShopInventoryEntry::new));
 
-    /** Same translated-name/"Any &lt;Tag&gt;" convention as {@link ShopListingEntry#label()}. */
+    /**
+     * Same translated-name/"Any &lt;Tag&gt;" convention as {@link ShopListingEntry#label()} -- except
+     * {@code customName} (2026-10-10, per-quality Shop listings), when present, *is* the label
+     * verbatim (Lyfe's baked {@code "[3.75] (T5) - Bread"}, not the plain item name), since that's
+     * the whole point of a per-quality row: distinguishing it from every other quality of the same
+     * item at a glance.
+     */
     public String label() {
+        if (customName.isPresent()) {
+            return customName.get();
+        }
         if (isTag) {
             String readable = Arrays.stream(resourceKey.getPath().replace('_', ' ').split(" "))
                     .map(w -> w.isEmpty() ? w : Character.toUpperCase(w.charAt(0)) + w.substring(1))

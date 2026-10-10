@@ -17,14 +17,23 @@ import net.minecraft.world.item.ItemStack;
  * signature outside a bridge class gated behind {@code ModList.get().isLoaded("yconomics")}.
  * {@code bridge.YconomicsShopBridge} converts between this and the real Yconomics type.
  */
-public record ShopResource(Optional<TagKey<Item>> tag, Optional<Identifier> itemId) {
+public record ShopResource(Optional<TagKey<Item>> tag, Optional<Identifier> itemId, Optional<String> customName) {
 
     public static ShopResource ofTag(TagKey<Item> tag) {
-        return new ShopResource(Optional.of(tag), Optional.empty());
+        return new ShopResource(Optional.of(tag), Optional.empty(), Optional.empty());
     }
 
     public static ShopResource ofItem(Identifier itemId) {
-        return new ShopResource(Optional.empty(), Optional.of(itemId));
+        return new ShopResource(Optional.empty(), Optional.of(itemId), Optional.empty());
+    }
+
+    /**
+     * One exact crafted-quality variant of a concrete item (2026-10-10, mirrors Yconomics' own
+     * {@code shop.ShopResource#ofExactItem} exactly) -- {@code customName} is the stack's real baked
+     * display text (e.g. Lyfe's {@code "[3.75] (T5) - Bread"}), matched exactly.
+     */
+    public static ShopResource ofExactItem(Identifier itemId, String customName) {
+        return new ShopResource(Optional.empty(), Optional.of(itemId), Optional.of(customName));
     }
 
     /** Added 2026-10-08 for "Sell N" -- does {@code stack} fall under this listing's resource? Mirrors Yconomics' own {@code shop.ShopResource#matches} exactly. */
@@ -35,6 +44,9 @@ public record ShopResource(Optional<TagKey<Item>> tag, Optional<Identifier> item
         if (tag.isPresent()) {
             return stack.is(tag.get());
         }
-        return BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(itemId.get());
+        if (!BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(itemId.get())) {
+            return false;
+        }
+        return customName.isEmpty() || customName.get().equals(stack.getHoverName().getString());
     }
 }

@@ -70,5 +70,10 @@ public final class ShopCraftingDebounceTicker {
         }
         List<Container> boxes = Settlemynts.resolveBoxesForPolygon(level, polygon.get());
         PlannedInventoryClearing.craftFromOwnStock(level, plot, polygon.get(), boxes);
+        // Same NPC auto-listing follow-up as the midnight path (ShopMidnightRestockTicker) -- a
+        // debounced craft can produce crafted-food variants just as well as the midnight one.
+        if (plot.owner().isEmpty()) {
+            ShopSeeding.autoListCraftedFoodVariants(level, plot, net.minecraft.core.BlockPos.ZERO);
+        }
     }
 }

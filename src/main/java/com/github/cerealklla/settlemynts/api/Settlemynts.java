@@ -379,6 +379,46 @@ public final class Settlemynts {
         return counts;
     }
 
+    /** One exact Shop-listable variant's total stock plus a representative stack -- see {@link #scanItemStockByVariant}. */
+    public record VariantStock(int count, ItemStack sample) {
+    }
+
+    /**
+     * Same box-scanning pass as {@link #scanItemStock}, but grouped by exact Shop-listable variant
+     * (2026-10-10, for per-quality Shop listings, e.g. Lyfe's crafted food) rather than plain item id
+     * -- a stack carrying a custom display name (Lyfe's baked {@code "[3.75] (T5) - Bread"}) gets its
+     * own {@code ShopResource.ofExactItem} key instead of being lumped into every other stack of the
+     * same base item; a stack with no custom name groups by plain item id exactly as before. {@code
+     * sample} is one real stack of that exact variant (for reading e.g. Lyfe's baked icons value when
+     * computing a suggested price) -- always present since a key only ever exists because at least
+     * one matching stack was found. Used only by {@code client.ManageShopScreen}'s row-building and
+     * NPC auto-listing -- every *generic* consumer (Planned Inventory targets, crafting, the plain
+     * Buy/Sell screen's own stock count) deliberately keeps using {@link #scanItemStock}/{@code
+     * zone.ContainerWithdraw}, which still treat any quality of the same item as one resource, per
+     * explicit user design (an NPC's "happy state" target for Bread is satisfied by any quality of
+     * Bread it has on hand).
+     */
+    public static Map<ShopResource, VariantStock> scanItemStockByVariant(List<Container> boxes) {
+        Map<ShopResource, VariantStock> result = new LinkedHashMap<>();
+        for (Container box : boxes) {
+            for (int slot = 0; slot < box.getContainerSize(); slot++) {
+                ItemStack stack = box.getItem(slot);
+                if (stack.isEmpty()) {
+                    continue;
+                }
+                Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+                ShopResource key = stack.has(net.minecraft.core.component.DataComponents.CUSTOM_NAME)
+                        ? ShopResource.ofExactItem(id, stack.getHoverName().getString())
+                        : ShopResource.ofItem(id);
+                VariantStock existing = result.get(key);
+                result.put(key, existing == null
+                        ? new VariantStock(stack.getCount(), stack.copy())
+                        : new VariantStock(existing.count() + stack.getCount(), existing.sample()));
+            }
+        }
+        return result;
+    }
+
     /**
      * Every real container located within {@code plotId}'s own polygon -- the same "all boxes on the
      * plot" pool {@code bills.PlotBoxDiscovery} already reads for rent. Falls back to a natural

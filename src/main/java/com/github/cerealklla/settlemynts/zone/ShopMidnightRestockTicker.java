@@ -65,6 +65,19 @@ public final class ShopMidnightRestockTicker {
                 // Explicit third step (2026-10-10 redesign): turn whatever just changed hands above
                 // into finished goods, for this same settlement only -- see that method's own doc.
                 PlannedInventoryClearing.craftFromOwnStockForGroup(level, core.getPlots());
+                // Fourth step, same day (explicit follow-up: "that way npc villages could
+                // automatically list food separated by value") -- auto-list whatever crafted-food
+                // quality variants just got produced above, for every NPC-owned (no player owner)
+                // plot nobody will necessarily ever open Manage Shop for. A player-owned plot is left
+                // alone -- its owner curates their own Shop via Manage Shop, same as every other
+                // listing. BlockPos.ZERO mirrors restockNaturalShop's own fallback right below --
+                // this only ever affects biome-gated catalog pricing for the dish's plain base price,
+                // which crafted dishes aren't gated on anyway.
+                for (PlotRecord plot : core.getPlots()) {
+                    if (plot.owner().isEmpty()) {
+                        ShopSeeding.autoListCraftedFoodVariants(level, plot, BlockPos.ZERO);
+                    }
+                }
             }
         }
         restockNaturalSettlementShops(server);
