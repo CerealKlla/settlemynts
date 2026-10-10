@@ -1133,12 +1133,23 @@ public class SettlemyntsMod {
             return;
         }
 
-        com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget target = plot.plannedInventory().stream()
-                .filter(t -> t.isTag() == payload.isTag() && t.resourceKey().equals(payload.resourceKey()))
-                .findFirst().orElse(null);
+        // Re-resolved from ShopWishlist itself, not a raw PlannedInventoryTarget lookup (real bug,
+        // 2026-10-10: "I tried to sell an item to the shop that it was asking for and it said it
+        // didn't want it right now") -- a translated material (e.g. the Armorer's own Iron Ingot
+        // need, derived live from its Armor recipe) never has its own PlannedInventoryTarget at all,
+        // only the finished good it's translated FROM does, so a raw target lookup here always came
+        // up empty for exactly the resources this screen actually offers. ShopWishlist is the single
+        // authoritative source for "how much is actually still needed" -- same one requestShopWishlist
+        // itself used to build this screen in the first place.
         java.util.List<net.minecraft.world.Container> boxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, plot.plotId());
-        int remainingDeficit = target == null ? 0
-                : target.targetCount() - com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, resource);
+        int remainingDeficit = com.github.cerealklla.settlemynts.zone.ShopWishlist.computeDeficits(serverLevel, plot).stream()
+                .filter(d -> d.resource().tag().isPresent() == payload.isTag()
+                        && (payload.isTag()
+                                ? d.resource().tag().get().location().equals(payload.resourceKey())
+                                : d.resource().itemId().get().equals(payload.resourceKey())))
+                .findFirst()
+                .map(com.github.cerealklla.settlemynts.zone.ShopWishlist.DeficitEntry::quantityNeeded)
+                .orElse(0);
         if (remainingDeficit <= 0) {
             player.sendSystemMessage(Component.literal("This shop doesn't need any more of that right now."));
             com.github.cerealklla.settlemynts.zone.WishlistOfferTracker.clear(player.getUUID(), plot.plotId(), resource);
