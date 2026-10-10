@@ -276,14 +276,15 @@ public final class ShopSeeding {
      * both call sites' own guards) -- the owner decides their own happy state manually, same as they
      * decide their own prices via Manage Shop.
      *
-     * <p><b>Also seeds crafting-material targets, same day, explicit follow-up confirmation</b>: for
-     * any catalog item that's a known {@code bridge.LyfeCraftingBridge} recipe output (e.g. a
-     * Blacksmith's Tier-appropriate weapons/armor), also adds a target for each required material --
-     * each {@code specificComponents} entry at {@code seed.stockCount() * qty}, and for each
-     * {@code genericComponents} group its first/declaration-order member (a simple starting default;
-     * the midnight engine's own cheapest-member logic in {@code PlannedInventoryClearing} is what
-     * actually matters at real trade time) at {@code seed.stockCount() * qty} -- so a fresh NPC
-     * Blacksmith isn't stuck with a forge and nothing to feed it.
+     * <p><b>No longer also seeds crafting-material targets</b> (that piece added 2026-10-09, removed
+     * again 2026-10-10) -- explicit user correction: "I don't intend any plots to be auto auto-seeded;
+     * that's why we are slowly adding this logic in so they can ask for what they need from others...
+     * I don't want any bifurcating logic between npc owned vs player owned in that sense. If there is
+     * an NPC running the shop it needs to be able to support this concept" (a forward reference to a
+     * future "hire an NPC to run your shop" feature, where an NPC-run shop should work exactly like a
+     * player-run one). {@code zone.ShopWishlist#computeDeficits} now derives a sold item's material
+     * need live from its recipe at ask-time instead (see that class's own doc) -- no persisted
+     * material target, NPC-owned or player-owned alike, superseding what this used to pre-seed.
      */
     private static void autoPopulatePlannedInventory(PlotOwner owner, PlotRecord plot, List<SeedListing> seedListings) {
         java.util.Set<java.util.Map.Entry<Identifier, Boolean>> existing = new java.util.HashSet<>();
@@ -297,25 +298,6 @@ public final class ShopSeeding {
             boolean isTag = resource.tag().isPresent();
             if (existing.add(java.util.Map.entry(key, isTag))) {
                 additions.add(new PlannedInventoryTarget(key, isTag, seed.stockCount()));
-            }
-            if (!isTag && com.github.cerealklla.settlemynts.bridge.LyfeCraftingBridge.isLoaded()) {
-                com.github.cerealklla.settlemynts.bridge.LyfeCraftingBridge.getRecipe(key).ifPresent(recipe -> {
-                    for (java.util.Map.Entry<Identifier, Integer> component : recipe.specificComponents().entrySet()) {
-                        if (existing.add(java.util.Map.entry(component.getKey(), false))) {
-                            additions.add(new PlannedInventoryTarget(component.getKey(), false, seed.stockCount() * component.getValue()));
-                        }
-                    }
-                    for (java.util.Map.Entry<String, Integer> group : recipe.genericComponents().entrySet()) {
-                        List<Identifier> members = com.github.cerealklla.settlemynts.bridge.LyfeCraftingBridge.componentGroupMembers(group.getKey());
-                        if (members.isEmpty()) {
-                            continue;
-                        }
-                        Identifier representative = members.get(0);
-                        if (existing.add(java.util.Map.entry(representative, false))) {
-                            additions.add(new PlannedInventoryTarget(representative, false, seed.stockCount() * group.getValue()));
-                        }
-                    }
-                });
             }
         }
         if (additions.isEmpty()) {
