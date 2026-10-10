@@ -59,10 +59,16 @@ public final class ShopSeeding {
         // NPC-owned plot, 2026-10-09 (explicit follow-up request: "a first pass at automatically
         // setting the Planned Inventory for NPC shops with things that make sense") -- a player-owned
         // plot gets nothing auto-populated here, same owner/no-owner split as applyCatalog/applyCatalogFull
-        // already draw for real listings themselves (see this method's own class doc).
-        if (seeded.owner().isEmpty()) {
+        // already draw for real listings themselves (see this method's own class doc). Skipped for a
+        // tiered catalog (2026-10-10) -- applyTieredDefaults below fully supersedes this for those,
+        // owner-agnostic, and running both would double up a resource's Planned Inventory target.
+        if (seeded.owner().isEmpty() && !catalog.get().hasTierProgression()) {
             autoPopulatePlannedInventory(owner, seeded, catalog.get().seedListingsFor(level, plotAnchor, 1));
         }
+        // Owner-agnostic default listings/Planned Inventory for a genuinely tiered catalog (Armorer/
+        // Blacksmith/Restaurant), 2026-10-10 -- see applyTieredDefaults' own doc. A brand-new plot is
+        // always Tier 1.
+        applyTieredDefaults(level, owner, seeded, catalog.get(), plotAnchor, 1);
     }
 
     /** True if this Zone Type has a registered catalog at all -- lets a caller decide whether it's even worth resolving/creating a Shop before calling {@link #seedNewPlotSharingShop}. */
@@ -98,6 +104,12 @@ public final class ShopSeeding {
         PlotRecord seeded = plot.withShopId(sharedShopId);
         owner.updatePlot(seeded);
         applyCatalogFull(level, owner, seeded, catalog.get(), plotAnchor, 1);
+        // Owner-agnostic default seeding for a tiered catalog (2026-10-10) -- see applyTieredDefaults'
+        // own doc. applyCatalogFull above already re-reads the plot fresh via its own owner.updatePlot
+        // calls, but this call needs the latest Planned Inventory state, so re-resolve rather than
+        // trust the now-possibly-stale `seeded` local.
+        PlotRecord afterCatalog = owner.getPlots().stream().filter(p -> p.plotId().equals(plot.plotId())).findFirst().orElse(seeded);
+        applyTieredDefaults(level, owner, afterCatalog, catalog.get(), plotAnchor, 1);
     }
 
     /**
@@ -114,7 +126,10 @@ public final class ShopSeeding {
         }
         Optional<ShopSeedCatalog> catalog = ShopSeedCatalogRegistry.get(plot.zoneTypeId());
         if (catalog.isPresent()) {
-            applyCatalogFull(level, owner, plot, catalog.get(), plotAnchor, resolveTier(level, plot));
+            int tier = resolveTier(level, plot);
+            applyCatalogFull(level, owner, plot, catalog.get(), plotAnchor, tier);
+            PlotRecord afterCatalog = owner.getPlots().stream().filter(p -> p.plotId().equals(plot.plotId())).findFirst().orElse(plot);
+            applyTieredDefaults(level, owner, afterCatalog, catalog.get(), plotAnchor, tier);
         }
         List<Container> plotBoxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plot.plotId());
         if (plotBoxes.isEmpty()) {
@@ -137,9 +152,15 @@ public final class ShopSeeding {
         }
         if (plot.shopId().isEmpty()) {
             UUID shopId = YconomicsShopBridge.registerShop(level, plot.plotId());
-            owner.updatePlot(plot.withShopId(shopId));
+            plot = plot.withShopId(shopId);
+            owner.updatePlot(plot);
         }
-        applyCatalog(level, plot, catalog.get(), plotAnchor, resolveTier(level, plot));
+        int tier = resolveTier(level, plot);
+        applyCatalog(level, plot, catalog.get(), plotAnchor, tier);
+        // Owner-agnostic default listings/Planned Inventory for a tiered catalog (2026-10-10) -- see
+        // applyTieredDefaults' own doc. This is the main trigger point for a player-owned plot's own
+        // Tier increase, since it runs every time Enter/Manage Shop opens.
+        applyTieredDefaults(level, owner, plot, catalog.get(), plotAnchor, tier);
     }
 
     private static final int NUGGET_FLOOR = 200;
@@ -250,9 +271,17 @@ public final class ShopSeeding {
         if (seedListings.isEmpty()) {
             return;
         }
+        // A tiered catalog (2026-10-10) leaves listing/Planned Inventory decisions entirely to
+        // applyTieredDefaults (called right after this, at both call sites) -- "regardless of if a
+        // player owns it or an NPC," the same curated previous-tier-full/current-tier-random split
+        // applies, not this method's own "list literally everything" shape. Stock still gets
+        // deposited either way -- nobody else would ever stock a natural shop's shelves otherwise.
+        boolean tiered = catalog.hasTierProgression();
         List<Container> plotBoxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plot.plotId());
         for (SeedListing seed : seedListings) {
-            YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), seed.pricePerUnit());
+            if (!tiered) {
+                YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), seed.pricePerUnit());
+            }
             if (plotBoxes.isEmpty()) {
                 continue;
             }
@@ -262,7 +291,9 @@ public final class ShopSeeding {
                 depositStock(plotBoxes, seed, topUp);
             }
         }
-        autoPopulatePlannedInventory(owner, plot, seedListings);
+        if (!tiered) {
+            autoPopulatePlannedInventory(owner, plot, seedListings);
+        }
     }
 
     /**
@@ -306,6 +337,108 @@ public final class ShopSeeding {
         List<PlannedInventoryTarget> merged = new java.util.ArrayList<>(plot.plannedInventory());
         merged.addAll(additions);
         owner.updatePlot(plot.withPlannedInventory(merged));
+    }
+
+    /**
+     * Default listing/Planned Inventory seeding for a catalog with real Tier progression
+     * (Armorer/Blacksmith/Restaurant -- see {@link ShopSeedCatalog#hasTierProgression}'s own doc),
+     * applied to **any** owner, player or NPC alike (2026-10-10, explicit user request: "This would
+     * be the default configuration for any such plot, regardless of if a player owns it or an NPC" --
+     * deliberately not restricted the way {@link #autoPopulatePlannedInventory}'s own NPC-only pass
+     * is). No-op (and no write) unless {@code tier} is strictly higher than {@link
+     * PlotRecord#tieredDefaultsAppliedTier()}, so a real Tier increase -- not every "Enter Shop" --
+     * is what actually triggers a re-seed; also skipped entirely if this plot has no Shop yet.
+     *
+     * <ul>
+     *   <li><b>Listings</b>: every not-yet-configured (no real listing, not explicitly suppressed)
+     *   item from the Tier just below {@code tier} gets listed in full ("all items from their
+     *   previous tier"); roughly half (rounded up, at least one if any exist), picked at random, of
+     *   the items genuinely new at {@code tier} itself also get listed ("a random assortment of items
+     *   from their current tier") -- the other half stays an unlisted catalog candidate row in Manage
+     *   Shop, same as any other not-yet-decided item. Never overwrites an owner's (or an earlier pass's)
+     *   explicit choice either way, same no-override convention every other seeding path here follows.</li>
+     *   <li><b>Planned Inventory</b>: a target of exactly 1 for every item at {@code tier} and below
+     *   ("1 of every item for their current tier and below"), additive-only -- never touches an
+     *   existing target, whatever its count.</li>
+     * </ul>
+     *
+     * <p>Only ever reads {@link SeedListing#resource()}-backed entries -- a stack-backed (Research/
+     * Recipe Note) listing has no stable item identity to dedupe/compare by and is left entirely to
+     * its own existing restock mechanism (see {@link #applyCatalog}/{@link #restockAtMidnight}).
+     */
+    public static void applyTieredDefaults(ServerLevel level, PlotOwner owner, PlotRecord plot, ShopSeedCatalog catalog, BlockPos plotAnchor, int tier) {
+        if (!catalog.hasTierProgression() || plot.shopId().isEmpty() || tier <= plot.tieredDefaultsAppliedTier()) {
+            return;
+        }
+        UUID shopId = plot.shopId().get();
+        List<SeedListing> prevListings = tier > 1 ? catalog.seedListingsFor(level, plotAnchor, tier - 1) : List.of();
+        List<SeedListing> allListings = catalog.seedListingsFor(level, plotAnchor, tier);
+
+        java.util.Set<Identifier> prevItemIds = new java.util.HashSet<>();
+        for (SeedListing seed : prevListings) {
+            seed.resource().flatMap(ShopResource::itemId).ifPresent(prevItemIds::add);
+        }
+
+        java.util.Set<Identifier> alreadyConfigured = new java.util.HashSet<>();
+        for (YconomicsShopBridge.ShopListingView view : YconomicsShopBridge.getListings(level, shopId)) {
+            view.resource().itemId().ifPresent(alreadyConfigured::add);
+        }
+        for (SuppressedShopResource s : plot.suppressedShopResources()) {
+            if (!s.isTag()) {
+                alreadyConfigured.add(s.resourceKey());
+            }
+        }
+
+        // 1. Every not-yet-configured item from the previous tier, listed in full.
+        for (SeedListing seed : prevListings) {
+            Optional<Identifier> itemId = seed.resource().flatMap(ShopResource::itemId);
+            if (itemId.isEmpty() || alreadyConfigured.contains(itemId.get())) {
+                continue;
+            }
+            YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), seed.pricePerUnit());
+            alreadyConfigured.add(itemId.get());
+        }
+
+        // 2. About half (rounded up), randomly chosen, of the not-yet-configured items genuinely new
+        // at this tier -- "a random assortment," not every single one, is the whole point here.
+        List<SeedListing> eligibleNewThisTier = new java.util.ArrayList<>();
+        for (SeedListing seed : allListings) {
+            Optional<Identifier> itemId = seed.resource().flatMap(ShopResource::itemId);
+            if (itemId.isEmpty() || prevItemIds.contains(itemId.get()) || alreadyConfigured.contains(itemId.get())) {
+                continue;
+            }
+            eligibleNewThisTier.add(seed);
+        }
+        // Manual Fisher-Yates -- Collections.shuffle only accepts java.util.Random, not vanilla's own RandomSource.
+        for (int i = eligibleNewThisTier.size() - 1; i > 0; i--) {
+            int j = level.getRandom().nextInt(i + 1);
+            java.util.Collections.swap(eligibleNewThisTier, i, j);
+        }
+        int pickCount = eligibleNewThisTier.isEmpty() ? 0 : Math.max(1, (eligibleNewThisTier.size() + 1) / 2);
+        for (int i = 0; i < pickCount; i++) {
+            SeedListing seed = eligibleNewThisTier.get(i);
+            YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), seed.pricePerUnit());
+        }
+
+        // 3. Planned Inventory: 1 of every item at this tier and below, additive-only.
+        java.util.Set<Identifier> existingTargets = new java.util.HashSet<>();
+        for (PlannedInventoryTarget target : plot.plannedInventory()) {
+            if (!target.isTag()) {
+                existingTargets.add(target.resourceKey());
+            }
+        }
+        List<PlannedInventoryTarget> additions = new java.util.ArrayList<>();
+        for (SeedListing seed : allListings) {
+            Optional<Identifier> itemId = seed.resource().flatMap(ShopResource::itemId);
+            if (itemId.isEmpty() || !existingTargets.add(itemId.get())) {
+                continue;
+            }
+            additions.add(new PlannedInventoryTarget(itemId.get(), false, 1));
+        }
+
+        List<PlannedInventoryTarget> mergedTargets = new java.util.ArrayList<>(plot.plannedInventory());
+        mergedTargets.addAll(additions);
+        owner.updatePlot(plot.withPlannedInventory(mergedTargets).withTieredDefaultsAppliedTier(tier));
     }
 
     /**

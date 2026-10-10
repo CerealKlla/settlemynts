@@ -73,12 +73,19 @@ import net.minecraft.resources.Identifier;
  * plot below target buys from one above target, within the same settlement, at the seller's own real
  * Shop sell price). Empty by default (including every pre-existing saved plot) -- a resource only
  * ever participates once an entry exists for it; see {@link PlannedInventoryTarget}'s own class doc.
+ *
+ * <p>{@code tieredDefaultsAppliedTier} (added 2026-10-10) -- the highest Tier {@code
+ * zone.ShopSeeding#applyTieredDefaults} has already seeded default listings/Planned Inventory targets
+ * for, on a catalog with real tier progression (Armorer/Blacksmith/Restaurant, never Grocer or any
+ * Blueprynts good). Lets that pass stay idempotent (only reacts once per real Tier increase, not on
+ * every "Enter Shop") without needing a separate tier-change event anywhere. Defaults to 0 (including
+ * every pre-existing saved plot), so a Tier 1 plot still seeds once on its very first check.
  */
 public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long cartographyrPlotEntityId,
                           long cartographyrBufferEntityId, Optional<BlockPos> boxPos, Optional<UUID> constructionBoxId,
                           Optional<UUID> owner, Optional<UUID> billId, Optional<UUID> shopId,
                           List<SuppressedShopResource> suppressedShopResources, int tier,
-                          List<PlannedInventoryTarget> plannedInventory) {
+                          List<PlannedInventoryTarget> plannedInventory, int tieredDefaultsAppliedTier) {
 
     public static final Codec<PlotRecord> CODEC = RecordCodecBuilder.create(i -> i.group(
             UUIDUtil.CODEC.fieldOf("plot_id").forGetter(PlotRecord::plotId),
@@ -93,30 +100,37 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
             UUIDUtil.CODEC.optionalFieldOf("shop_id").forGetter(PlotRecord::shopId),
             SuppressedShopResource.CODEC.listOf().optionalFieldOf("suppressed_shop_resources", List.of()).forGetter(PlotRecord::suppressedShopResources),
             Codec.INT.optionalFieldOf("tier", 1).forGetter(PlotRecord::tier),
-            PlannedInventoryTarget.CODEC.listOf().optionalFieldOf("planned_inventory", List.of()).forGetter(PlotRecord::plannedInventory)
+            PlannedInventoryTarget.CODEC.listOf().optionalFieldOf("planned_inventory", List.of()).forGetter(PlotRecord::plannedInventory),
+            Codec.INT.optionalFieldOf("tiered_defaults_applied_tier", 0).forGetter(PlotRecord::tieredDefaultsAppliedTier)
     ).apply(i, PlotRecord::new));
 
     /** Stamps in a freshly-registered Shop id -- see this record's own class doc on when this happens. */
     public PlotRecord withShopId(UUID shopId) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier, plannedInventory);
+                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier);
     }
 
     /** Overwrites the full Shop Config suppression set -- see {@code SettlemyntsMod#setShopListings}, the only caller. */
     public PlotRecord withSuppressedShopResources(List<SuppressedShopResource> suppressedShopResources) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier, plannedInventory);
+                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier, plannedInventory, tieredDefaultsAppliedTier);
     }
 
     /** Raises (or sets) this plot's own unlocked construction-Tier cap -- see this record's own class doc. */
     public PlotRecord withTier(int tier) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier);
     }
 
     /** Overwrites the full Planned Inventory target set -- see {@code SettlemyntsMod#setPlannedInventory}, the only caller. */
     public PlotRecord withPlannedInventory(List<PlannedInventoryTarget> plannedInventory) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, List.copyOf(plannedInventory));
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, List.copyOf(plannedInventory), tieredDefaultsAppliedTier);
+    }
+
+    /** Marks {@code tier} as the highest Tier {@code zone.ShopSeeding#applyTieredDefaults} has seeded for -- see this record's own class doc. */
+    public PlotRecord withTieredDefaultsAppliedTier(int tieredDefaultsAppliedTier) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier);
     }
 }
