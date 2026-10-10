@@ -193,17 +193,26 @@ public final class PlannedInventoryClearing {
 
         for (Participant p : participants) {
             PlannedInventoryTarget target = findTarget(p.plot(), key);
-            if (target == null) {
+            int currentStock = ContainerWithdraw.countAvailable(p.boxes(), resource);
+            if (target != null && currentStock < target.targetCount()) {
+                buyers.add(new Buyer(p, target.targetCount() - currentStock));
                 continue;
             }
-            int currentStock = ContainerWithdraw.countAvailable(p.boxes(), resource);
-            if (currentStock < target.targetCount()) {
-                buyers.add(new Buyer(p, target.targetCount() - currentStock));
-            } else if (currentStock > target.targetCount()) {
-                int pricePerUnit = sellPriceFor(level, p.plot().shopId().orElseThrow(), resource);
-                if (pricePerUnit > 0) {
-                    sellers.add(new Seller(p, currentStock - target.targetCount(), pricePerUnit));
-                }
+            // Surplus above its own declared target, or (real fix, 2026-10-10: "I set it to want to
+            // have 64 apples in stock, but not list them for sale... but the grocer isn't buying
+            // them" -- the Grocer had a target, the player's own apple-selling plot never did) its
+            // whole current stock when it has no target at all. Previously a seller candidate with no
+            // PlannedInventoryTarget of its own was silently skipped entirely, even with a real Shop
+            // listing and real stock -- inconsistent with the craftable-resource path's own
+            // cheapestSellerPrice, which already never required one (see that method's own doc: a
+            // seller is just "anyone with a real listing price," always).
+            int surplus = target != null ? currentStock - target.targetCount() : currentStock;
+            if (surplus <= 0 || p.plot().shopId().isEmpty()) {
+                continue;
+            }
+            int pricePerUnit = sellPriceFor(level, p.plot().shopId().get(), resource);
+            if (pricePerUnit > 0) {
+                sellers.add(new Seller(p, surplus, pricePerUnit));
             }
         }
 
