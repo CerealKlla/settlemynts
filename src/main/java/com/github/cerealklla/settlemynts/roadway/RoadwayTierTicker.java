@@ -83,6 +83,13 @@ public final class RoadwayTierTicker {
                 for (BlockPos pos : connection.roadCells()) {
                     if (level.getBlockState(pos).is(ModBlocks.ROADWAY.get())) {
                         level.setBlock(pos, roadState, 3);
+                        // Forced unconditionally, same reasoning as RoadwayPaver#paveColumn -- this
+                        // runs once for every road cell on server boot (lastKnownTierByCore starts
+                        // empty, so the first scan after any restart always repaints), which is
+                        // exactly what heals every already-placed Tier 1 road's stale lighting
+                        // (computed before TieredRoadwayBlock's shape/occlusion override existed)
+                        // without needing a player to manually reconnect near each one.
+                        level.getLightEngine().checkBlock(pos);
                         cellsRepainted++;
                     }
                 }

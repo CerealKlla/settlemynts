@@ -1,9 +1,13 @@
 package com.github.cerealklla.settlemynts.roadway;
 
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
  * A plain indestructible road block whose look tracks a settlement's Town Hall Tier (added
@@ -26,6 +30,16 @@ public class TieredRoadwayBlock extends Block {
 
     public static final IntegerProperty TIER = IntegerProperty.create("tier", 1, 5);
 
+    // Matches vanilla DirtPathBlock's own SHAPE exactly (Block.column(16.0, 0.0, 15.0)) -- Tier 1's
+    // model is parented directly on minecraft:block/dirt_path, whose top face sits 1 pixel below a
+    // full cube. Without a matching shape override here, this block kept reporting a full-cube shape
+    // regardless of tier (the Block default), which made a neighboring block's engine-side face
+    // culling wrongly treat Tier 1 as fully sealed against it -- a real, confirmed live bug
+    // (2026-10-09): a 1-pixel gap at the road's edge rendered as seeing straight through the terrain,
+    // since neither this block's own (correctly short) top face nor the neighbor's (wrongly culled)
+    // bottom-of-side face painted anything there.
+    private static final VoxelShape TIER_1_SHAPE = Block.column(16.0, 0.0, 15.0);
+
     public TieredRoadwayBlock(Properties properties) {
         super(properties);
         registerDefaultState(stateDefinition.any().setValue(TIER, 3));
@@ -35,5 +49,18 @@ public class TieredRoadwayBlock extends Block {
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
         super.createBlockStateDefinition(builder);
         builder.add(TIER);
+    }
+
+    @Override
+    protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        return state.getValue(TIER) == 1 ? TIER_1_SHAPE : super.getShape(state, level, pos, context);
+    }
+
+    // Tells the engine to actually consult getShape() for face culling/light occlusion instead of
+    // assuming a full solid cube -- same as vanilla DirtPathBlock's own override. Safe for every tier
+    // (2-5 report a real full-cube shape, so this is a no-op for them).
+    @Override
+    protected boolean useShapeForLightOcclusion(BlockState state) {
+        return state.getValue(TIER) == 1;
     }
 }
