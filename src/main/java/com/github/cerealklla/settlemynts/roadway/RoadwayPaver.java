@@ -302,11 +302,6 @@ public final class RoadwayPaver {
             }
         }
         captureAndSet(level, new BlockPos(x, targetY, z), roadState, snapshot, captured);
-        // Forced unconditionally (not just when captureAndSet actually wrote a new state) -- a real
-        // live bug, 2026-10-09: Tier 1's shape/occlusion override (see TieredRoadwayBlock) only
-        // matters once lighting is (re)computed under it, and vanilla's own setBlock short-circuits
-        // without touching light data at all when the written state already equals what's there.
-        level.getLightEngine().checkBlock(new BlockPos(x, targetY, z));
         int clearanceStart = Math.max(targetY + 1, naturalY + 1);
         for (int y = clearanceStart; y <= targetY + CLEARANCE_BLOCKS; y++) {
             BlockPos pos = new BlockPos(x, y, z);
