@@ -56,6 +56,20 @@ public final class ShopCraftingDebounceTicker {
     }
 
     private static void fire(ServerLevel level, UUID plotId) {
+        // Temporary diagnostic (2026-10-10, see diagnostics.LagDiagnostics' own doc) -- remove once
+        // the real lag cause is confirmed.
+        long diagStart = System.nanoTime();
+        try {
+            fireTimed(level, plotId);
+        } finally {
+            long diagElapsedMs = (System.nanoTime() - diagStart) / 1_000_000L;
+            if (diagElapsedMs >= 5) {
+                com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info("[LagDiagnostics] ShopCraftingDebounceTicker.fire took {}ms", diagElapsedMs);
+            }
+        }
+    }
+
+    private static void fireTimed(ServerLevel level, UUID plotId) {
         if (!LyfeCraftingBridge.isLoaded()) {
             return;
         }

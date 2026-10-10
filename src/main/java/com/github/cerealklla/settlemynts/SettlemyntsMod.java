@@ -202,6 +202,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerDeathListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerRespawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerShopInteractListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.diagnostics.LagDiagnostics());
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.RegisterCommandsEvent event) ->
                 com.github.cerealklla.settlemynts.debug.DebugCommands.register(event.getDispatcher()));
 

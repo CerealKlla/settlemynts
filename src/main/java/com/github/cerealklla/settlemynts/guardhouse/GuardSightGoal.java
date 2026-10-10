@@ -67,7 +67,14 @@ public class GuardSightGoal extends Goal {
         if (!(guard.level() instanceof ServerLevel level)) {
             return false;
         }
+        // Temporary diagnostic (2026-10-10, see diagnostics.LagDiagnostics' own doc) -- remove once
+        // the real lag cause is confirmed.
+        long start = System.nanoTime();
         LivingEntity found = findNearestVisibleHostile(level);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
+        if (elapsedMs >= 5) {
+            com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info("[LagDiagnostics] GuardSightGoal.findNearestVisibleHostile took {}ms", elapsedMs);
+        }
         if (found != null) {
             guard.setTarget(found);
         }

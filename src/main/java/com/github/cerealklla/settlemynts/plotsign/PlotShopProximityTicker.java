@@ -47,6 +47,20 @@ public final class PlotShopProximityTicker {
         if (player.tickCount % CHECK_INTERVAL_TICKS != 0) {
             return;
         }
+        // Temporary diagnostic (2026-10-10, see diagnostics.LagDiagnostics' own doc) -- remove once
+        // the real lag cause is confirmed.
+        long diagStart = System.nanoTime();
+        try {
+            onPlayerTickTimed(player);
+        } finally {
+            long diagElapsedMs = (System.nanoTime() - diagStart) / 1_000_000L;
+            if (diagElapsedMs >= 5) {
+                SettlemyntsMod.LOGGER.info("[LagDiagnostics] PlotShopProximityTicker.onPlayerTick took {}ms", diagElapsedMs);
+            }
+        }
+    }
+
+    private void onPlayerTickTimed(ServerPlayer player) {
         ServerLevel level = (ServerLevel) player.level();
         BlockPos center = player.blockPosition();
         double radiusSq = (double) RADIUS_BLOCKS * RADIUS_BLOCKS;

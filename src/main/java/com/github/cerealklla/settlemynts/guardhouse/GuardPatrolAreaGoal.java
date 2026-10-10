@@ -143,7 +143,14 @@ public class GuardPatrolAreaGoal extends Goal {
         if (!(guard.level() instanceof ServerLevel level)) {
             return;
         }
+        // Temporary diagnostic (2026-10-10, see diagnostics.LagDiagnostics' own doc) -- remove once
+        // the real lag cause is confirmed.
+        long diagStart = System.nanoTime();
         List<BlockPos> route = buildRoadRoute(level);
+        long diagElapsedMs = (System.nanoTime() - diagStart) / 1_000_000L;
+        if (diagElapsedMs >= 5) {
+            com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info("[LagDiagnostics] GuardPatrolAreaGoal.buildRoadRoute took {}ms", diagElapsedMs);
+        }
         if (route.isEmpty()) {
             BlockPos fallback = guard.resolvePatrolArea(level).map(area -> pickTarget(level, area)).orElse(null);
             route = fallback == null ? List.of() : List.of(fallback);
