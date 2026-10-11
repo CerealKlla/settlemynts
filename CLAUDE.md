@@ -238,7 +238,14 @@ cross-mod inter-settlement road-connection quest (full design in myssions-contex
 settlement's own plot tiers, `SettlementTierResolver`) that determines a Highway's paving quality.
 50-block max connection length (actually enforced, unlike the original's documentary-only
 constant); stakes are consumed on placement and returned on pickup. `./gradlew build` green.
-**Not yet live-tested** -- the Myssions-side quest that actually grants these stakes doesn't exist
-yet.
+
+**Myssions-facing Highway-quest facade added, same day** (see
+[context/decisions.md](context/decisions.md), [context/classes/Roadway.md](context/classes/Roadway.md))
+-- the Myssions-side road-connection quest (registry, acceptance flow, completion ticker) is now
+fully built and calling back into this mod via four new `api.Settlemynts` methods:
+`findCoreIdForPlaceId`, `grantHighwayStakes`, `checkHighwayProgress`, `getSettlementTier`/
+`buybackUnusedHighwayStakes`. `./gradlew build` green, whole-suite (8 mods) boot-smoke-tested clean.
+**Not yet live-tested** -- no Message Board UI exists yet for a player to actually post/accept one
+of these quests through; see myssions-context's decisions.md for the full remaining-work list.
 
 See [context/classes/](context/classes/) for per-class reference.
