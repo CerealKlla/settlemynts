@@ -495,6 +495,37 @@ public final class Settlemynts {
         return Optional.empty();
     }
 
+    /**
+     * A plot's real, on-the-ground location: its Plot Config Sign's own position/dimension (every
+     * finalized plot has one, regardless of whether Blueprynts is loaded -- see {@code
+     * plotsign.PlotConfigSignSpawner}'s own doc) plus its owning settlement's display name (empty
+     * string for a natural village, which has no player-set {@code GhostTownHallCoreEntity#
+     * settlementName} to read). Added 2026-10-10 for Myssions' on-site quest retrofit -- a quest
+     * whose threat is literally at the issuing NPC's own plot (not some vague distant location) can
+     * point a player back to the real place by name, even after they've left.
+     */
+    public record PlotLocation(BlockPos pos, net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension, String settlementName) {
+    }
+
+    public static Optional<PlotLocation> findPlotLocation(ServerLevel level, UUID plotId) {
+        net.minecraft.core.GlobalPos signPos = com.github.cerealklla.settlemynts.plotsign.PlotConfigSignIndex.get(level.getServer())
+                .get(plotId).orElse(null);
+        if (signPos == null) {
+            return Optional.empty();
+        }
+        ServerLevel signLevel = level.getServer().getLevel(signPos.dimension());
+        if (signLevel == null) {
+            return Optional.empty();
+        }
+        String settlementName = "";
+        if (signLevel.getBlockEntity(signPos.pos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign
+                && sign.settlementCoreId() != null
+                && signLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core) {
+            settlementName = core.getSettlementName();
+        }
+        return Optional.of(new PlotLocation(signPos.pos(), signPos.dimension(), settlementName));
+    }
+
     private static Optional<Geometry.Polygon> findPolygonForPlot(ServerLevel level, UUID plotId) {
         AABB worldBounds = new AABB(-WORLD_SCAN_RADIUS, level.getMinY(), -WORLD_SCAN_RADIUS,
                 WORLD_SCAN_RADIUS, level.getMaxY(), WORLD_SCAN_RADIUS);
