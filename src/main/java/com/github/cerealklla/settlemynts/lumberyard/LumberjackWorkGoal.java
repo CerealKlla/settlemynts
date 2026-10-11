@@ -235,13 +235,31 @@ public class LumberjackWorkGoal extends Goal {
         return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false);
     }
 
-    /** Walks straight down through a vertical log column to its lowest (ground-level) block. */
-    private static BlockPos findTrunkBase(ServerLevel level, BlockPos topLog) {
-        BlockPos pos = topLog;
-        while (pos.getY() > level.getMinY() && level.getBlockState(pos.below()).is(BlockTags.LOGS)) {
-            pos = pos.below();
+    /**
+     * Resolves whatever log block the heightmap scan actually found down to the tree's true
+     * ground-level base -- real report, 2026-10-11: "not clearing trees when he gets within 4 blocks
+     * of the base of the tree, it seems like he is trying to get to the very top of the tree." Root
+     * cause: this used to just walk straight down the *same x,z column* looking for more logs, but
+     * the column {@code findTarget}'s heightmap scan hits isn't always the trunk's own column -- it
+     * can land on a branch log sitting out over the canopy, which (for most vanilla tree shapes)
+     * isn't directly above another log at all, just leaves. Walking straight down from a branch
+     * stopped immediately, handing back that elevated branch position as "the base" -- so the worker
+     * was correctly arriving at the real ground-level trunk but being told to reach a target still
+     * floating up in the canopy, which it could never get within harvest range of.
+     *
+     * <p>Fixed by flood-filling the whole connected log structure first (same {@link
+     * #findConnectedLogs} harvest itself already uses -- which member log it's started from doesn't
+     * matter, connectivity finds the same full set either way) and taking its lowest log as the real
+     * base, rather than only ever looking straight down from one specific column.
+     */
+    private static BlockPos findTrunkBase(ServerLevel level, BlockPos anyLog) {
+        BlockPos lowest = anyLog;
+        for (BlockPos pos : findConnectedLogs(level, anyLog)) {
+            if (pos.getY() < lowest.getY()) {
+                lowest = pos;
+            }
         }
-        return pos;
+        return lowest;
     }
 
     /**
