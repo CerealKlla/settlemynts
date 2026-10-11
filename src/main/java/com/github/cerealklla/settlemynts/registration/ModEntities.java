@@ -100,6 +100,20 @@ public final class ModEntities {
             MobCategory.MISC,
             builder -> builder.sized(0.5f, 1.0f));
 
+    // Inter-settlement Highway Stakes (added 2026-10-11) -- same hitbox shapes as their
+    // intra-settlement Roadway counterparts above; see roadway.HighwayStakeEntity's own doc.
+    public static final DeferredHolder<EntityType<?>, EntityType<com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity>> HIGHWAY_STAKE = ENTITIES.registerEntityType(
+            "highway_stake",
+            com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(1.0f, 1.0f));
+
+    public static final DeferredHolder<EntityType<?>, EntityType<com.github.cerealklla.settlemynts.roadway.HighwayConnectionMarkerEntity>> HIGHWAY_CONNECTION_MARKER = ENTITIES.registerEntityType(
+            "highway_connection_marker",
+            com.github.cerealklla.settlemynts.roadway.HighwayConnectionMarkerEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(0.5f, 1.0f));
+
     public static final DeferredHolder<EntityType<?>, EntityType<GhostPerimeterFencePostEntity>> GHOST_PERIMETER_FENCE_POST = ENTITIES.registerEntityType(
             "ghost_perimeter_fence_post",
             GhostPerimeterFencePostEntity::new,

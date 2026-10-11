@@ -246,58 +246,9 @@ public class GuardPatrolAreaGoal extends Goal {
         return nearest;
     }
 
-    /** Unweighted BFS over {@link RoadwayStakeEntity#getConnectionIds()} -- empty if {@code goal} isn't reachable from {@code start} (a disconnected network component). */
+    /** Unweighted BFS over {@link RoadwayStakeEntity#getConnectionIds()} -- empty if {@code goal} isn't reachable from {@code start} (a disconnected network component). Delegates to the shared {@link com.github.cerealklla.settlemynts.roadway.RoadwayGraph}, added 2026-10-11 so the new Highway Stake feature can reuse the exact same algorithm. */
     private static List<RoadwayStakeEntity> findStakePath(List<RoadwayStakeEntity> stakes, RoadwayStakeEntity start, RoadwayStakeEntity goal) {
-        if (start.getUUID().equals(goal.getUUID())) {
-            return List.of(start);
-        }
-        Map<UUID, RoadwayStakeEntity> byId = new HashMap<>();
-        for (RoadwayStakeEntity stake : stakes) {
-            byId.put(stake.getUUID(), stake);
-        }
-        Map<UUID, UUID> prev = new HashMap<>();
-        Set<UUID> visited = new HashSet<>();
-        Deque<UUID> queue = new ArrayDeque<>();
-        visited.add(start.getUUID());
-        queue.add(start.getUUID());
-        while (!queue.isEmpty()) {
-            UUID current = queue.poll();
-            if (current.equals(goal.getUUID())) {
-                break;
-            }
-            RoadwayStakeEntity currentStake = byId.get(current);
-            if (currentStake == null) {
-                continue;
-            }
-            for (UUID next : currentStake.getConnectionIds()) {
-                if (visited.add(next)) {
-                    prev.put(next, current);
-                    queue.add(next);
-                }
-            }
-        }
-        if (!visited.contains(goal.getUUID())) {
-            return List.of();
-        }
-        List<UUID> idPath = new ArrayList<>();
-        UUID current = goal.getUUID();
-        idPath.add(current);
-        while (!current.equals(start.getUUID())) {
-            current = prev.get(current);
-            if (current == null) {
-                return List.of(); // shouldn't happen given the visited check above, but don't trust it blindly
-            }
-            idPath.add(current);
-        }
-        Collections.reverse(idPath);
-        List<RoadwayStakeEntity> result = new ArrayList<>(idPath.size());
-        for (UUID id : idPath) {
-            RoadwayStakeEntity stake = byId.get(id);
-            if (stake != null) {
-                result.add(stake);
-            }
-        }
-        return result;
+        return com.github.cerealklla.settlemynts.roadway.RoadwayGraph.shortestPath(stakes, start, goal);
     }
 
     private BlockPos pickTarget(ServerLevel level, Geometry.Polygon area) {

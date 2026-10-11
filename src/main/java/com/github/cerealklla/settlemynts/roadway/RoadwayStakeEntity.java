@@ -59,7 +59,7 @@ import net.minecraft.world.phys.Vec3;
  * restoring each snapped edge's exact original terrain. The OTHER stake on each snapped connection
  * is never deleted -- it just loses that one connection and keeps all its others.
  */
-public class RoadwayStakeEntity extends Display.BlockDisplay {
+public class RoadwayStakeEntity extends Display.BlockDisplay implements StakeNode {
 
     private static final double SEARCH_RADIUS_BLOCKS = 500.0;
 

@@ -97,6 +97,8 @@ public class SettlemyntsModClient {
         // Connection markers (added 2026-10-06, "make it obvious which stakes are connected") --
         // same shared renderer, same ghost-torch block state as GHOST_ROAD_ACCESS_PREVIEW below.
         event.registerEntityRenderer(ModEntities.ROADWAY_CONNECTION_MARKER.get(), GhostBlockDisplayRenderer::new);
+        event.registerEntityRenderer(ModEntities.HIGHWAY_STAKE.get(), GhostBlockDisplayRenderer::new);
+        event.registerEntityRenderer(ModEntities.HIGHWAY_CONNECTION_MARKER.get(), GhostBlockDisplayRenderer::new);
         // RopeAnchorEntity never has a block state (see its own doc) -- reused purely so it has SOME
         // renderer registered; its only real visual contribution is the generic vanilla leash line,
         // which renders independently of this.

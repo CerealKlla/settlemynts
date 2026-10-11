@@ -81,6 +81,16 @@ public final class ModItems {
                     .stacksTo(1)
                     .setId(ResourceKey.create(Registries.ITEM, id))));
 
+    // Inter-settlement Highway Stakes (added 2026-10-11) -- a finite, stackable, consumed-on-use
+    // copy of ROADWAY_STAKE above; see roadway.HighwayStakeItem's own doc for why it isn't the same
+    // item. Stack size matches the largest plausible grant (see Myssions' own road-quest stake-count
+    // formula) with headroom.
+    public static final DeferredItem<com.github.cerealklla.settlemynts.roadway.HighwayStakeItem> HIGHWAY_STAKE = ITEMS.register(
+            "highway_stake",
+            id -> new com.github.cerealklla.settlemynts.roadway.HighwayStakeItem(new Item.Properties()
+                    .stacksTo(256)
+                    .setId(ResourceKey.create(Registries.ITEM, id))));
+
     public static final DeferredRegister.DataComponents DATA_COMPONENTS =
             DeferredRegister.createDataComponents(Registries.DATA_COMPONENT_TYPE, SettlemyntsMod.MODID);
 
@@ -128,6 +138,25 @@ public final class ModItems {
     // lifetime (same shape as TOWN_HALL_CORE_LOCATOR_CORE_ID above).
     public static final DeferredHolder<DataComponentType<?>, DataComponentType<UUID>> ROADWAY_STAKE_OWNER_CORE_ID =
             DATA_COMPONENTS.registerComponentType("roadway_stake_owner_core_id", builder -> builder
+                    .persistent(UUIDUtil.CODEC)
+                    .networkSynchronized(UUIDUtil.STREAM_CODEC));
+
+    // Highway Stakes (added 2026-10-11) -- which Myssions road-connection quest instance this stack
+    // is bound to, plus each end's settlement core (either may be absent -- a natural settlement has
+    // no real core; see roadway.HighwayStakeEntity's own doc). Three separate components rather than
+    // one combined record, matching this file's own existing one-component-per-field convention.
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<UUID>> HIGHWAY_STAKE_INSTANCE_ID =
+            DATA_COMPONENTS.registerComponentType("highway_stake_instance_id", builder -> builder
+                    .persistent(UUIDUtil.CODEC)
+                    .networkSynchronized(UUIDUtil.STREAM_CODEC));
+
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<UUID>> HIGHWAY_STAKE_SETTLEMENT_CORE_A =
+            DATA_COMPONENTS.registerComponentType("highway_stake_settlement_core_a", builder -> builder
+                    .persistent(UUIDUtil.CODEC)
+                    .networkSynchronized(UUIDUtil.STREAM_CODEC));
+
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<UUID>> HIGHWAY_STAKE_SETTLEMENT_CORE_B =
+            DATA_COMPONENTS.registerComponentType("highway_stake_settlement_core_b", builder -> builder
                     .persistent(UUIDUtil.CODEC)
                     .networkSynchronized(UUIDUtil.STREAM_CODEC));
 }
