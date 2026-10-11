@@ -71,7 +71,14 @@ public final class PlannedInventoryClearing {
         long start = System.nanoTime();
         List<Participant> participants = new ArrayList<>();
         for (PlotRecord plot : plots) {
-            if (plot.shopId().isEmpty() || plot.plannedInventory().isEmpty()) {
+            // Only exclude a plot that can do neither side of a trade -- a shop with real listings but
+            // a completely blank Planned Inventory (never visited that screen at all) must still be
+            // eligible as a seller, same as settleResource's own "no target = sell whole stock" logic
+            // below already intends (2026-10-10 fix) but could never reach, since this gate used to
+            // require BOTH a shop AND at least one Planned Inventory target just to enter the pass at
+            // all. Real report, 2026-10-11: items listed and stocked via Manage Shop, no Planned
+            // Inventory configured, never got auto-bought by another plot's real deficit.
+            if (plot.shopId().isEmpty() && plot.plannedInventory().isEmpty()) {
                 continue;
             }
             participants.add(new Participant(plot, Settlemynts.resolvePlotBoxes(level, plot.plotId())));
