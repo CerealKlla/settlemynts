@@ -195,4 +195,15 @@ on Myssions (`bridge.MyssionsQuestBridge`) lets an NPC's quest-board offer or in
 delivery show up and be accepted/turned in from this same menu. `./gradlew build` green in both
 repos, whole-suite boot-smoke-tested clean. **Not yet live-tested or deployed.**
 
+**"Press H" chat menu rebuilt around a real quest picker + "Complete Quest," same day** (see
+[context/classes/PlotConfigSign.md](context/classes/PlotConfigSign.md)'s own section) — two more
+real live-test corrections: quest instances now round-trip a real hidden Myssions-side UUID instead
+of a definition id (so two separate acceptances of the same quest never collide), and "I've got a
+job that needs doing" now opens a real `client.QuestListScreen` picker (one button per active quest
+by name, plus the board's new offer) instead of showing one ambiguous job — each leads to its own
+sub-screen (`QuestCompleteScreen`/`QuestAcceptScreen`) with a real action button.
+`plotsign.QuestOfferInfo`/`AcceptOrTurnInQuestPayload`/`client.QuestOfferScreen` are gone, replaced
+by `QuestMenuInfo`/`AcceptBoardOfferPayload`/`CompleteQuestPayload`. `./gradlew build` green in both
+repos, whole-suite boot-smoke-tested clean. **Not yet live-tested or deployed.**
+
 See [context/classes/](context/classes/) for per-class reference.

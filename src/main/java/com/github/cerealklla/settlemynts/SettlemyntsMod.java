@@ -492,9 +492,13 @@ public class SettlemyntsMod {
 
         // Quest menu inside the same "Press H" chat screen (2026-10-10) -- see
         // bridge.MyssionsQuestBridge's own doc.
-        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AcceptOrTurnInQuestPayload.TYPE,
-                com.github.cerealklla.settlemynts.plotsign.AcceptOrTurnInQuestPayload.STREAM_CODEC,
-                (payload, context) -> acceptOrTurnInQuest(payload, context));
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AcceptBoardOfferPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.AcceptBoardOfferPayload.STREAM_CODEC,
+                (payload, context) -> acceptBoardOffer(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.CompleteQuestPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.CompleteQuestPayload.STREAM_CODEC,
+                (payload, context) -> completeQuest(payload, context));
 
         // Planned Inventory (2026-10-09) -- see zone.PlannedInventoryClearing's own doc.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload.TYPE,
@@ -1086,16 +1090,15 @@ public class SettlemyntsMod {
         PlotRecord plot = resolved.get().plot();
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
-                buildQuestOffer(player, plot)));
+                buildQuestMenu(player, plot)));
     }
 
     /**
-     * "I've got a job that needs doing" button on {@code client.ChatMenuScreen} (2026-10-10,
-     * explicit user request: "these quests should show up in the Press H menu for the NPCs") --
-     * accepts a fresh board offer, or turns in a ready delivery, exactly like a shift+right-click on
-     * the quest giver itself. See {@code bridge.MyssionsQuestBridge#interact}'s own doc.
+     * "I've got a job that needs doing" -> the board's new offer -> "Accept Quest" on {@code
+     * client.QuestAcceptScreen} (2026-10-10). See {@code bridge.MyssionsQuestBridge#acceptBoardOffer}'s
+     * own doc.
      */
-    private static void acceptOrTurnInQuest(com.github.cerealklla.settlemynts.plotsign.AcceptOrTurnInQuestPayload payload, IPayloadContext context) {
+    private static void acceptBoardOffer(com.github.cerealklla.settlemynts.plotsign.AcceptBoardOfferPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
@@ -1106,19 +1109,42 @@ public class SettlemyntsMod {
         }
         PlotRecord plot = resolved.get().plot();
         if (com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
-            com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.interact(player, plot.plotId(), plot.zoneTypeId().toString());
+            com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.acceptBoardOffer(player, plot.plotId());
         }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
-                buildQuestOffer(player, plot)));
+                buildQuestMenu(player, plot)));
     }
 
-    /** Per-player quest-giver preview for {@link #requestShopWishlist}/{@link #sellToShopWishlist}/{@link #acceptOrTurnInQuest}'s own payload -- empty if Myssions isn't loaded. */
-    private static java.util.Optional<com.github.cerealklla.settlemynts.plotsign.QuestOfferInfo> buildQuestOffer(ServerPlayer player, PlotRecord plot) {
-        if (!com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
-            return java.util.Optional.empty();
+    /**
+     * "I've got a job that needs doing" -> pick an active quest by name -> "Complete Quest" on
+     * {@code client.QuestCompleteScreen} (2026-10-10, explicit user spec: "a sub-menu [with] the
+     * option to complete the quest"). See {@code bridge.MyssionsQuestBridge#completeQuest}'s own doc.
+     */
+    private static void completeQuest(com.github.cerealklla.settlemynts.plotsign.CompleteQuestPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
         }
-        return com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.preview(player, plot.plotId(), plot.zoneTypeId().toString());
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, payload.anchor());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        if (com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
+            com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.completeQuest(player, payload.instanceId());
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
+                payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
+                buildQuestMenu(player, plot)));
+    }
+
+    /** Per-player quest-giver menu for {@link #requestShopWishlist}/{@link #sellToShopWishlist}/{@link #acceptBoardOffer}/{@link #completeQuest}'s own payload -- empty if Myssions isn't loaded. */
+    private static com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo buildQuestMenu(ServerPlayer player, PlotRecord plot) {
+        if (!com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
+            return com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo.EMPTY;
+        }
+        return com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.getMenu(player, plot.plotId(), plot.zoneTypeId().toString());
     }
 
     /** Shared row-assembly for {@link #requestShopWishlist} and {@link #sellToShopWishlist}'s own post-sale refresh. */
@@ -1238,7 +1264,7 @@ public class SettlemyntsMod {
         sendShopGoldUpdate(player, serverLevel, plot.plotId());
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
-                buildQuestOffer(player, plot)));
+                buildQuestMenu(player, plot)));
     }
 
     /**

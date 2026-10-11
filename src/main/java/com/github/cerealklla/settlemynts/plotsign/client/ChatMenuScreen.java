@@ -15,9 +15,10 @@ import net.minecraft.network.chat.Component;
  *   <li>"I need a few things" -- present whenever this NPC's shop has an unmet Planned Inventory
  *   deficit (see {@code zone.ShopWishlist}'s own doc); opens {@link WishlistScreen} with the data
  *   already fetched for this screen, no extra round trip.</li>
- *   <li>"I've got a job that needs doing" -- present whenever Myssions has a quest-board offer or
- *   in-progress delivery for this NPC (see {@code bridge.MyssionsQuestBridge}'s own doc); opens
- *   {@link QuestOfferScreen}, same no-extra-round-trip shape.</li>
+ *   <li>"I've got a job that needs doing" -- present whenever Myssions has at least one active
+ *   quest or a board offer for this NPC's pool (see {@code bridge.MyssionsQuestBridge}'s own doc);
+ *   opens {@link QuestListScreen} (same no-extra-round-trip shape), which lets the player pick a
+ *   specific active quest by name to complete, or accept the board's offer.</li>
  * </ul>
  * The floating "!" nameplate ({@code plotsign.PlotShopProximityTicker#updateWishlistNameplate})
  * shows whenever either is present.
@@ -49,7 +50,7 @@ public final class ChatMenuScreen extends Screen {
         int y = centerY - 30;
 
         boolean hasWishlist = !data.entries().isEmpty();
-        boolean hasQuest = data.questOffer().isPresent();
+        boolean hasQuest = !data.questMenu().activeQuests().isEmpty() || data.questMenu().newOffer().isPresent();
 
         if (hasWishlist) {
             addRenderableWidget(Button.builder(Component.literal("I need a few things"), b -> onNeedThings())
@@ -74,7 +75,7 @@ public final class ChatMenuScreen extends Screen {
     }
 
     private void onJob() {
-        Minecraft.getInstance().setScreen(new QuestOfferScreen(data));
+        Minecraft.getInstance().setScreen(new QuestListScreen(data));
     }
 
     @Override
@@ -87,7 +88,7 @@ public final class ChatMenuScreen extends Screen {
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        if (data.entries().isEmpty() && data.questOffer().isEmpty()) {
+        if (data.entries().isEmpty() && data.questMenu().activeQuests().isEmpty() && data.questMenu().newOffer().isEmpty()) {
             String message = "Nothing to talk about right now.";
             graphics.text(font, message, width / 2 - font.width(message) / 2, height / 2 - 40, 0xFFAAAAAA);
         }

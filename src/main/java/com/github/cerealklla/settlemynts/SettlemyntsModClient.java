@@ -230,9 +230,9 @@ public class SettlemyntsModClient {
                 wishlistScreen.refresh(update);
             } else if (Minecraft.getInstance().screen instanceof com.github.cerealklla.settlemynts.plotsign.client.ChatMenuScreen chatMenuScreen) {
                 chatMenuScreen.refresh(update);
-            } else if (Minecraft.getInstance().screen == null
-                    || Minecraft.getInstance().screen instanceof com.github.cerealklla.settlemynts.plotsign.client.QuestOfferScreen) {
-                // First "Press H" open, or just backed off QuestOfferScreen after an Accept/Turn In --
+            } else {
+                // First "Press H" open, or just backed off any of the quest sub-screens
+                // (QuestListScreen/QuestCompleteScreen/QuestAcceptScreen) after an Accept/Complete --
                 // land back on the chat menu either way, see ChatMenuScreen's own doc.
                 Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.ChatMenuScreen(update));
             }
