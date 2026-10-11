@@ -46,9 +46,16 @@ public final class MyssionsQuestBridge {
         Myssions.acceptBoardOffer(player, plotId);
     }
 
-    /** Attempts to complete a specific active instance. */
-    public static void completeQuest(ServerPlayer player, UUID instanceId) {
-        Myssions.tryCompleteQuest(player, instanceId);
+    /**
+     * Attempts to complete a specific active instance -- true if a reward GUI was opened (or
+     * re-opened) server-side, or the instance was already fully done. The caller must NOT send a
+     * fresh {@code OpenShopWishlistPayload}/open {@code ChatMenuScreen} in that case (2026-10-11,
+     * real bug found wiring this in: Myssions' own reward-pickup GUI opens via a plain vanilla
+     * {@code player.openMenu(...)} packet, and a custom payload arriving right after it would
+     * immediately override/close that screen with the chat menu again).
+     */
+    public static boolean completeQuest(ServerPlayer player, UUID instanceId) {
+        return Myssions.tryCompleteQuest(player, instanceId);
     }
 
     /** Player-independent -- used for the global "!" nameplate, see {@code Myssions#hasPendingBoardOffer}'s own doc. */

@@ -206,4 +206,11 @@ sub-screen (`QuestCompleteScreen`/`QuestAcceptScreen`) with a real action button
 by `QuestMenuInfo`/`AcceptBoardOfferPayload`/`CompleteQuestPayload`. `./gradlew build` green in both
 repos, whole-suite boot-smoke-tested clean. **Not yet live-tested or deployed.**
 
+**Real race condition fixed: Myssions' new reward-pickup GUI vs. this mod's own chat-menu refresh,
+2026-10-11** (see [context/classes/PlotConfigSign.md](context/classes/PlotConfigSign.md)'s own
+section) — `SettlemyntsMod#completeQuest` used to always send a fresh chat-menu-refresh packet right
+after calling into Myssions, which would have instantly closed/overridden Myssions' new reward GUI
+the moment it opened. Found and fixed before ever live-testing. `./gradlew build` green. **Never
+live-tested.**
+
 See [context/classes/](context/classes/) for per-class reference.

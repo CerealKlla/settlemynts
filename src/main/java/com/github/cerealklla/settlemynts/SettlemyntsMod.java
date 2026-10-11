@@ -1131,8 +1131,16 @@ public class SettlemyntsMod {
             return;
         }
         PlotRecord plot = resolved.get().plot();
+        boolean openedRewardMenu = false;
         if (com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
-            com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.completeQuest(player, payload.instanceId());
+            openedRewardMenu = com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.completeQuest(player, payload.instanceId());
+        }
+        // A reward GUI just opened via a plain vanilla container-open packet -- must NOT send a
+        // chat-menu refresh right behind it, or the client would immediately override/close that
+        // screen with ChatMenuScreen again (real bug found live, 2026-10-11). Only still-incomplete
+        // (false) genuinely needs the usual refresh, so QuestCompleteScreen reflects the latest state.
+        if (openedRewardMenu) {
+            return;
         }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
