@@ -9,10 +9,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.tags.TagKey;
 import net.minecraft.world.Container;
 
 import com.github.cerealklla.settlemynts.api.Settlemynts;
@@ -40,10 +38,18 @@ import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
  * item's own deficit is no longer dropped, it's **translated** into its recipe's material shortfall
  * -- via {@code bridge.LyfeCraftingBridge}, only when the plot actually has a sufficiently-tiered
  * crafting structure for that recipe ("he has a crafting table capable of building them"), the same
- * tier gate {@code zone.PlotCraftingStructures}/{@code PlannedInventoryClearing} already use. A
- * resource that genuinely has no existing Planned Inventory target at all (never explicitly managed)
- * still never appears, same as before -- this only re-expresses an *existing* deficit target in terms
- * of what's actually missing to fill it, it never invents a new one.
+ * tier gate {@code zone.PlotCraftingStructures}/{@code PlannedInventoryClearing} already use.
+ *
+ * <p>**A third correction, 2026-10-11**: any Planned Inventory target that *wasn't* a currently-sold,
+ * in-deficit, craftable finished good was still being listed directly (a leftover "direct deficit"
+ * fallback) -- in practice this meant a plot's own raw-material targets (auto-seeded for NPC shops
+ * specifically to support crafting, see {@code ShopSeeding#autoPopulatePlannedInventory}) showed up
+ * in the public wishlist too, which is exactly what the previous fix above was supposed to prevent.
+ * Explicit user correction: the wishlist is **only** "components needed to craft an item the shop
+ * has listed for sale but doesn't have enough of in stock, and could craft if it had the
+ * components" -- nothing else. The "direct deficit" fallback is gone entirely; a target that isn't a
+ * sold, in-deficit, known, tier-craftable recipe contributes nothing to the wishlist at all, no
+ * matter what it is.
  */
 public final class ShopWishlist {
 
@@ -59,15 +65,14 @@ public final class ShopWishlist {
     }
 
     /**
-     * Every raw material this plot would need to buy to actually fill its own deficits, with how many
-     * units short. A deficit target the shop doesn't sell is a direct wishlist entry as-is; a deficit
-     * target it *does* sell is translated into its recipe's material shortfall instead (see class
-     * doc) -- dropped entirely if it's not a known recipe, or the plot lacks a tiered-enough crafting
-     * structure, since there's nothing a player could bring that would actually help either way.
+     * Every raw material this plot would need to buy to actually craft its way out of a real
+     * shortfall on something it sells, with how many units short. A Planned Inventory target that
+     * isn't a sold, in-deficit, known, tier-craftable recipe contributes nothing at all -- see class
+     * doc's third correction for why this is deliberately narrower than "everything in deficit."
      */
     public static List<DeficitEntry> computeDeficits(ServerLevel level, PlotRecord plot) {
         List<DeficitEntry> deficits = new ArrayList<>();
-        if (plot.plannedInventory().isEmpty()) {
+        if (plot.plannedInventory().isEmpty() || !LyfeCraftingBridge.isLoaded()) {
             return deficits;
         }
         List<Container> boxes = Settlemynts.resolvePlotBoxes(level, plot.plotId());
@@ -79,21 +84,17 @@ public final class ShopWishlist {
                         .collect(Collectors.toSet()))
                 .orElse(Set.of());
 
-        List<DeficitEntry> directDeficits = new ArrayList<>();
         Map<Identifier, Integer> materialUnitsRequired = new LinkedHashMap<>();
         int structureTier = -1; // Lazily resolved -- -1 means "not checked yet."
 
         for (PlannedInventoryTarget target : plot.plannedInventory()) {
-            ShopResource resource = target.isTag()
-                    ? ShopResource.ofTag(TagKey.create(Registries.ITEM, target.resourceKey()))
-                    : ShopResource.ofItem(target.resourceKey());
+            if (target.isTag() || !soldItemIds.contains(target.resourceKey())) {
+                continue; // Only a sold, concrete finished good can translate into a wishlist entry at all.
+            }
+            ShopResource resource = ShopResource.ofItem(target.resourceKey());
             int currentStock = ContainerWithdraw.countAvailable(boxes, resource);
             int unitsShort = target.targetCount() - currentStock;
             if (unitsShort <= 0) {
-                continue;
-            }
-            if (target.isTag() || !soldItemIds.contains(target.resourceKey()) || !LyfeCraftingBridge.isLoaded()) {
-                directDeficits.add(new DeficitEntry(resource, unitsShort));
                 continue;
             }
             Optional<LyfeCraftingBridge.RecipeInfo> recipeOpt = LyfeCraftingBridge.getRecipe(target.resourceKey());
@@ -129,7 +130,6 @@ public final class ShopWishlist {
                 deficits.add(new DeficitEntry(resource, shortfall));
             }
         }
-        deficits.addAll(directDeficits);
         return deficits;
     }
 

@@ -206,6 +206,13 @@ sub-screen (`QuestCompleteScreen`/`QuestAcceptScreen`) with a real action button
 by `QuestMenuInfo`/`AcceptBoardOfferPayload`/`CompleteQuestPayload`. `./gradlew build` green in both
 repos, whole-suite boot-smoke-tested clean. **Not yet live-tested or deployed.**
 
+**Third wishlist-scoping correction, 2026-10-11** (see
+[context/classes/PlotConfigSign.md](context/classes/PlotConfigSign.md)'s own section) — the public
+wishlist was still listing any Planned Inventory deficit that wasn't a sold/craftable finished good
+(a leftover "direct deficit" fallback), e.g. a plot's own raw-material targets. Removed entirely —
+the wishlist is now purely "components needed to craft something the shop sells but is short on."
+`./gradlew build` green. **Not yet re-confirmed live.**
+
 **Real race condition fixed: Myssions' new reward-pickup GUI vs. this mod's own chat-menu refresh,
 2026-10-11** (see [context/classes/PlotConfigSign.md](context/classes/PlotConfigSign.md)'s own
 section) — `SettlemyntsMod#completeQuest` used to always send a fresh chat-menu-refresh packet right
