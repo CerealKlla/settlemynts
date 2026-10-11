@@ -58,8 +58,13 @@ public final class MyssionsQuestBridge {
         return Myssions.tryCompleteQuest(player, instanceId);
     }
 
-    /** Player-independent -- used for the global "!" nameplate, see {@code Myssions#hasPendingBoardOffer}'s own doc. */
+    /** Player-independent -- used for the global "?" nameplate, see {@code Myssions#hasPendingBoardOffer}'s own doc. */
     public static boolean hasPendingBoardOffer(ServerLevel level, UUID plotId) {
         return Myssions.hasPendingBoardOffer(level.getServer(), plotId);
+    }
+
+    /** Player-specific -- used for the issuer NPC's personal "!" head marker, see {@code Myssions#hasUrgentPersonalBusiness}'s own doc. */
+    public static boolean hasUrgentPersonalBusiness(ServerPlayer player, UUID plotId, String zoneTypeId) {
+        return Myssions.hasUrgentPersonalBusiness(player, plotId, zoneTypeId);
     }
 }

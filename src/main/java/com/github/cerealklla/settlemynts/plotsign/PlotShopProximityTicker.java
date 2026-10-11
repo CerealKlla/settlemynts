@@ -1,8 +1,11 @@
 package com.github.cerealklla.settlemynts.plotsign;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
@@ -45,7 +48,14 @@ public final class PlotShopProximityTicker {
     private static final int CHECK_INTERVAL_TICKS = 10; // 2x/sec
     private static final int RADIUS_BLOCKS = 4;
 
+    // Wider than RADIUS_BLOCKS on purpose -- the personal "!" marker (2026-10-11) is meant to be
+    // spotted from across a plot/settlement, same rough visibility as a normal nameplate, not just
+    // once a player is already standing in interaction range. Not tied to RADIUS_BLOCKS at all; the
+    // "Press G/H" proximity trigger and this marker's own visibility are two independent concerns.
+    private static final int PERSONAL_MARKER_RADIUS_BLOCKS = 48;
+
     private final Map<UUID, ShopAnchor> lastSent = new HashMap<>();
+    private final Map<UUID, Set<Integer>> lastSentMarkers = new HashMap<>();
 
     @SubscribeEvent
     public void onPlayerTick(PlayerTickEvent.Post event) {
@@ -149,18 +159,54 @@ public final class PlotShopProximityTicker {
             lastSent.remove(playerId);
             PacketDistributor.sendToPlayer(player, new PlotShopPromptPayload(false, new ShopAnchor.Sign(BlockPos.ZERO), false));
         }
+
+        scanPersonalMarkers(player, level, center);
+    }
+
+    /**
+     * Separate, wider scan for the personal "!" head marker (2026-10-11) -- unlike everything else
+     * in this ticker, not about "what's the single nearest interactable thing," but "every NPC within
+     * normal nameplate-visibility range that this specific player personally has urgent business
+     * with." Always sends the FULL current set on change (not a diff), matching {@link
+     * PersonalQuestMarkerPayload}'s own doc -- simplest correct option, and this set is small (a
+     * handful of entities per player at most).
+     */
+    private void scanPersonalMarkers(ServerPlayer player, ServerLevel level, BlockPos center) {
+        AABB search = new AABB(center).inflate(PERSONAL_MARKER_RADIUS_BLOCKS);
+        List<Villager> candidates = level.getEntitiesOfClass(Villager.class, search,
+                v -> (v.getClass() == Villager.class && v.getPersistentData().contains(NaturalVillagePlotGenerator.PLOT_ID_TAG))
+                        || (v instanceof PlotNpc npc && npc.plotId() != null));
+
+        Set<Integer> marked = new java.util.HashSet<>();
+        for (Villager npc : candidates) {
+            ShopAnchor.Npc anchor = new ShopAnchor.Npc(npc.getId());
+            if (SettlemyntsMod.anchorHasUrgentPersonalBusiness(player, level, anchor)) {
+                marked.add(npc.getId());
+            }
+        }
+
+        UUID playerId = player.getUUID();
+        Set<Integer> previous = lastSentMarkers.get(playerId);
+        if (Objects.equals(previous, marked)) {
+            return;
+        }
+        lastSentMarkers.put(playerId, marked);
+        PacketDistributor.sendToPlayer(player, new PersonalQuestMarkerPayload(new ArrayList<>(marked)));
     }
 
     private static final net.minecraft.network.chat.Component WISHLIST_MARKER =
-            net.minecraft.network.chat.Component.literal("!").withStyle(net.minecraft.ChatFormatting.YELLOW, net.minecraft.ChatFormatting.BOLD);
+            net.minecraft.network.chat.Component.literal("?").withStyle(net.minecraft.ChatFormatting.GREEN, net.minecraft.ChatFormatting.BOLD);
 
     /**
-     * Sets/clears a plain vanilla nameplate ("!") above an NPC whose plot currently has an unmet
-     * Planned Inventory deficit (2026-10-10, "if they have needs they'd have a ! floating over their
-     * heads") -- reuses vanilla's own nametag rendering entirely, no new client rendering code
-     * needed. Public (visible to every player, not just whoever's asking), server-authoritative,
-     * computed only for NPCs this method is already iterating for proximity detection -- no
-     * additional world scanning beyond what this ticker already does every interval.
+     * Sets/clears a plain vanilla nameplate ("?") above an NPC whose plot currently has an unmet
+     * Planned Inventory deficit OR an unclaimed quest board offer (2026-10-10, "if they have needs
+     * they'd have a ! floating over their heads"; recolored/reglyphed green "?" 2026-10-11 -- the
+     * user's own correction, freeing up "!" for the new personal marker below: "Currently that
+     * results in a Golden ! and I now want a Green ?") -- reuses vanilla's own nametag rendering
+     * entirely, no new client rendering code needed. Public (visible to every player, not just
+     * whoever's asking), server-authoritative, computed only for NPCs this method is already
+     * iterating for proximity detection -- no additional world scanning beyond what this ticker
+     * already does every interval.
      */
     private static void updateWishlistNameplate(ServerLevel level, Villager npc, ShopAnchor.Npc anchor) {
         boolean hasWishlist = SettlemyntsMod.anchorHasWishlist(level, anchor);

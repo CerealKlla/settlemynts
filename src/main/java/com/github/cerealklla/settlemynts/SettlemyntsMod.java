@@ -518,6 +518,11 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState.set(payload.present(), payload.anchor(), payload.hasWishlist()));
 
+        // Personal "!" head marker (2026-10-11) -- see PersonalQuestMarkerPayload's own doc.
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.PersonalQuestMarkerPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.PersonalQuestMarkerPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientPersonalQuestMarkerState.set(payload.entityIds()));
+
         // "Distance from Stake" readout for Plot Placement Stakes/Roadway Stakes (2026-10-09).
         registrar.playToClient(com.github.cerealklla.settlemynts.founding.AnchorDistancePayload.TYPE,
                 com.github.cerealklla.settlemynts.founding.AnchorDistancePayload.STREAM_CODEC,
@@ -1545,6 +1550,28 @@ public class SettlemyntsMod {
                     PlotRecord plot = ctx.plot();
                     var menu = com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.getMenu(player, plot.plotId(), plot.zoneTypeId().toString());
                     return !menu.activeQuests().isEmpty();
+                })
+                .orElse(false);
+    }
+
+    /**
+     * Narrower than {@link #anchorHasPersonalQuestBusiness} -- true only when {@code player} has an
+     * incomplete talk milestone or a fully ready-to-turn-in quest with this specific issuer, not just
+     * "any active quest at all." Drives the issuer NPC's personal "!" head marker (2026-10-11 user
+     * spec: "a ! only visible to players who have a active Milestone to talk to them, or a quest
+     * ready to turn back in"), computed by {@code plotsign.PersonalQuestMarkerTicker} and rendered
+     * client-side via {@code plotsign.client.PersonalQuestMarkerRenderer} -- see that class's own doc
+     * for why this can't just reuse the shared "?" nameplate mechanism.
+     */
+    public static boolean anchorHasUrgentPersonalBusiness(ServerPlayer player, ServerLevel level, com.github.cerealklla.settlemynts.plotsign.ShopAnchor anchor) {
+        if (!com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
+            return false;
+        }
+        return resolveShopContext(level, anchor)
+                .map(ctx -> {
+                    PlotRecord plot = ctx.plot();
+                    return com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.hasUrgentPersonalBusiness(
+                            player, plot.plotId(), plot.zoneTypeId().toString());
                 })
                 .orElse(false);
     }

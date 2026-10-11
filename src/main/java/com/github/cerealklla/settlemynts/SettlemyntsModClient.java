@@ -50,6 +50,11 @@ import org.lwjgl.glfw.GLFW;
 @EventBusSubscriber(modid = SettlemyntsMod.MODID, value = Dist.CLIENT)
 public class SettlemyntsModClient {
     public SettlemyntsModClient(ModContainer container) {
+        // RenderNameTagEvent fires on NeoForge.EVENT_BUS (the game bus), not the mod bus the
+        // @EventBusSubscriber annotation above wires everything else in this class to -- registered
+        // here, in a client-only constructor, same reasoning as PersonalQuestMarkerRenderer's own doc.
+        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.register(
+                new com.github.cerealklla.settlemynts.plotsign.client.PersonalQuestMarkerRenderer());
     }
 
     // "Press G to open shop" (design doc Section 14a, 2026-10-05) -- "G" is free across the whole
