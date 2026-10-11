@@ -142,7 +142,8 @@ public final class PlotShopProximityTicker {
             // "Press H to chat" is NPC-only -- see this class's own doc. A sign anchor always
             // reports false here even if its own shop has a real wishlist deficit; "Press G to open
             // shop" (gated only on `nearest` being present at all, not on this flag) still works.
-            boolean canChat = nearest instanceof ShopAnchor.Npc && SettlemyntsMod.anchorHasWishlist(level, nearest);
+            boolean canChat = nearest instanceof ShopAnchor.Npc
+                    && (SettlemyntsMod.anchorHasWishlist(level, nearest) || SettlemyntsMod.anchorHasPersonalQuestBusiness(player, level, nearest));
             PacketDistributor.sendToPlayer(player, new PlotShopPromptPayload(true, nearest, canChat));
         } else {
             lastSent.remove(playerId);

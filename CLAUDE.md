@@ -206,6 +206,14 @@ sub-screen (`QuestCompleteScreen`/`QuestAcceptScreen`) with a real action button
 by `QuestMenuInfo`/`AcceptBoardOfferPayload`/`CompleteQuestPayload`. `./gradlew build` green in both
 repos, whole-suite boot-smoke-tested clean. **Not yet live-tested or deployed.**
 
+**"Press H" prompt disappeared entirely right after accepting a quest, fixed 2026-10-11** (see
+[context/classes/PlotConfigSign.md](context/classes/PlotConfigSign.md)'s own section) — prompt
+eligibility only ever checked the global board/wishlist state, never the asking player's own active
+quest, so it correctly went back to false for everyone the instant the board slot cleared on accept
+— even for the player who still needed it to turn the quest in later. New
+`anchorHasPersonalQuestBusiness`, used only for the per-player prompt. `./gradlew build` green.
+**Not yet re-confirmed live.**
+
 **Third wishlist-scoping correction, 2026-10-11** (see
 [context/classes/PlotConfigSign.md](context/classes/PlotConfigSign.md)'s own section) — the public
 wishlist was still listing any Planned Inventory deficit that wasn't a sold/craftable finished good

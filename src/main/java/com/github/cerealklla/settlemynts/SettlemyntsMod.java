@@ -1523,6 +1523,32 @@ public class SettlemyntsMod {
                 .orElse(false);
     }
 
+    /**
+     * Same as {@link #anchorHasWishlist}, plus {@code player}'s own active/awaiting-pickup quests
+     * from this NPC's pool -- real bug found live, 2026-10-11: "I took a quest from an NPC but after
+     * accepting the quest his 'H' menu went away... I came back... with the required proof but his
+     * H menu is still gone so I can't turn it in." Root cause: the board slot clears the instant a
+     * quest is accepted, so the global, player-independent {@link #anchorHasWishlist} check (which
+     * only ever looks at the board/wishlist, never a specific player's own quest state) correctly
+     * went back to false for everyone -- but the player who'd just accepted it still needed "Press H"
+     * to turn it in later, and had no other way to reach it. Used only for the per-player "Press H to
+     * chat" prompt itself ({@code plotsign.PlotShopProximityTicker}) -- the floating "!" nameplate
+     * stays purely {@link #anchorHasWishlist}, since a nameplate is shared by every viewer and can't
+     * represent "player X personally has unfinished business here."
+     */
+    public static boolean anchorHasPersonalQuestBusiness(ServerPlayer player, ServerLevel level, com.github.cerealklla.settlemynts.plotsign.ShopAnchor anchor) {
+        if (!com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
+            return false;
+        }
+        return resolveShopContext(level, anchor)
+                .map(ctx -> {
+                    PlotRecord plot = ctx.plot();
+                    var menu = com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.getMenu(player, plot.plotId(), plot.zoneTypeId().toString());
+                    return !menu.activeQuests().isEmpty();
+                })
+                .orElse(false);
+    }
+
     private static java.util.Optional<PlotRecordAndCore> resolvePlotForManage(ServerLevel level, net.minecraft.core.BlockPos signPos, UUID playerId) {
         if (!(level.getBlockEntity(signPos) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
                 || sign.settlementCoreId() == null
