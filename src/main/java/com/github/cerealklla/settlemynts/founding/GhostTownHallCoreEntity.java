@@ -3,6 +3,7 @@ package com.github.cerealklla.settlemynts.founding;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -167,6 +168,20 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
 
     public Long getCartographyrCoreEntityId() {
         return cartographyrCoreEntityId;
+    }
+
+    // Same large-AABB "it's never removed, only (rarely) moved" world scan shape as
+    // founding.TownHallCoreRelocatorItem#findCore -- no chunk-independent settlement index exists.
+    private static final double WORLD_SCAN_RADIUS = 3.0E7;
+
+    /** Finds the live core entity whose own registered {@link #getCartographyrEntityId()} matches {@code placeId} -- added 2026-10-11 for the inter-settlement Highway Stake feature, which only ever has a Cartographyr placeId to start from (settlements are keyed by it, not a Settlemynts UUID). Empty if no such core is currently loaded (chunk-load-dependent, same limitation as every other world scan in this mod) or {@code placeId} belongs to a natural (NPC-owned) settlement, which has no real core entity at all. */
+    public static Optional<GhostTownHallCoreEntity> findByCartographyrEntityId(ServerLevel level, long placeId) {
+        net.minecraft.world.phys.AABB searchBox = new net.minecraft.world.phys.AABB(
+                -WORLD_SCAN_RADIUS, level.getMinY(), -WORLD_SCAN_RADIUS,
+                WORLD_SCAN_RADIUS, level.getMaxY(), WORLD_SCAN_RADIUS);
+        return level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), searchBox,
+                core -> core.getCartographyrEntityId() != null && core.getCartographyrEntityId() == placeId)
+                .stream().findFirst();
     }
 
     public void setCartographyrCoreEntityId(long cartographyrCoreEntityId) {

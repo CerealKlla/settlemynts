@@ -570,4 +570,40 @@ public final class Settlemynts {
         }
         return false;
     }
+
+    // --- Inter-settlement Highway Stake support (added 2026-10-11, for Myssions' new road-
+    // connection quest -- see roadway.HighwayQuestSupport for the real implementation). Settlements
+    // are identified by their Cartographyr placeId here, not a Settlemynts UUID, since Myssions
+    // only ever has the former (a settlement's canonical cross-mod identity).
+
+    /** The live settlement core for a Cartographyr-registered settlement, if one currently exists and is loaded -- empty for a natural (NPC-owned) settlement, which has none. */
+    public static Optional<UUID> findCoreIdForPlaceId(ServerLevel level, long placeId) {
+        return com.github.cerealklla.settlemynts.roadway.HighwayQuestSupport.findCoreIdForPlaceId(level, placeId);
+    }
+
+    /** Grants {@code player} a fresh Highway Stake stack correctly tagged for a road-connection quest instance between two settlements. Either core id may be absent. */
+    public static void grantHighwayStakes(net.minecraft.server.level.ServerPlayer player, UUID instanceId,
+                                           Optional<UUID> coreIdA, Optional<UUID> coreIdB, int tier, int count) {
+        com.github.cerealklla.settlemynts.roadway.HighwayQuestSupport.grantHighwayStakes(player, instanceId, coreIdA, coreIdB, tier, count);
+    }
+
+    /** Removes and counts every remaining Highway Stake item tagged with {@code instanceId} from the player's inventory -- the buyback payout at road completion. */
+    public static int buybackUnusedHighwayStakes(net.minecraft.server.level.ServerPlayer player, UUID instanceId) {
+        return com.github.cerealklla.settlemynts.roadway.HighwayQuestSupport.buybackUnusedStakes(player, instanceId);
+    }
+
+    /** Live progress of an in-progress road-connection instance's Highway Stake network -- see {@code roadway.HighwayQuestSupport.HighwayProgress}'s own doc. */
+    public static com.github.cerealklla.settlemynts.roadway.HighwayQuestSupport.HighwayProgress checkHighwayProgress(
+            ServerLevel level, UUID instanceId, BlockPos nearHint, long placeIdA, long placeIdB) {
+        return com.github.cerealklla.settlemynts.roadway.HighwayQuestSupport.checkProgress(level, instanceId, nearHint, placeIdA, placeIdB);
+    }
+
+    /** The Settlement Tier of a Cartographyr-registered settlement -- the average of its own plot tiers (see {@code roadway.SettlementTierResolver}). {@code 1} if the settlement can't currently be resolved to a live plot list at all (an unloaded or natural settlement with no tracked plots). */
+    public static int getSettlementTier(ServerLevel level, long placeId) {
+        Optional<UUID> coreId = findCoreIdForPlaceId(level, placeId);
+        if (coreId.isPresent() && level.getEntity(coreId.get()) instanceof GhostTownHallCoreEntity core) {
+            return com.github.cerealklla.settlemynts.roadway.SettlementTierResolver.averageTier(core.getPlots());
+        }
+        return 1;
+    }
 }
