@@ -280,7 +280,7 @@ public final class ShopSeeding {
         List<Container> plotBoxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plot.plotId());
         for (SeedListing seed : seedListings) {
             if (!tiered) {
-                YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), seed.pricePerUnit());
+                YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), effectivePrice(level, seed));
             }
             if (plotBoxes.isEmpty()) {
                 continue;
@@ -395,7 +395,7 @@ public final class ShopSeeding {
             if (itemId.isEmpty() || alreadyConfigured.contains(itemId.get())) {
                 continue;
             }
-            YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), seed.pricePerUnit());
+            YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), effectivePrice(level, seed));
             alreadyConfigured.add(itemId.get());
         }
 
@@ -417,7 +417,7 @@ public final class ShopSeeding {
         int pickCount = eligibleNewThisTier.isEmpty() ? 0 : Math.max(1, (eligibleNewThisTier.size() + 1) / 2);
         for (int i = 0; i < pickCount; i++) {
             SeedListing seed = eligibleNewThisTier.get(i);
-            YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), seed.pricePerUnit());
+            YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), effectivePrice(level, seed));
         }
 
         // 3. Planned Inventory: 1 of every item at this tier and below, additive-only.
@@ -448,14 +448,38 @@ public final class ShopSeeding {
      * yet. Never applied automatically; the row only becomes a real listing if the owner leaves (or
      * types) a price and clicks "Save Changes" -- see {@link #applyCatalog}'s own doc for why this
      * replaced the old always-on auto-listing behavior.
+     *
+     * <p><b>Prefers the recipe-derived price, 2026-10-11</b> (explicit user request: "this is how all
+     * brand new NPC shops should default to going forward") -- see {@link #effectivePrice}'s own doc.
      */
     public static int suggestedPriceFor(ServerLevel level, PlotRecord plot, BlockPos plotAnchor, ShopResource resource) {
         for (SeedListing seed : catalogSeedListings(level, plot, plotAnchor)) {
             if (sameResource(seed.listingResource(), resource)) {
-                return seed.pricePerUnit();
+                return effectivePrice(level, seed);
             }
         }
         return 0;
+    }
+
+    /**
+     * The price a freshly-seeded listing should actually use -- {@code api.Yconomics#getDerivedPrice}
+     * (the recipe-derived "what is this item actually worth" engine, {@code
+     * price.PriceDerivation}'s own doc) when it has resolved something for this item, falling back to
+     * the catalog's own hand-authored {@link SeedListing#pricePerUnit()} only when the item has no
+     * derivable recipe relationship at all (a genuinely recipe-less decorative/rare catalog entry) or
+     * {@code /yconomics recalculateprices} has never been run on this server. Explicit user spec,
+     * 2026-10-11: the derived price is the new default for brand-new NPC shops and plots going
+     * forward -- this deliberately does **not** retroactively touch any already-placed listing
+     * (nothing here is called outside the normal seed-a-new-plot/tier-up paths).
+     */
+    private static int effectivePrice(ServerLevel level, SeedListing seed) {
+        Optional<Identifier> itemId = seed.resource().flatMap(ShopResource::itemId);
+        if (itemId.isEmpty()) {
+            return seed.pricePerUnit(); // Stack-backed (e.g. a Lyfe Research Note) -- no single item id to derive from.
+        }
+        return YconomicsShopBridge.isAvailable()
+                ? YconomicsShopBridge.getDerivedPrice(level, itemId.get()).orElse(seed.pricePerUnit())
+                : seed.pricePerUnit();
     }
 
     /**

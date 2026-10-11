@@ -57,6 +57,35 @@ public final class PlotShopProximityTicker {
     private final Map<UUID, ShopAnchor> lastSent = new HashMap<>();
     private final Map<UUID, Set<Integer>> lastSentMarkers = new HashMap<>();
 
+    // Real lag source found 2026-10-11 via [LagDiagnostics] ("PlotShopProximityTicker.onPlayerTick
+    // took 109-121ms"): scanPersonalMarkers' PERSONAL_MARKER_RADIUS_BLOCKS (48, far wider than the
+    // 4-block main scan) could sweep many NPCs at once, and anchorHasUrgentPersonalBusiness is a real
+    // expensive call (walks into Myssions' getQuestGiverMenu, which iterates a player's entire quest
+    // history and re-checks milestone completion, including real inventory scans for deliver-style
+    // quests) -- run uncached, per NPC, per player, every CHECK_INTERVAL_TICKS (twice a second). This
+    // is purely a cosmetic head-marker, which doesn't need sub-second freshness, so each (player, NPC)
+    // pair's result is now cached for PERSONAL_BUSINESS_CACHE_TTL_TICKS instead of recomputed every
+    // scan -- same "don't need perfect freshness, just don't recompute every tick" reasoning
+    // ShopWishlistCache already applies to the plot-wishlist side of this same ticker.
+    private static final long PERSONAL_BUSINESS_CACHE_TTL_TICKS = 60; // 3 seconds.
+    private record BusinessKey(UUID playerId, int entityId) {
+    }
+    private record CachedBusiness(boolean hasUrgentBusiness, long expiresAtGameTime) {
+    }
+    private final Map<BusinessKey, CachedBusiness> personalBusinessCache = new HashMap<>();
+
+    private boolean hasUrgentPersonalBusinessCached(ServerPlayer player, ServerLevel level, ShopAnchor.Npc anchor) {
+        BusinessKey key = new BusinessKey(player.getUUID(), anchor.entityId());
+        long now = level.getGameTime();
+        CachedBusiness cached = personalBusinessCache.get(key);
+        if (cached != null && cached.expiresAtGameTime() > now) {
+            return cached.hasUrgentBusiness();
+        }
+        boolean result = SettlemyntsMod.anchorHasUrgentPersonalBusiness(player, level, anchor);
+        personalBusinessCache.put(key, new CachedBusiness(result, now + PERSONAL_BUSINESS_CACHE_TTL_TICKS));
+        return result;
+    }
+
     @SubscribeEvent
     public void onPlayerTick(PlayerTickEvent.Post event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) {
@@ -180,7 +209,7 @@ public final class PlotShopProximityTicker {
         Set<Integer> marked = new java.util.HashSet<>();
         for (Villager npc : candidates) {
             ShopAnchor.Npc anchor = new ShopAnchor.Npc(npc.getId());
-            if (SettlemyntsMod.anchorHasUrgentPersonalBusiness(player, level, anchor)) {
+            if (hasUrgentPersonalBusinessCached(player, level, anchor)) {
                 marked.add(npc.getId());
             }
         }

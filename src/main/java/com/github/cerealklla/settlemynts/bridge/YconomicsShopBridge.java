@@ -104,6 +104,15 @@ public final class YconomicsShopBridge {
         return com.github.cerealklla.yconomics.shop.ShopPricing.effectiveSellPayout(sellPricePerUnit, bonusFraction);
     }
 
+    /**
+     * The recipe-derived minimum price for {@code itemId}, if {@code /yconomics recalculateprices}
+     * has ever been run -- see {@code api.Yconomics#getDerivedPrice}'s own doc. Empty if it hasn't
+     * been run, or the item has no derivable recipe relationship at all.
+     */
+    public static Optional<Integer> getDerivedPrice(ServerLevel level, net.minecraft.resources.Identifier itemId) {
+        return Yconomics.getDerivedPrice(level, itemId);
+    }
+
     /** The buyer's own Gold Nugget balance (loose inventory + Coin Purse) -- see {@code api.Yconomics#getNuggetBalance}. */
     public static int getNuggetBalance(Player player) {
         return Yconomics.getNuggetBalance(player);
