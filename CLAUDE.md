@@ -184,4 +184,15 @@ A fourth issue (already-placed Tier 1 road cells keep stale lighting computed be
 
 **Town Hall Tier road progression replaced with an event trigger, un-fixed Town Hall "Ancestors" naming, 2026-10-10** — real correction: "there should be no ticker for this at all. A player manually upgrades the PLOT tier (not building a new building), and that should automatically improve all the roads and enforce new roads match the new tier." `RoadwayTierTicker` (the 5-second poll scanning every settlement's Town Hall for a Tier change) deleted outright; its repaint logic moved into a plain `roadway.RoadwayRetier#repaintSettlementRoads`, called directly from the "Upgrade Plot" handler the instant a Town Hall plot's own Tier is raised — the only place that value can ever change, so there's nothing left to poll for. Separately, the "Ancestors" Town Hall Blueprint set on Production had a stale off-by-one naming bug from the earlier T0-T4→T1-T5 renumbering (the internal `tier` field was correct, but each Blueprint's own `name` field and filename still said one Tier lower, e.g. the real Tier 2 file displayed as "Town Hall Tier 1") — renamed all five to match their real tier, and deleted a stray, out-of-range "Tier 6" entry (confirmed only T1-T5 should exist). `./gradlew build` green. **Not yet live-tested** (both fixes applied directly to Production's live blueprint store and code, pending redeploy/retest).
 
+**"Press H" chat menu reworked, NPC-only, now surfaces Myssions quests, 2026-10-10** (see
+[context/classes/PlotConfigSign.md](context/classes/PlotConfigSign.md)'s "Chat Menu + Quest Menu"
+section) — two explicit user corrections: the wishlist chat prompt is now NPC-only (a Plot Config
+Sign could previously also trigger it; that loop in `PlotShopProximityTicker` is deleted), and "Press
+H" now opens an intermediate `client.ChatMenuScreen` with up to two independent buttons ("I need a
+few things" -> the existing Wishlist screen, "I've got a job that needs doing" -> new
+`client.QuestOfferScreen`) instead of jumping straight to the wishlist. New optional soft dependency
+on Myssions (`bridge.MyssionsQuestBridge`) lets an NPC's quest-board offer or in-progress
+delivery show up and be accepted/turned in from this same menu. `./gradlew build` green in both
+repos, whole-suite boot-smoke-tested clean. **Not yet live-tested or deployed.**
+
 See [context/classes/](context/classes/) for per-class reference.

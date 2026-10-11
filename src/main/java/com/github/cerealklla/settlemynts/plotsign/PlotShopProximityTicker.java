@@ -13,24 +13,28 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.npc.villager.Villager;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * "Walk within range of a shop-eligible Plot Config Sign, or a natural village's own trading
- * Villager" prompt (design doc Section 14a, added 2026-10-05; Villager case added 2026-10-08, Part C
- * of the "Natural settlements..." plan). Every {@value #CHECK_INTERVAL_TICKS} ticks, scans a small
- * radius around each online player for whichever's nearest, and pushes a {@link
- * PlotShopPromptPayload} to the client -- but only when the nearest-found anchor changes, not every
- * scan, so the client isn't flooded with redundant packets while standing still next to one.
+ * "Walk within range of a shop-eligible NPC" prompt (design doc Section 14a, added 2026-10-05;
+ * Villager case added 2026-10-08, Part C of the "Natural settlements..." plan). Every {@value
+ * #CHECK_INTERVAL_TICKS} ticks, scans a small radius around each online player for whichever's
+ * nearest, and pushes a {@link PlotShopPromptPayload} to the client -- but only when the
+ * nearest-found anchor changes, not every scan, so the client isn't flooded with redundant packets
+ * while standing still next to one.
+ *
+ * <p><b>NPC-only, deliberately</b> (corrected 2026-10-10 -- an earlier version also scanned nearby
+ * Plot Config Signs for this same prompt; explicit user correction: "the 'Chat' menu... is only
+ * supposed to be accessible from the NPC itself"). A sign's own right-click Main Menu (Enter
+ * Shop/Manage Shop) is untouched by this change -- that's a completely separate interaction.
  *
  * <p>Mirrors {@code zone.PlotValidityOverlay}/{@code lyfe.minimap.MinimapTracker}'s general
  * "server resolves eligibility, client just renders/reacts to the last snapshot" shape -- the
- * client has no way to know a sign's (or villager's) shop-eligibility on its own (that's derived
- * from {@code PlotRecord#zoneTypeId()}/{@code shopId()}, entirely server-side state).
+ * client has no way to know an NPC's shop-eligibility on its own (that's derived from {@code
+ * PlotRecord#zoneTypeId()}/{@code shopId()}, entirely server-side state).
  */
 public final class PlotShopProximityTicker {
 
@@ -65,22 +69,13 @@ public final class PlotShopProximityTicker {
         BlockPos center = player.blockPosition();
         double radiusSq = (double) RADIUS_BLOCKS * RADIUS_BLOCKS;
 
+        // "Press H to chat" (and now, 2026-10-10, the quest menu inside it) is NPC-only -- explicit
+        // user correction: "the 'Chat' menu... is only supposed to be accessible from the NPC itself."
+        // The Plot Config Sign's own Main Menu (right-click -> Enter Shop/Manage Shop) still uses a
+        // Sign ShopAnchor fine (see resolveShopContext/RequestShopPayload) -- only this proximity
+        // prompt's sign eligibility is removed.
         ShopAnchor nearest = null;
         double nearestDistSq = Double.MAX_VALUE;
-        for (BlockPos pos : BlockPos.betweenClosed(
-                center.offset(-RADIUS_BLOCKS, -RADIUS_BLOCKS, -RADIUS_BLOCKS),
-                center.offset(RADIUS_BLOCKS, RADIUS_BLOCKS, RADIUS_BLOCKS))) {
-            double distSq = pos.distSqr(center);
-            if (distSq > radiusSq || distSq >= nearestDistSq) {
-                continue;
-            }
-            BlockEntity blockEntity = level.getBlockEntity(pos);
-            if (!(blockEntity instanceof PlotConfigSignBlockEntity sign) || !PlotConfigSignBlock.hasShop(level, sign)) {
-                continue;
-            }
-            nearestDistSq = distSq;
-            nearest = new ShopAnchor.Sign(pos.immutable());
-        }
 
         AABB villagerSearch = new AABB(center).inflate(RADIUS_BLOCKS);
         for (Villager villager : level.getEntitiesOfClass(Villager.class, villagerSearch,

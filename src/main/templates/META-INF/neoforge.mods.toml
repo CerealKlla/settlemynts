@@ -158,6 +158,17 @@ taxation/rent, on top of Cartographyr's geographic entity model.
     ordering="NONE"
     side="BOTH"
 
+# Optional soft dependency (2026-10-10) -- surfaces Myssions' quest-board offers (and ready-to-
+# turn-in deliveries) inside this mod's own "Press H" wishlist screen if Myssions happens to be
+# loaded (see bridge.MyssionsQuestBridge). Same "ordering=NONE, no versionRange" reasoning as the
+# other optional dependencies above.
+[[dependencies.${mod_id}]]
+    modId="myssions"
+    type="optional"
+    reason="Surfaces quest-board offers and turn-ins inside the Press H wishlist screen."
+    ordering="NONE"
+    side="BOTH"
+
 # Features are specific properties of the game environment, that you may want to declare you require. This example declares
 # that your mod requires GL version 3.2 or higher. Other features will be added. They are side aware so declaring this won't
 # stop your mod loading on the server for example.

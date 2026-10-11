@@ -490,6 +490,12 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.SellToShopWishlistPayload.STREAM_CODEC,
                 (payload, context) -> sellToShopWishlist(payload, context));
 
+        // Quest menu inside the same "Press H" chat screen (2026-10-10) -- see
+        // bridge.MyssionsQuestBridge's own doc.
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AcceptOrTurnInQuestPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.AcceptOrTurnInQuestPayload.STREAM_CODEC,
+                (payload, context) -> acceptOrTurnInQuest(payload, context));
+
         // Planned Inventory (2026-10-09) -- see zone.PlannedInventoryClearing's own doc.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload.STREAM_CODEC,
@@ -1079,7 +1085,40 @@ public class SettlemyntsMod {
         }
         PlotRecord plot = resolved.get().plot();
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
-                payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos())));
+                payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
+                buildQuestOffer(player, plot)));
+    }
+
+    /**
+     * "I've got a job that needs doing" button on {@code client.ChatMenuScreen} (2026-10-10,
+     * explicit user request: "these quests should show up in the Press H menu for the NPCs") --
+     * accepts a fresh board offer, or turns in a ready delivery, exactly like a shift+right-click on
+     * the quest giver itself. See {@code bridge.MyssionsQuestBridge#interact}'s own doc.
+     */
+    private static void acceptOrTurnInQuest(com.github.cerealklla.settlemynts.plotsign.AcceptOrTurnInQuestPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, payload.anchor());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        if (com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
+            com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.interact(player, plot.plotId(), plot.zoneTypeId().toString());
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
+                payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
+                buildQuestOffer(player, plot)));
+    }
+
+    /** Per-player quest-giver preview for {@link #requestShopWishlist}/{@link #sellToShopWishlist}/{@link #acceptOrTurnInQuest}'s own payload -- empty if Myssions isn't loaded. */
+    private static java.util.Optional<com.github.cerealklla.settlemynts.plotsign.QuestOfferInfo> buildQuestOffer(ServerPlayer player, PlotRecord plot) {
+        if (!com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
+            return java.util.Optional.empty();
+        }
+        return com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.preview(player, plot.plotId(), plot.zoneTypeId().toString());
     }
 
     /** Shared row-assembly for {@link #requestShopWishlist} and {@link #sellToShopWishlist}'s own post-sale refresh. */
@@ -1198,7 +1237,8 @@ public class SettlemyntsMod {
 
         sendShopGoldUpdate(player, serverLevel, plot.plotId());
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
-                payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos())));
+                payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
+                buildQuestOffer(player, plot)));
     }
 
     /**
@@ -1430,10 +1470,22 @@ public class SettlemyntsMod {
                 .orElse(false);
     }
 
-    /** Does the shop behind {@code anchor} (sign or NPC alike) currently have any unmet Planned Inventory deficit -- see {@code zone.ShopWishlist}'s own doc. Used by {@code plotsign.PlotShopProximityTicker} for both the "Press &lt;key&gt; to chat" prompt and the floating "!" nameplate. */
+    /**
+     * Does the NPC behind {@code anchor} currently have anything to offer through the "Press H"
+     * chat menu -- either an unmet Planned Inventory deficit (see {@code zone.ShopWishlist}'s own
+     * doc) or an unclaimed Myssions quest-board offer (added 2026-10-10, see {@code
+     * bridge.MyssionsQuestBridge}'s own doc). Used by {@code plotsign.PlotShopProximityTicker} for
+     * both the "Press &lt;key&gt; to chat" prompt and the floating "!" nameplate -- both are
+     * deliberately player-independent (global) signals, which is why the quest half of this check
+     * only looks at board-offer presence, not any specific player's own in-progress/ready-to-deliver
+     * state (see {@code api.Myssions#hasPendingBoardOffer}'s own doc for why that distinction
+     * matters).
+     */
     public static boolean anchorHasWishlist(ServerLevel level, com.github.cerealklla.settlemynts.plotsign.ShopAnchor anchor) {
         return resolveShopContext(level, anchor)
-                .map(ctx -> com.github.cerealklla.settlemynts.zone.ShopWishlistCache.hasWishlist(level, ctx.plot()))
+                .map(ctx -> com.github.cerealklla.settlemynts.zone.ShopWishlistCache.hasWishlist(level, ctx.plot())
+                        || (com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()
+                                && com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.hasPendingBoardOffer(level, ctx.plot().plotId())))
                 .orElse(false);
     }
 

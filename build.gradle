@@ -186,6 +186,13 @@ dependencies {
     // Kyt/Yconomics above. compileOnly only, same reasoning.
     compileOnly files("../Lyfe/build/libs/lyfe-${lyfe_version}.jar")
 
+    // Myssions is an optional soft dependency (see neoforge.mods.toml) -- surfaces quest-board
+    // offers/turn-ins inside this mod's own "Press H" wishlist screen (see
+    // bridge.MyssionsQuestBridge), gated behind ModList.get().isLoaded("myssions") at runtime,
+    // same isolation pattern as Blueprynts/Protectyons/Kyt/Yconomics/Lyfe above. compileOnly only,
+    // same reasoning.
+    compileOnly files("../Myssions/build/libs/myssions-${myssions_version}.jar")
+
     // Plain JUnit 5 for pure Codec round-trip tests (no live server/registry needed, so
     // ModDevGradle's neoForge { unitTest {} } FML-bootstrap machinery isn't required here).
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'

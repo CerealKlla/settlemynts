@@ -87,8 +87,10 @@ public final class WishlistScreen extends Screen {
                     .bounds(centerX + SELL_BUTTON_X, rowY, SELL_BUTTON_WIDTH, 20).build());
         }
 
+        addRenderableWidget(Button.builder(Component.literal("Back"), b -> Minecraft.getInstance().setScreen(new ChatMenuScreen(data)))
+                .bounds(centerX - 105, footerTop + 6, 100, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
-                .bounds(centerX - 50, footerTop + 6, 100, 20).build());
+                .bounds(centerX + 5, footerTop + 6, 100, 20).build());
     }
 
     @Override
