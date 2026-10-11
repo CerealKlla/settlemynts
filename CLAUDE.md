@@ -228,4 +228,17 @@ after calling into Myssions, which would have instantly closed/overridden Myssio
 the moment it opened. Found and fixed before ever live-testing. `./gradlew build` green. **Never
 live-tested.**
 
+**Highway Stakes: inter-settlement roads, 2026-10-11** (see
+[context/decisions.md](context/decisions.md), [context/classes/Roadway.md](context/classes/Roadway.md))
+-- a new, parallel "copy and tweak" of the existing Roadway Stake mechanism that can connect two
+*different* settlements (the original is hard-scoped to one), built as the foundation for a new
+cross-mod inter-settlement road-connection quest (full design in myssions-context). New
+`HighwayStakeEntity`/`HighwayStakeItem`/`HighwayPaver`/`HighwayConnectionMarkerEntity`/
+`HighwayStakeLeash`, plus a new, previously-undesigned **Settlement Tier** concept (average of a
+settlement's own plot tiers, `SettlementTierResolver`) that determines a Highway's paving quality.
+50-block max connection length (actually enforced, unlike the original's documentary-only
+constant); stakes are consumed on placement and returned on pickup. `./gradlew build` green.
+**Not yet live-tested** -- the Myssions-side quest that actually grants these stakes doesn't exist
+yet.
+
 See [context/classes/](context/classes/) for per-class reference.
