@@ -1,7 +1,6 @@
 package com.github.cerealklla.settlemynts.plotsign;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import io.netty.buffer.ByteBuf;
@@ -21,9 +20,9 @@ import net.minecraft.resources.Identifier;
  * other at the one call site that's already gated behind {@code
  * ModList.get().isLoaded("myssions")}.
  */
-public record QuestMenuInfo(List<ActiveEntry> activeQuests, Optional<NewOffer> newOffer) {
+public record QuestMenuInfo(List<ActiveEntry> activeQuests, List<NewOffer> newOffers) {
 
-    public static final QuestMenuInfo EMPTY = new QuestMenuInfo(List.of(), Optional.empty());
+    public static final QuestMenuInfo EMPTY = new QuestMenuInfo(List.of(), List.of());
 
     /** One of the player's own active (in-progress) quest instances from this NPC's pool -- {@code instanceId} is Myssions' own hidden per-acceptance UUID, never shown directly, only round-tripped. */
     public record ActiveEntry(UUID instanceId, String questName, boolean readyToComplete) {
@@ -35,7 +34,7 @@ public record QuestMenuInfo(List<ActiveEntry> activeQuests, Optional<NewOffer> n
                 ActiveEntry::new);
     }
 
-    /** The plot's current unclaimed board offer, if any and if the player doesn't already have a record of it. */
+    /** One of the plot's current unclaimed board offers, filtered to ones the player doesn't already have a record of. */
     public record NewOffer(Identifier questId, String questName, String description) {
 
         public static final StreamCodec<ByteBuf, NewOffer> STREAM_CODEC = StreamCodec.composite(
@@ -47,6 +46,6 @@ public record QuestMenuInfo(List<ActiveEntry> activeQuests, Optional<NewOffer> n
 
     public static final StreamCodec<ByteBuf, QuestMenuInfo> STREAM_CODEC = StreamCodec.composite(
             ActiveEntry.STREAM_CODEC.apply(ByteBufCodecs.list()), QuestMenuInfo::activeQuests,
-            ByteBufCodecs.optional(NewOffer.STREAM_CODEC), QuestMenuInfo::newOffer,
+            NewOffer.STREAM_CODEC.apply(ByteBufCodecs.list()), QuestMenuInfo::newOffers,
             QuestMenuInfo::new);
 }

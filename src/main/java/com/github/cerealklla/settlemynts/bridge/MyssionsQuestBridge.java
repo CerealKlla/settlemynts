@@ -1,6 +1,5 @@
 package com.github.cerealklla.settlemynts.bridge;
 
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -8,6 +7,7 @@ import com.github.cerealklla.myssions.api.Myssions;
 import com.github.cerealklla.myssions.quest.QuestGiverMenu;
 import com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo;
 
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.fml.ModList;
@@ -36,14 +36,15 @@ public final class MyssionsQuestBridge {
         var activeEntries = menu.activeQuests().stream()
                 .map(e -> new QuestMenuInfo.ActiveEntry(e.instanceId(), e.questName(), e.readyToComplete()))
                 .collect(Collectors.toList());
-        Optional<QuestMenuInfo.NewOffer> newOffer = menu.newOffer()
-                .map(o -> new QuestMenuInfo.NewOffer(o.questId(), o.questName(), o.description()));
-        return new QuestMenuInfo(activeEntries, newOffer);
+        var newOffers = menu.newOffers().stream()
+                .map(o -> new QuestMenuInfo.NewOffer(o.questId(), o.questName(), o.description()))
+                .collect(Collectors.toList());
+        return new QuestMenuInfo(activeEntries, newOffers);
     }
 
-    /** Accepts the plot's current board offer. */
-    public static void acceptBoardOffer(ServerPlayer player, UUID plotId) {
-        Myssions.acceptBoardOffer(player, plotId);
+    /** Accepts one specific offer (by definition id) sitting on the plot's board. */
+    public static void acceptBoardOffer(ServerPlayer player, UUID plotId, Identifier questId) {
+        Myssions.acceptBoardOffer(player, plotId, questId);
     }
 
     /**

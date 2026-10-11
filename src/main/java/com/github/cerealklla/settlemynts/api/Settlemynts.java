@@ -279,6 +279,25 @@ public final class Settlemynts {
     }
 
     /**
+     * Every real shop listing across every plot in {@code settlementCoreId}'s settlement, unfiltered
+     * by resource -- added 2026-10-11 for Myssions' "buy an item from a local shop" quest, which
+     * needs to ask "does this settlement sell anything at all" rather than "does it sell this one
+     * specific thing" ({@link #findSellingPlot}/{@link #findSellingPlots}). Same loop, just not
+     * filtered to one resource, and the same existing limitation: player-founded settlements only
+     * (resolved via {@link GhostTownHallCoreEntity#getPlots()}), not natural villages.
+     */
+    public static List<YconomicsShopBridge.ShopListingView> getAllSettlementListings(ServerLevel level, UUID settlementCoreId) {
+        List<YconomicsShopBridge.ShopListingView> result = new ArrayList<>();
+        if (!YconomicsShopBridge.isAvailable() || !(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
+            return result;
+        }
+        for (PlotRecord plot : core.getPlots()) {
+            result.addAll(getListings(level, plot.plotId()));
+        }
+        return result;
+    }
+
+    /**
      * Buys up to {@code quantity} units of {@code resource} from {@code shopId} (the Shop that owns
      * {@code plotId}'s boxes), draining stock from every box located on {@code plotId}'s own plot (via
      * Cartographyr's Box Identity over the plot's real polygon) and depositing nuggets into {@code

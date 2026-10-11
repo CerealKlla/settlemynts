@@ -50,7 +50,7 @@ public final class ChatMenuScreen extends Screen {
         int y = centerY - 30;
 
         boolean hasWishlist = !data.entries().isEmpty();
-        boolean hasQuest = !data.questMenu().activeQuests().isEmpty() || data.questMenu().newOffer().isPresent();
+        boolean hasQuest = !data.questMenu().activeQuests().isEmpty() || !data.questMenu().newOffers().isEmpty();
 
         if (hasWishlist) {
             addRenderableWidget(Button.builder(Component.literal("I need a few things"), b -> onNeedThings())
@@ -88,7 +88,7 @@ public final class ChatMenuScreen extends Screen {
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        if (data.entries().isEmpty() && data.questMenu().activeQuests().isEmpty() && data.questMenu().newOffer().isEmpty()) {
+        if (data.entries().isEmpty() && data.questMenu().activeQuests().isEmpty() && data.questMenu().newOffers().isEmpty()) {
             String message = "Nothing to talk about right now.";
             graphics.text(font, message, width / 2 - font.width(message) / 2, height / 2 - 40, 0xFFAAAAAA);
         }

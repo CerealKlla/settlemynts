@@ -1114,7 +1114,7 @@ public class SettlemyntsMod {
         }
         PlotRecord plot = resolved.get().plot();
         if (com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
-            com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.acceptBoardOffer(player, plot.plotId());
+            com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.acceptBoardOffer(player, plot.plotId(), payload.questId());
         }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),

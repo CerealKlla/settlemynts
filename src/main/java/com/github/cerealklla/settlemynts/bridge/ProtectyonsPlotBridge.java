@@ -55,9 +55,15 @@ public final class ProtectyonsPlotBridge {
      * set for that area at all -- so the founder was blocked from breaking terrain anywhere in their
      * own settlement until individual plots existed to carve out exemptions. Call at settlement
      * Finalize (mirrors {@link #registerPlot}) with the current Town Planner roster.
+     *
+     * <p>Uses {@link Protectyons#registerProtectedSettlementArea} (not the plain {@code
+     * registerProtectedArea} {@link #registerPlot} uses) since 2026-10-11 -- this is the one call
+     * site that also needs the real original ground height baked in per column, to fix the
+     * "protection band follows a building's roof instead of the real ground" bug. See Protectyons'
+     * own {@code permission.ProtectedAreaRegistry} doc for the full fix.
      */
     public static void registerSettlement(ServerLevel level, UUID settlementCoreId, Geometry settlementPolygon, Set<UUID> permittedPlayers) {
-        Protectyons.registerProtectedArea(level.getServer(), settlementCoreId, settlementPolygon, permittedPlayers);
+        Protectyons.registerProtectedSettlementArea(level, settlementCoreId, settlementPolygon, permittedPlayers);
     }
 
     /** Called whenever a settlement's Town Planner set changes, to keep the settlement-wide area (not just its plots) in sync. */

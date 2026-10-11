@@ -63,7 +63,7 @@ public final class QuestAcceptScreen extends Screen {
     }
 
     private void accept() {
-        Minecraft.getInstance().getConnection().send(new ServerboundCustomPayloadPacket(new AcceptBoardOfferPayload(data.anchor())));
+        Minecraft.getInstance().getConnection().send(new ServerboundCustomPayloadPacket(new AcceptBoardOfferPayload(data.anchor(), offer.questId())));
     }
 
     @Override

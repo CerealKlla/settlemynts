@@ -60,19 +60,14 @@ public class LumberjackWorkGoal extends Goal {
 
     private static final int REROLL_CHANCE_DENOMINATOR = 20;
     private static final double ARRIVE_DIST_SQ = 4.0;
-    // Harvest-only, widened 2026-10-06 (real live report: "teleported on top of a tree but isn't
-    // chopping it down") -- root cause is LumberjackWorkerEntity#customServerAiStep's underground-
-    // escape safety net, which measures ground level via Heightmap.Types.MOTION_BLOCKING_NO_LEAVES:
-    // that excludes leaves but NOT logs, so standing at a tall trunk's own column reads as
-    // "underground" relative to the trunk's own top and gets teleported up onto it. The flat 2-block
-    // arrive radius then never counted as "arrived" at the trunk base once perched up there. harvest()
-    // acts purely on the stored world position, not the worker's own, so it's safe to just widen how
-    // close counts as arrived for a harvest target specifically -- 15 blocks comfortably covers
-    // standing anywhere on even the tallest trunk this goal will ever climb (MAX_TRUNK_HEIGHT + canopy
-    // margin). Deliberately NOT applied to planting too -- there's no equivalent teleport-onto-target
-    // failure mode for a ground-level soil spot, and a wide plant-arrive radius would make the worker
-    // plant from well outside the spot it's supposedly walking to.
-    private static final double HARVEST_ARRIVE_DIST_SQ = 225.0;
+    // Harvest-only. Was briefly widened to 225.0 (~15 blocks) on 2026-10-06 to work around a
+    // teleport-onto-trunk edge case (LumberjackWorkerEntity#customServerAiStep's underground-escape
+    // safety net could perch a worker high up a tall trunk, out of the old flat 2-block arrive
+    // radius). Set back down to 4.0, 2026-10-11 (explicit user request) now that harvest() flood-
+    // fills every connected log from wherever the worker actually arrives (findConnectedLogs, added
+    // 2026-10-09) rather than acting on a fixed box anchored at the trunk base -- a close arrive
+    // radius is no longer at odds with catching the whole tree.
+    private static final double HARVEST_ARRIVE_DIST_SQ = 4.0;
     // Randomized per scan (2026-10-05, explicit user request: "5-7 instead of flat 4") -- varies the
     // plot's planting pattern instead of a perfectly uniform grid.
     private static final int MIN_SAPLING_SPACING_BLOCKS = 5;
