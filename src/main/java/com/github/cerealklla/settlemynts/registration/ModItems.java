@@ -159,4 +159,12 @@ public final class ModItems {
             DATA_COMPONENTS.registerComponentType("highway_stake_settlement_core_b", builder -> builder
                     .persistent(UUIDUtil.CODEC)
                     .networkSynchronized(UUIDUtil.STREAM_CODEC));
+
+    // The highway's fixed paving quality (average of both endpoint settlements' own Settlement
+    // Tier -- see roadway.SettlementTierResolver), computed once at quest acceptance and carried on
+    // every stake placed from this stack.
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<Integer>> HIGHWAY_STAKE_TIER =
+            DATA_COMPONENTS.registerComponentType("highway_stake_tier", builder -> builder
+                    .persistent(com.mojang.serialization.Codec.INT)
+                    .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.VAR_INT));
 }

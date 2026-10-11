@@ -28,6 +28,7 @@ import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -58,14 +59,25 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
     private static final EntityDataAccessor<String> DATA_CONNECTIONS =
             SynchedEntityData.defineId(HighwayStakeEntity.class, EntityDataSerializers.STRING);
 
-    public static final double MAX_CONNECTION_LENGTH_BLOCKS = RoadwayStakeEntity.MAX_CONNECTION_LENGTH_BLOCKS;
+    // Deliberately its OWN constant, not shared with RoadwayStakeEntity's 100 -- explicit user
+    // spec, 2026-10-11: "I'd like the max distance between Highway stakes to be 50. Play testing
+    // may inform a need to tweak that again." Actually enforced (see #interact/HighwayStakeItem),
+    // unlike the original Roadway constant which turned out to be documentary only (never checked
+    // anywhere) -- this one has to be real, since the stake-count efficiency formula depends on it.
+    public static final double MAX_CONNECTION_LENGTH_BLOCKS = 50.0;
 
     private UUID ownerPlayerId;
     private UUID linkedInstanceId;
     // Both nullable -- a natural (NPC-owned) settlement has no real GhostTownHallCoreEntity at all.
-    // See HighwayPaver's own doc for how pavement/tier/plot-crossing degrade gracefully without one.
+    // See HighwayPaver's own doc for how pavement/plot-crossing degrade gracefully without one.
     private UUID settlementCoreIdA;
     private UUID settlementCoreIdB;
+    // The whole highway's fixed paving quality, computed once at quest assignment from both
+    // endpoint settlements' own Settlement Tier (see SettlementTierResolver) -- explicit user spec,
+    // 2026-10-11: "the actual quality of the road will be determined by the average Tier of the two
+    // endpoint settlements." Carried on every stake (set from the item's own data component) so any
+    // edge paved from it uses the same tier regardless of which two stakes are being connected.
+    private int highwayTier = 1;
     private List<ConnectionSnapshot> connectionSnapshots = List.of();
 
     public record ConnectionSnapshot(UUID otherStakeId, List<HighwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId) {
@@ -87,13 +99,14 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
     }
 
     public static HighwayStakeEntity create(ServerLevel level, int x, int y, int z, UUID ownerPlayerId, UUID linkedInstanceId,
-                                             Optional<UUID> settlementCoreIdA, Optional<UUID> settlementCoreIdB) {
+                                             Optional<UUID> settlementCoreIdA, Optional<UUID> settlementCoreIdB, int highwayTier) {
         HighwayStakeEntity stake = new HighwayStakeEntity(ModEntities.HIGHWAY_STAKE.get(), level);
         stake.setPos(x + 0.5, y, z + 0.5);
         stake.ownerPlayerId = ownerPlayerId;
         stake.linkedInstanceId = linkedInstanceId;
         stake.settlementCoreIdA = settlementCoreIdA.orElse(null);
         stake.settlementCoreIdB = settlementCoreIdB.orElse(null);
+        stake.highwayTier = Math.max(1, highwayTier);
         GhostBlockDisplays.setBlockState(stake, ModBlocks.ROPE_FENCE_POST.get().defaultBlockState());
         GhostBlockDisplays.setTranslation(stake, -0.5f, 0f, -0.5f);
         level.addFreshEntity(stake);
@@ -106,6 +119,24 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
 
     public UUID getOwnerPlayerId() {
         return ownerPlayerId;
+    }
+
+    public int getHighwayTier() {
+        return highwayTier;
+    }
+
+    /** Builds a fresh, single, placeable {@link HighwayStakeItem} stack carrying this stake's own instance/core/tier data -- handed back when a connection-less stake is picked back up (explicit user spec: "be sure that the player can 'pick up' placed stakes... and that it will give them back the physical item"). */
+    public ItemStack toItemStack() {
+        ItemStack stack = new ItemStack(com.github.cerealklla.settlemynts.registration.ModItems.HIGHWAY_STAKE.get());
+        stack.set(com.github.cerealklla.settlemynts.registration.ModItems.HIGHWAY_STAKE_INSTANCE_ID, linkedInstanceId);
+        if (settlementCoreIdA != null) {
+            stack.set(com.github.cerealklla.settlemynts.registration.ModItems.HIGHWAY_STAKE_SETTLEMENT_CORE_A, settlementCoreIdA);
+        }
+        if (settlementCoreIdB != null) {
+            stack.set(com.github.cerealklla.settlemynts.registration.ModItems.HIGHWAY_STAKE_SETTLEMENT_CORE_B, settlementCoreIdB);
+        }
+        stack.set(com.github.cerealklla.settlemynts.registration.ModItems.HIGHWAY_STAKE_TIER, highwayTier);
+        return stack;
     }
 
     @Override
@@ -227,6 +258,13 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
             int az = Mth.floor(anchor.getZ());
             int tx = Mth.floor(getX());
             int tz = Mth.floor(getZ());
+            double distance = Math.sqrt(anchor.distanceToSqr(this));
+            if (distance > MAX_CONNECTION_LENGTH_BLOCKS) {
+                player.sendSystemMessage(Component.literal(
+                        "That's too far for one connection -- place a Highway Stake no more than "
+                                + (int) MAX_CONNECTION_LENGTH_BLOCKS + " blocks from your anchor."));
+                return InteractionResult.SUCCESS;
+            }
             var core = resolveNearestRealCore(serverLevel);
             if (core != null && HighwayPaver.crossesPlot(serverLevel, core, ax, az, tx, tz)) {
                 player.sendSystemMessage(Component.literal(
@@ -240,24 +278,73 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
                 return InteractionResult.SUCCESS;
             }
             connect(anchor, this);
-            HighwayPaver.paveEdge(serverLevel, core, anchor, this);
+            HighwayPaver.paveEdge(serverLevel, core, highwayTier, anchor, this);
             HighwayConnectionMarkerEntity.regenerateAll(serverLevel, ownerPlayerId, linkedInstanceId, blockPosition());
             HighwayStakeLeash.setGhostAnchor(serverPlayer, this);
             player.sendSystemMessage(Component.literal("Connected -- anchor now here, continue extending the road."));
             return InteractionResult.SUCCESS;
         }
 
-        // Not holding a Highway Stake item for this instance -- right-clicking removes this stake
-        // outright if it has no connections (same "only an empty stake deletes" rule as
-        // RoadwayStakeEntity), no item handed back.
-        if (!getConnectionIds().isEmpty()) {
-            player.sendSystemMessage(Component.literal("Snap this stake's connections first by removing the stakes on either end."));
+        // Not holding a Highway Stake item for this instance -- right-clicking picks the stake back
+        // up. Explicit user spec, 2026-10-11: "be sure that the player can 'pick up' placed stakes
+        // in the same way they do in settlements, and that it will give them back the physical
+        // item" -- unlike RoadwayStakeEntity (an infinite tool, no item ever handed back), this one
+        // IS consumable, so the real item comes back here. A connected stake only snaps its
+        // connections (restoring terrain, same as RoadwayStakeEntity#snapAllConnections) and stays
+        // in place for reattachment; an already-empty stake is the one that actually gets removed
+        // and returns its item.
+        HighwayStakeLeash.clearGhostAnchor(player.getUUID());
+        int connectionCount = getConnectionIds().size();
+        if (connectionCount > 0) {
+            snapAllConnections(serverLevel);
+            player.sendSystemMessage(Component.literal(
+                    "Snapped " + connectionCount + " connection" + (connectionCount == 1 ? "" : "s")
+                            + " -- stake left in place. Right-click it again to pick it up, or reconnect it."));
             return InteractionResult.SUCCESS;
         }
-        HighwayStakeLeash.clearGhostAnchor(player.getUUID());
+        ItemStack returned = toItemStack();
         discard();
-        player.sendSystemMessage(Component.literal("Highway Stake removed."));
+        if (!player.getInventory().add(returned)) {
+            player.drop(returned, false);
+        }
+        player.sendSystemMessage(Component.literal("Highway Stake picked up."));
         return InteractionResult.SUCCESS;
+    }
+
+    /** Restores every snapped edge's original terrain and retires its Cartographyr road entity -- a copy of {@code RoadwayStakeEntity#snapAllConnections}, leaving this stake itself in place. */
+    private void snapAllConnections(ServerLevel serverLevel) {
+        for (UUID otherId : List.copyOf(getConnectionIds())) {
+            ConnectionSnapshot entry = null;
+            for (ConnectionSnapshot candidate : connectionSnapshots) {
+                if (candidate.otherStakeId().equals(otherId)) {
+                    entry = candidate;
+                    break;
+                }
+            }
+            if (entry != null) {
+                HighwayPaver.restoreEdge(serverLevel, entry.snapshot());
+                Cartography.retireEntity(serverLevel, entry.roadEntityId());
+            }
+            if (serverLevel.getEntity(otherId) instanceof HighwayStakeEntity other) {
+                other.removeConnectionIdAndSnapshot(getUUID());
+            }
+        }
+        entityData.set(DATA_CONNECTIONS, "");
+        connectionSnapshots = List.of();
+        HighwayConnectionMarkerEntity.regenerateAll(serverLevel, ownerPlayerId, linkedInstanceId, blockPosition());
+    }
+
+    private void removeConnectionIdAndSnapshot(UUID otherId) {
+        List<UUID> current = new ArrayList<>(getConnectionIds());
+        current.remove(otherId);
+        entityData.set(DATA_CONNECTIONS, joinIds(current));
+        List<ConnectionSnapshot> remaining = new ArrayList<>();
+        for (ConnectionSnapshot entry : connectionSnapshots) {
+            if (!entry.otherStakeId().equals(otherId)) {
+                remaining.add(entry);
+            }
+        }
+        connectionSnapshots = remaining;
     }
 
     @Override
@@ -279,6 +366,7 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         linkedInstanceId = input.read("LinkedInstanceId", UUIDUtil.CODEC).orElse(null);
         settlementCoreIdA = input.read("SettlementCoreIdA", UUIDUtil.CODEC).orElse(null);
         settlementCoreIdB = input.read("SettlementCoreIdB", UUIDUtil.CODEC).orElse(null);
+        highwayTier = Math.max(1, input.getIntOr("HighwayTier", 1));
         entityData.set(DATA_CONNECTIONS, input.getStringOr("Connections", ""));
         connectionSnapshots = input.read("ConnectionSnapshots", Codec.list(ConnectionSnapshot.CODEC)).orElse(List.of());
     }
@@ -290,6 +378,7 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         output.storeNullable("LinkedInstanceId", UUIDUtil.CODEC, linkedInstanceId);
         output.storeNullable("SettlementCoreIdA", UUIDUtil.CODEC, settlementCoreIdA);
         output.storeNullable("SettlementCoreIdB", UUIDUtil.CODEC, settlementCoreIdB);
+        output.putInt("HighwayTier", highwayTier);
         output.putString("Connections", entityData.get(DATA_CONNECTIONS));
         output.store("ConnectionSnapshots", Codec.list(ConnectionSnapshot.CODEC), connectionSnapshots);
     }

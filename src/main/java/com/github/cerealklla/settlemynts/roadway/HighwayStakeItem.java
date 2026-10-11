@@ -51,11 +51,20 @@ public class HighwayStakeItem extends Item {
         }
         UUID coreIdA = held.get(ModItems.HIGHWAY_STAKE_SETTLEMENT_CORE_A);
         UUID coreIdB = held.get(ModItems.HIGHWAY_STAKE_SETTLEMENT_CORE_B);
+        Integer tier = held.get(ModItems.HIGHWAY_STAKE_TIER);
+        int highwayTier = tier != null ? tier : 1;
 
         BlockPos placePos = context.getClickedPos().above();
         HighwayStakeEntity anchor = HighwayStakeLeash.resolveGhostAnchor(serverLevel, player.getUUID());
 
         if (anchor != null) {
+            double distance = Math.sqrt(anchor.distanceToSqr(placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5));
+            if (distance > HighwayStakeEntity.MAX_CONNECTION_LENGTH_BLOCKS) {
+                player.sendSystemMessage(Component.literal(
+                        "That's too far for one connection -- place the stake no more than "
+                                + (int) HighwayStakeEntity.MAX_CONNECTION_LENGTH_BLOCKS + " blocks from your anchor."));
+                return InteractionResult.FAIL;
+            }
             var core = anchor.resolveNearestRealCore(serverLevel);
             if (HighwayPaver.crossesPlot(serverLevel, core,
                     Mth.floor(anchor.getX()), Mth.floor(anchor.getZ()), placePos.getX(), placePos.getZ())) {
@@ -74,10 +83,10 @@ public class HighwayStakeItem extends Item {
         }
 
         HighwayStakeEntity newPost = HighwayStakeEntity.create(serverLevel, placePos.getX(), placePos.getY(), placePos.getZ(),
-                player.getUUID(), instanceId, Optional.ofNullable(coreIdA), Optional.ofNullable(coreIdB));
+                player.getUUID(), instanceId, Optional.ofNullable(coreIdA), Optional.ofNullable(coreIdB), highwayTier);
         if (anchor != null) {
             HighwayStakeEntity.connect(anchor, newPost);
-            HighwayPaver.paveEdge(serverLevel, anchor.resolveNearestRealCore(serverLevel), anchor, newPost);
+            HighwayPaver.paveEdge(serverLevel, anchor.resolveNearestRealCore(serverLevel), highwayTier, anchor, newPost);
             HighwayConnectionMarkerEntity.regenerateAll(serverLevel, player.getUUID(), instanceId, placePos);
         }
         HighwayStakeLeash.setGhostAnchor(serverPlayer, newPost);

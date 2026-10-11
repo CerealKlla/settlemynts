@@ -40,13 +40,20 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * a subclass) or widening its signature to accept a nullable core for every caller, including the
  * original intra-settlement feature where a core is always real. A parallel copy keeps that
  * original feature's behavior completely untouched.
+ *
+ * <p><b>Tier is passed in explicitly, not resolved from {@code core}</b> (added 2026-10-11, explicit
+ * user spec: "the actual quality of the road will be determined by the average Tier of the two
+ * endpoint settlements" -- a brand-new concept, see {@link SettlementTierResolver}). Unlike
+ * {@link RoadwayPaver} (where a single settlement's own current Tier applies uniformly), a Highway
+ * has two different endpoint settlements and should pave at one single, fixed quality for its whole
+ * length -- computed once at quest assignment (see {@code bridge.MyssionsRoadQuestBridge}), not
+ * re-derived per edge from whichever settlement happens to be nearest.
  */
 public final class HighwayPaver {
 
     private static final int ROAD_SIDE_OFFSET_BLOCKS = 1;
     private static final int CLEARANCE_BLOCKS = 4;
     private static final double PATH_HALF_WIDTH_BLOCKS = 1.5;
-    private static final int DEFAULT_TIER = 1;
     private static final int MAX_SLOPE_PER_STEP = 1;
 
     private HighwayPaver() {
@@ -105,8 +112,7 @@ public final class HighwayPaver {
         return false;
     }
 
-    public static void paveEdge(ServerLevel level, GhostTownHallCoreEntity core, HighwayStakeEntity a, HighwayStakeEntity b) {
-        int tier = core != null ? RoadwayTierResolver.currentTier(level, core) : DEFAULT_TIER;
+    public static void paveEdge(ServerLevel level, GhostTownHallCoreEntity core, int tier, HighwayStakeEntity a, HighwayStakeEntity b) {
         int x1 = Mth.floor(a.getX());
         int z1 = Mth.floor(a.getZ());
         int x2 = Mth.floor(b.getX());
