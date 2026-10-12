@@ -1131,6 +1131,12 @@ public class SettlemyntsMod {
         if (com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
             com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.acceptBoardOffer(player, plot.plotId(), payload.questId());
         }
+        // Real report, 2026-10-12: accepting the plot's last offer left its NPC still showing a
+        // stale "?" nameplate, since nothing clears it except a future proximity re-scan -- see
+        // plotsign.PlotShopProximityTicker#refreshNameplate's own doc.
+        if (payload.anchor() instanceof com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc npcAnchor) {
+            com.github.cerealklla.settlemynts.plotsign.PlotShopProximityTicker.refreshNameplate(serverLevel, npcAnchor);
+        }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
                 buildQuestMenu(player, plot)));

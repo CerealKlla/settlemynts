@@ -249,4 +249,20 @@ public final class PlotShopProximityTicker {
             npc.setCustomNameVisible(false);
         }
     }
+
+    /**
+     * Public entry point for refreshing one specific NPC's "?" nameplate on demand, outside this
+     * ticker's own lazy per-tick/player-proximity scan -- added 2026-10-12, real report: a plot's
+     * quest-giving NPC kept showing a stale "?" with "Press H" doing nothing, because nothing ever
+     * clears the marker except the next time some player happens to stand within {@link
+     * #RADIUS_BLOCKS} of that specific NPC again. Called right after an action that can make a
+     * plot's wishlist/board state go from "has something" to "empty" (e.g. {@code SettlemyntsMod
+     * #acceptBoardOffer}), so the nameplate can't outlive the real state it's supposed to reflect.
+     * A no-op if {@code anchor} doesn't resolve to a live {@link Villager}.
+     */
+    public static void refreshNameplate(ServerLevel level, ShopAnchor.Npc anchor) {
+        if (level.getEntity(anchor.entityId()) instanceof Villager npc) {
+            updateWishlistNameplate(level, npc, anchor);
+        }
+    }
 }
