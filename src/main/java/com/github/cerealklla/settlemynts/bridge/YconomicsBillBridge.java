@@ -69,4 +69,16 @@ public final class YconomicsBillBridge {
     private static List<RecurringBill.BoxRef> toYconomics(List<BoxRef> refs) {
         return refs.stream().map(r -> new RecurringBill.BoxRef(r.id(), r.pos())).toList();
     }
+
+    /** Settlemynts' own translated shape of {@code bills.BillEvents.BillProcessedListener} -- see its own doc. */
+    public interface BillProcessedListener {
+        void onBillProcessed(net.minecraft.server.MinecraftServer server, UUID billId, Optional<UUID> ownerContext,
+                              List<net.minecraft.core.GlobalPos> sourceBoxPositions, List<net.minecraft.core.GlobalPos> destinationBoxPositions,
+                              Map<Identifier, Integer> cost, String outcomeName);
+    }
+
+    /** Registers a listener for every recurring bill processed (not just this mod's own rent bills) -- see {@code zone.RentLedgerListener}. */
+    public static void registerBillProcessedListener(BillProcessedListener listener) {
+        Yconomics.registerBillProcessedListener(listener::onBillProcessed);
+    }
 }

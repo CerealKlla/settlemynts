@@ -180,6 +180,9 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.plotsign.LocatorCancelListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.construction.NpcAutoFundingTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.bills.PlotRentTicker());
+        if (ModList.get().isLoaded("yconomics")) {
+            com.github.cerealklla.settlemynts.zone.RentLedgerListener.register();
+        }
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardSpawnTicker());
         // PlotShopProximityTicker is no longer a tick-event subscriber as of 2026-10-12 -- it's
         // purely static now, driven by ProximityScanPayload instead of PlayerTickEvent (see its own
@@ -992,6 +995,12 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
                     serverLevel, resolvedBuy.get().plot().boxPos().get(),
                     "Sold " + filled + "x to " + player.getGameProfile().name() + " for " + result.nuggetsCharged() + " nuggets");
+        } else {
+            // Temporary diagnostic (2026-10-12, real report: "I'm not seeing anything added to these
+            // [ledgers] when making purchases at shops") -- confirms whether the silent-skip gate
+            // above is the actual cause before assuming it. Remove once confirmed live.
+            LOGGER.info("[ShopLedgerDebug] buyFromShop plot={} -- skipped ledger entry: boxPosPresent={} blueprintsLoaded={}",
+                    plotId, resolvedBuy.get().plot().boxPos().isPresent(), ModList.get().isLoaded("blueprynts"));
         }
     }
 
@@ -1112,6 +1121,10 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
                     serverLevel, resolvedSell.get().plot().boxPos().get(),
                     "Bought " + result.itemsSold() + "x from " + player.getGameProfile().name() + " for " + nuggetsOwed + " nuggets");
+        } else {
+            // Temporary diagnostic -- see buyFromShop's own identical hook. Remove once confirmed live.
+            LOGGER.info("[ShopLedgerDebug] sellToShop plot={} -- skipped ledger entry: boxPosPresent={} blueprintsLoaded={}",
+                    plotId, resolvedSell.get().plot().boxPos().isPresent(), ModList.get().isLoaded("blueprynts"));
         }
     }
 

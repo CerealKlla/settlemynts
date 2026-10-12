@@ -7,6 +7,8 @@ import com.github.cerealklla.settlemynts.registration.ModBlocks;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
@@ -35,8 +37,18 @@ public final class RoadwayRetier {
         for (RoadwayStakeEntity stake : RoadwayStakeEntity.findByOwnerCore(level, settlementCoreId)) {
             for (RoadwayStakeEntity.ConnectionSnapshot connection : stake.getConnectionSnapshots()) {
                 for (BlockPos pos : connection.roadCells()) {
-                    if (level.getBlockState(pos).is(ModBlocks.ROADWAY.get())) {
+                    BlockState existing = level.getBlockState(pos);
+                    if (existing.is(ModBlocks.ROADWAY.get())) {
                         level.setBlock(pos, roadState, 3);
+                        cellsRepainted++;
+                    } else if (existing.is(Blocks.STONE_BRICK_STAIRS) || existing.is(Blocks.BRICK_STAIRS)) {
+                        // Slope-step stair cell (2026-10-12) -- not the flat ROADWAY block, so the
+                        // check above misses it; re-select the new tier's own stairs match (keeping
+                        // the existing climb direction/half), falling back to the flat road if the
+                        // new tier has no real stairs match (Tiers 1/2/5 -- see
+                        // RoadwayPaver#stairStateFor's own doc).
+                        BlockState newStairState = RoadwayPaver.stairStateFor(tier, existing.getValue(StairBlock.FACING));
+                        level.setBlock(pos, newStairState != null ? newStairState.setValue(StairBlock.HALF, existing.getValue(StairBlock.HALF)) : roadState, 3);
                         cellsRepainted++;
                     }
                 }

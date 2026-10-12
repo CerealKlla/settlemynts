@@ -21,10 +21,13 @@ import com.github.cerealklla.settlemynts.zone.PlotGeometry;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Half;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 import java.util.HashSet;
@@ -213,6 +216,21 @@ public final class RoadwayPaver {
             int perpX = -Integer.signum(dz);
             int perpZ = Integer.signum(dx);
 
+            // Slope-step stair, added 2026-10-12 (explicit user request, Tier 3+ only) -- wherever
+            // this index sits exactly 1 block above its immediate predecessor on the (already
+            // slope-limited, so never more than 1) profile, this whole 3-wide cross-section paves as
+            // a real vanilla stairs block climbing in the direction of travel instead of a flat cube
+            // with a vertical riser between it and the previous cross-section. See
+            // #stairStateFor's own doc for which tiers actually have a real vanilla stairs match.
+            BlockState stepState = null;
+            if (i > 0 && profile[i] != profile[i - 1]) {
+                Direction travelDirection = directionFromDelta(v.x() - centerline.get(i - 1).x(), v.z() - centerline.get(i - 1).z());
+                if (profile[i] < profile[i - 1]) {
+                    travelDirection = travelDirection.getOpposite(); // Descending -- the riser (and climb direction) point the other way.
+                }
+                stepState = stairStateFor(tier, travelDirection);
+            }
+
             for (int offset = -ROAD_SIDE_OFFSET_BLOCKS; offset <= ROAD_SIDE_OFFSET_BLOCKS; offset++) {
                 int colX = v.x() + perpX * offset;
                 int colZ = v.z() + perpZ * offset;
@@ -221,7 +239,7 @@ public final class RoadwayPaver {
                 }
                 int natural = offset == 0 ? naturalY[i] : naturalSurfaceY(level, colX, colZ);
                 int targetY = profile[i];
-                paveColumn(level, colX, targetY, colZ, natural, tier, snapshot, captured);
+                paveColumn(level, colX, targetY, colZ, natural, tier, stepState, snapshot, captured);
                 roadCells.add(new BlockPos(colX, targetY, colZ));
                 roadBlocksPlaced++;
             }
@@ -284,8 +302,40 @@ public final class RoadwayPaver {
         level.setBlock(pos, desired, 3);
     }
 
-    private static void paveColumn(ServerLevel level, int x, int targetY, int z, int naturalY, int tier, List<SnapshotEntry> snapshot, Set<BlockPos> captured) {
-        BlockState roadState = ModBlocks.ROADWAY.get().defaultBlockState().setValue(TieredRoadwayBlock.TIER, tier);
+    /**
+     * The direction a stair at this tier should climb, or {@code null} for a tier with no real
+     * vanilla stairs match -- Tier 3 (stone bricks) -&gt; {@code STONE_BRICK_STAIRS} and Tier 4
+     * (bricks) -&gt; {@code BRICK_STAIRS} are exact texture matches for {@link TieredRoadwayBlock}'s
+     * own per-tier look; Tier 5 (quartz bricks) has no vanilla stairs variant at all (confirmed
+     * against the real block registry -- `quartz_bricks` never got one, unlike every other brick-
+     * family block), so it's deliberately left paving flat steps exactly as before rather than
+     * shipping a visually-mismatched substitute texture. Tiers 1-2 were never asked for and are
+     * left untouched too (Tier 1's own path/dirt look has no stair concept either).
+     */
+    static BlockState stairStateFor(int tier, Direction facing) {
+        net.minecraft.world.level.block.Block stairBlock = switch (tier) {
+            case 3 -> Blocks.STONE_BRICK_STAIRS;
+            case 4 -> Blocks.BRICK_STAIRS;
+            default -> null;
+        };
+        if (stairBlock == null) {
+            return null;
+        }
+        return stairBlock.defaultBlockState()
+                .setValue(StairBlock.FACING, facing)
+                .setValue(StairBlock.HALF, Half.BOTTOM);
+    }
+
+    /** Plain cardinal direction for an adjacent/diagonal centerline step -- picks the dominant axis if both are nonzero (a true diagonal step), preferring the larger delta. */
+    private static Direction directionFromDelta(int dx, int dz) {
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private static void paveColumn(ServerLevel level, int x, int targetY, int z, int naturalY, int tier, BlockState stepState, List<SnapshotEntry> snapshot, Set<BlockPos> captured) {
+        BlockState roadState = stepState != null ? stepState : ModBlocks.ROADWAY.get().defaultBlockState().setValue(TieredRoadwayBlock.TIER, tier);
         if (targetY > naturalY) {
             // Causeway -- fill a solid support earthwork from natural terrain up to road level.
             for (int y = naturalY; y < targetY; y++) {
