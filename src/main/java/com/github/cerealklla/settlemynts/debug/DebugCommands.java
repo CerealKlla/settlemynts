@@ -119,19 +119,42 @@ public final class DebugCommands {
             source.sendFailure(Component.literal("No loaded Town Hall Core found."));
             return 0;
         }
+        // Real root cause found live, 2026-10-12: this used to call updatePermittedPlayers, which
+        // is a documented no-op against an areaId that was never actually registered -- and it turns
+        // out most of this settlement's plots (and/or the settlement-wide area) genuinely never were
+        // (confirmed via temporary debug logging in Protectyons: only 1 of 11 expected areas existed
+        // in its registry at all). Real cause of THAT still unconfirmed (not persisting across
+        // restarts is the leading theory, but unproven) -- this command now does a real re-register
+        // instead, recreating any missing entry outright, using each plot/settlement's own
+        // already-correct geometry pulled fresh from Cartographyr (confirmed intact and correct via
+        // the same debug session) rather than recomputing it from scratch.
         int count = 0;
         for (PlotRecord plot : nearest.getPlots()) {
-            com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.updatePermittedPlayers(level, plot.plotId(),
+            java.util.Optional<com.github.cerealklla.cartographyr.geo.Geometry.Polygon> polygon =
+                    com.github.cerealklla.settlemynts.api.Settlemynts.resolvePolygonDirect(level, plot);
+            if (polygon.isEmpty()) {
+                continue;
+            }
+            com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.registerPlot(level, plot.plotId(), polygon.get(),
                     com.github.cerealklla.settlemynts.zone.PlotPermissions.computeProtectionPermittedPlayers(plot, nearest));
             count++;
         }
-        if (nearest.isFinalized()) {
-            com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.updateSettlementPermittedPlayers(level, nearest.getUUID(), nearest.getTownPlanners());
+        boolean settlementResynced = false;
+        if (nearest.isFinalized() && nearest.getCartographyrEntityId() != null) {
+            var settlementEntity = com.github.cerealklla.cartographyr.api.Cartography.getEntity(level,
+                    new com.github.cerealklla.cartographyr.geo.EntityId(nearest.getCartographyrEntityId()));
+            if (settlementEntity.isPresent()) {
+                com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.registerSettlement(level, nearest.getUUID(),
+                        settlementEntity.get().geometry(), nearest.getTownPlanners());
+                settlementResynced = true;
+            }
         }
         int finalCount = count;
+        boolean finalSettlementResynced = settlementResynced;
         GhostTownHallCoreEntity finalCore = nearest;
-        source.sendSuccess(() -> Component.literal("Resynced Protectyons permissions for \"" + finalCore.getSettlementName()
-                + "\" -- " + finalCount + " plot(s) + the settlement-wide area."), false);
+        source.sendSuccess(() -> Component.literal("Re-registered Protectyons permissions for \"" + finalCore.getSettlementName()
+                + "\" -- " + finalCount + "/" + finalCore.getPlots().size() + " plot(s), settlement-wide area "
+                + (finalSettlementResynced ? "re-registered" : "SKIPPED (not finalized or no Cartographyr entity)") + "."), false);
         return count;
     }
 
