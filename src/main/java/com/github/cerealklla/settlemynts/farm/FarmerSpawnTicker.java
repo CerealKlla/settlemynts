@@ -65,17 +65,19 @@ public final class FarmerSpawnTicker {
             return;
         }
 
-        UUID existing = sign.farmerWorkerId();
-        if (existing != null) {
-            if (level.getEntity(existing) instanceof FarmerWorkerEntity living && living.isAlive()) {
-                // Idempotent backfill (2026-10-09) -- picks up the profession fix below for a
-                // worker that was already alive, spawned before this feature existed. Cheap to set
-                // unconditionally every scan (just replaces the record with an identical one once
-                // already correct).
+        // Real, confirmed-live duplicate-worker bug fixed 2026-10-12 (see
+        // zone.PlotNpcDeathListener's own doc for the full root-cause trace, found via Mineshaft's
+        // twin) -- this used to also check `level.getEntity(existing)` here and treat "not currently
+        // found" as proof of death, which is only ever proof the worker's current chunk isn't loaded
+        // *right now* (it wanders), near-guaranteed right after a restart. A slot is now only ever
+        // cleared by a real death; a non-null slot here always means "alive, don't touch" -- still
+        // doing the idempotent profession backfill below when the worker happens to be loaded right
+        // now, purely cosmetic and harmless to skip on a scan where it isn't.
+        if (sign.farmerWorkerId() != null) {
+            if (level.getEntity(sign.farmerWorkerId()) instanceof FarmerWorkerEntity living) {
                 living.setVillagerData(living.getVillagerData().withProfession(level.registryAccess(), net.minecraft.world.entity.npc.villager.VillagerProfession.FARMER));
-                return;
             }
-            sign.setFarmerWorkerId(null);
+            return;
         }
 
         FarmerWorkerEntity worker = new FarmerWorkerEntity(ModEntities.FARMER_WORKER.get(), level);

@@ -60,19 +60,15 @@ public final class MineshaftSpawnTicker {
             return;
         }
 
-        UUID existing = sign.minerWorkerId();
-        if (existing != null) {
-            net.minecraft.world.entity.Entity found = level.getEntity(existing);
-            if (found instanceof MinerWorkerEntity living && living.isAlive()) {
-                return; // Already filled.
-            }
-            // Temporary diagnostic (2026-10-12, real report: dozens of live miner_worker entities
-            // piled at one plot) -- logs exactly why the "already filled" check failed to find the
-            // existing worker, instead of guessing. Remove once the real cause is confirmed.
-            com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
-                    "[MinerSpawnDebug] plot={} sign existing minerWorkerId={} -- level.getEntity() returned {}",
-                    plotId, existing, found == null ? "null" : (found.getClass().getSimpleName() + " isAlive=" + found.isAlive()));
-            sign.setMinerWorkerId(null);
+        // Real, confirmed-live duplicate-worker bug fixed 2026-10-12 -- this used to also check
+        // `level.getEntity(existing)` here and treat "not currently found" as proof of death, which
+        // is only ever proof the worker's *current* chunk (it wanders, see MinerWorkGoal) isn't
+        // loaded *right now* -- a near-guarantee right after a restart. The real worker would then
+        // reload moments later alongside the brand-new one this spawned in its place. A slot is now
+        // only ever cleared by a real death, via zone.PlotNpcDeathListener -- see its own doc for the
+        // full root-cause trace. A non-null slot here always means "alive, don't touch."
+        if (sign.minerWorkerId() != null) {
+            return;
         }
 
         MinerWorkerEntity worker = new MinerWorkerEntity(ModEntities.MINER_WORKER.get(), level);
@@ -80,7 +76,5 @@ public final class MineshaftSpawnTicker {
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
         level.addFreshEntity(worker);
         sign.setMinerWorkerId(worker.getUUID());
-        com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
-                "[MinerSpawnDebug] plot={} spawned new worker uuid={}", plotId, worker.getUUID());
     }
 }

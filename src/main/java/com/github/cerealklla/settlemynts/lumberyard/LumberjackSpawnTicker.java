@@ -60,12 +60,14 @@ public final class LumberjackSpawnTicker {
             return;
         }
 
-        UUID existing = sign.lumberjackWorkerId();
-        if (existing != null) {
-            if (level.getEntity(existing) instanceof LumberjackWorkerEntity living && living.isAlive()) {
-                return; // Already filled.
-            }
-            sign.setLumberjackWorkerId(null);
+        // Real, confirmed-live duplicate-worker bug fixed 2026-10-12 (see
+        // zone.PlotNpcDeathListener's own doc for the full root-cause trace, found via Mineshaft's
+        // twin) -- this used to also check `level.getEntity(existing)` here and treat "not currently
+        // found" as proof of death, which is only ever proof the worker's current chunk isn't loaded
+        // *right now* (it wanders), near-guaranteed right after a restart. A slot is now only ever
+        // cleared by a real death; a non-null slot here always means "alive, don't touch."
+        if (sign.lumberjackWorkerId() != null) {
+            return;
         }
 
         LumberjackWorkerEntity worker = new LumberjackWorkerEntity(ModEntities.LUMBERJACK_WORKER.get(), level);

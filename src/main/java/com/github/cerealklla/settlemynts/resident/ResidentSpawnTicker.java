@@ -80,16 +80,20 @@ public final class ResidentSpawnTicker {
             return; // These get their own specialized worker instead (see lumberyard/farm/mineshaft packages).
         }
 
-        UUID existing = sign.residentVillagerId();
-        if (existing != null) {
-            if (level.getEntity(existing) instanceof ResidentVillagerEntity living && living.isAlive()) {
-                // Idempotent backfill (2026-10-09) -- picks up the profession fix below for a
-                // resident that was already alive, spawned before this feature existed.
+        // Real, confirmed-live duplicate-worker bug fixed 2026-10-12 (see
+        // zone.PlotNpcDeathListener's own doc for the full root-cause trace, found via Mineshaft's
+        // twin) -- this used to also check `level.getEntity(existing)` here and treat "not currently
+        // found" as proof of death, which is only ever proof the resident's current chunk isn't
+        // loaded *right now*, near-guaranteed right after a restart. A slot is now only ever cleared
+        // by a real death; a non-null slot here always means "alive, don't touch" -- still doing the
+        // idempotent profession backfill below when the resident happens to be loaded right now,
+        // purely cosmetic and harmless to skip on a scan where it isn't.
+        if (sign.residentVillagerId() != null) {
+            if (level.getEntity(sign.residentVillagerId()) instanceof ResidentVillagerEntity living) {
                 com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator.representativeProfessionFor(plot.zoneTypeId())
                         .ifPresent(profession -> living.setVillagerData(living.getVillagerData().withProfession(level.registryAccess(), profession)));
-                return; // Already filled.
             }
-            sign.setResidentVillagerId(null);
+            return; // Already filled.
         }
 
         // No finalizeSpawn call, deliberately -- that would let vanilla's own

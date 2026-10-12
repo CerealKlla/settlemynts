@@ -194,6 +194,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.lumberyard.LumberjackSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.farm.FarmerSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.mineshaft.MineshaftSpawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotNpcDeathListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.TownHallCoreLocatorTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.LocatorCancelListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotStakeTossGuard());
