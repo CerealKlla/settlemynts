@@ -62,9 +62,16 @@ public final class MineshaftSpawnTicker {
 
         UUID existing = sign.minerWorkerId();
         if (existing != null) {
-            if (level.getEntity(existing) instanceof MinerWorkerEntity living && living.isAlive()) {
+            net.minecraft.world.entity.Entity found = level.getEntity(existing);
+            if (found instanceof MinerWorkerEntity living && living.isAlive()) {
                 return; // Already filled.
             }
+            // Temporary diagnostic (2026-10-12, real report: dozens of live miner_worker entities
+            // piled at one plot) -- logs exactly why the "already filled" check failed to find the
+            // existing worker, instead of guessing. Remove once the real cause is confirmed.
+            com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
+                    "[MinerSpawnDebug] plot={} sign existing minerWorkerId={} -- level.getEntity() returned {}",
+                    plotId, existing, found == null ? "null" : (found.getClass().getSimpleName() + " isAlive=" + found.isAlive()));
             sign.setMinerWorkerId(null);
         }
 
@@ -73,5 +80,7 @@ public final class MineshaftSpawnTicker {
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
         level.addFreshEntity(worker);
         sign.setMinerWorkerId(worker.getUUID());
+        com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
+                "[MinerSpawnDebug] plot={} spawned new worker uuid={}", plotId, worker.getUUID());
     }
 }
