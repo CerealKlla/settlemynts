@@ -569,6 +569,56 @@ public final class Settlemynts {
         return Optional.empty();
     }
 
+    /** The real current shortfall of each generic resource needed to raise a plot's Tier cap by one right now -- see {@link #getPlotUpgradeShortfall}'s own doc. */
+    public record PlotUpgradeShortfall(int nextTier, int woodNeeded, int stoneNeeded) {
+        public boolean anyShortfall() {
+            return woodNeeded > 0 || stoneNeeded > 0;
+        }
+    }
+
+    /**
+     * The real current shortfall (cost minus physical on-hand plot stock) of each generic resource
+     * needed to raise {@code plotId}'s own Tier cap by one right now -- added 2026-10-12 for
+     * Myssions' new "help upgrade this plot" quest type, which hands a player the actual missing
+     * components to go gather, not just the plot's flat Tier-upgrade cost table on its own (which
+     * says nothing about whatever the plot's boxes already hold). Mirrors {@code construction
+     * .PlotTierUpgradeFunding#preview}'s own on-hand accounting, but doesn't involve gold/market
+     * purchasing at all -- a quest reward is a flat gold/XP grant, not a funding transaction. Empty
+     * if {@code plotId} can't be resolved.
+     */
+    public static Optional<PlotUpgradeShortfall> getPlotUpgradeShortfall(ServerLevel level, UUID plotId) {
+        return findPlotRecord(level, plotId).map(plot -> {
+            int nextTier = plot.tier() + 1;
+            List<Container> boxes = resolvePlotBoxes(level, plotId);
+            List<com.github.cerealklla.settlemynts.construction.ResourceCost> cost =
+                    com.github.cerealklla.settlemynts.construction.PlotTierUpgradeCost.costFor(nextTier);
+            int woodNeeded = 0;
+            int stoneNeeded = 0;
+            for (com.github.cerealklla.settlemynts.construction.ResourceCost entry : cost) {
+                int shortfall = Math.max(0, entry.amount() - countAvailable(boxes, entry.resource()));
+                if (entry.resource() == com.github.cerealklla.blueprynts.blueprint.GenericResource.WOOD) {
+                    woodNeeded = shortfall;
+                } else if (entry.resource() == com.github.cerealklla.blueprynts.blueprint.GenericResource.STONE) {
+                    stoneNeeded = shortfall;
+                }
+            }
+            return new PlotUpgradeShortfall(nextTier, woodNeeded, stoneNeeded);
+        });
+    }
+
+    private static int countAvailable(List<Container> boxes, com.github.cerealklla.blueprynts.blueprint.GenericResource resource) {
+        int total = 0;
+        for (Container box : boxes) {
+            for (int slot = 0; slot < box.getContainerSize(); slot++) {
+                ItemStack stack = box.getItem(slot);
+                if (!stack.isEmpty() && resource.matches(stack.getItem())) {
+                    total += stack.getCount();
+                }
+            }
+        }
+        return total;
+    }
+
     /**
      * A plot's real, on-the-ground location: its Plot Config Sign's own position/dimension (every
      * finalized plot has one, regardless of whether Blueprynts is loaded -- see {@code
