@@ -69,6 +69,31 @@ public final class ShopSeeding {
         // Blacksmith/Restaurant), 2026-10-10 -- see applyTieredDefaults' own doc. A brand-new plot is
         // always Tier 1.
         applyTieredDefaults(level, owner, seeded, catalog.get(), plotAnchor, 1);
+        // NPC-owned, one-shot real listings at Finalize (added 2026-10-11, real live report: a
+        // Mineshaft plot "would not be functional without player intervention" -- an NPC-owned plot
+        // with no Town Planner ever expected to visit Manage Shop has no one to ever click "Save
+        // Changes," so applyCatalog's deliberate never-auto-list rule (2026-10-08, see that method's
+        // own doc) left it permanently empty. That rule's own reasoning was about NOT overriding a
+        // player's deliberate removal -- it doesn't apply here, since there's no owner who could have
+        // made that choice yet. Mirrors autoPopulatePlannedInventory's own NPC-owned-only guard
+        // exactly; a player-owned plot is completely unaffected, same manual-only flow as today.
+        if (seeded.owner().isEmpty()) {
+            applyRealListingsForNpcOwnedPlot(level, seeded, catalog.get(), plotAnchor, 1);
+        }
+    }
+
+    /** See {@link #seedNewPlot}'s own doc for why this exists -- NPC-owned-only, one-shot, real listings (not just a price suggestion). */
+    private static void applyRealListingsForNpcOwnedPlot(ServerLevel level, PlotRecord plot, ShopSeedCatalog catalog, BlockPos plotAnchor, int tier) {
+        if (plot.shopId().isEmpty()) {
+            return;
+        }
+        UUID shopId = plot.shopId().get();
+        for (SeedListing seed : catalog.seedListingsFor(level, plotAnchor, tier)) {
+            if (seed.resource().isEmpty()) {
+                continue; // Stack-backed (e.g. a Lyfe Research Note) -- handled by applyCatalog's own stock top-up, not a real listing here.
+            }
+            YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), effectivePrice(level, seed));
+        }
     }
 
     /** True if this Zone Type has a registered catalog at all -- lets a caller decide whether it's even worth resolving/creating a Shop before calling {@link #seedNewPlotSharingShop}. */

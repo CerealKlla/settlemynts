@@ -31,6 +31,9 @@ public class PlotConfigSignBlockEntity extends BlockEntity {
     // just for the two zone types that get a specialized worker instead of a generic resident.
     private UUID lumberjackWorkerId;
     private UUID farmerWorkerId;
+    // Mineshaft worker NPC (2026-10-11, see mineshaft.MineshaftSpawnTicker) -- same per-plot mutable
+    // "who currently works here" slot as lumberjackWorkerId/farmerWorkerId above.
+    private UUID minerWorkerId;
 
     public PlotConfigSignBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.PLOT_CONFIG_SIGN.get(), pos, state);
@@ -78,6 +81,15 @@ public class PlotConfigSignBlockEntity extends BlockEntity {
         setChanged();
     }
 
+    public UUID minerWorkerId() {
+        return minerWorkerId;
+    }
+
+    public void setMinerWorkerId(UUID minerWorkerId) {
+        this.minerWorkerId = minerWorkerId;
+        setChanged();
+    }
+
     @Override
     protected void loadAdditional(ValueInput input) {
         super.loadAdditional(input);
@@ -86,6 +98,7 @@ public class PlotConfigSignBlockEntity extends BlockEntity {
         residentVillagerId = input.read("ResidentVillagerId", UUIDUtil.CODEC).orElse(null);
         lumberjackWorkerId = input.read("LumberjackWorkerId", UUIDUtil.CODEC).orElse(null);
         farmerWorkerId = input.read("FarmerWorkerId", UUIDUtil.CODEC).orElse(null);
+        minerWorkerId = input.read("MinerWorkerId", UUIDUtil.CODEC).orElse(null);
     }
 
     @Override
@@ -96,5 +109,6 @@ public class PlotConfigSignBlockEntity extends BlockEntity {
         output.storeNullable("ResidentVillagerId", UUIDUtil.CODEC, residentVillagerId);
         output.storeNullable("LumberjackWorkerId", UUIDUtil.CODEC, lumberjackWorkerId);
         output.storeNullable("FarmerWorkerId", UUIDUtil.CODEC, farmerWorkerId);
+        output.storeNullable("MinerWorkerId", UUIDUtil.CODEC, minerWorkerId);
     }
 }

@@ -10,8 +10,10 @@ import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
@@ -21,6 +23,7 @@ import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
@@ -98,11 +101,42 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         // Deliberately never calls super.customServerAiStep (Villager's own) -- see class doc.
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
-        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
-        if (surfaceY - getY() > UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS) {
+        if (isActuallyTrappedUnderground(level, blockX, blockZ)) {
             getNavigation().stop();
+            int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
             teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
         }
+    }
+
+    /**
+     * Real fix, 2026-10-11, for a live report: "Lumberjack is still climbing trees instead of
+     * chopping down the tree." The old check compared a heightmap column's surface against the
+     * worker's own Y -- but {@code MOTION_BLOCKING_NO_LEAVES} counts logs as solid, so a worker
+     * simply standing next to (or approaching) a trunk has its own column's "surface" read as the
+     * top of the tree, not real ground, and got teleported straight up onto it. That's exactly what
+     * looked like "climbing" -- a repeated false-positive escape teleport, not a pathfinding issue.
+     * This was already flagged once as a known edge case (see {@code LumberjackWorkGoal}'s
+     * {@code HARVEST_ARRIVE_DIST_SQ} history) and worked around there, but never actually fixed here
+     * at the source.
+     *
+     * <p>Fixed by checking whether the worker is genuinely enclosed -- walking straight up from its
+     * own position looking for real open space, ignoring logs/leaves entirely (a tree overhead is
+     * not "underground"). Only a solid, non-tree ceiling across the whole threshold band counts as
+     * actually trapped.
+     */
+    private boolean isActuallyTrappedUnderground(ServerLevel level, int blockX, int blockZ) {
+        int startY = Mth.floor(getY()) + 1;
+        for (int dy = 0; dy < UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS; dy++) {
+            BlockPos pos = new BlockPos(blockX, startY + dy, blockZ);
+            BlockState state = level.getBlockState(pos);
+            if (state.is(BlockTags.LOGS) || state.is(BlockTags.LEAVES)) {
+                continue; // Tree material overhead -- not a real ceiling, keep scanning upward.
+            }
+            if (state.getCollisionShape(level, pos).isEmpty()) {
+                return false; // Found real open space within the threshold -- not trapped.
+            }
+        }
+        return true;
     }
 
     @Override

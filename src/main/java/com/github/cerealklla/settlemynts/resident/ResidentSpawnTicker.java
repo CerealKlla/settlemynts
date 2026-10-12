@@ -34,9 +34,9 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * type -- except a Guardhouse (real report, 2026-10-05: "do not spawn an NPC at the guardhouse,
  * they already spawn actual guards" -- this is exactly the "worth revisiting" case this doc used
  * to flag as open; it's now resolved, a Guardhouse plot never gets a resident), and, same day,
- * Lumberyard/Farm plots once their own specialized worker NPCs (see {@code
- * lumberyard.LumberjackSpawnTicker}/{@code farm.FarmerSpawnTicker}) replaced the generic resident
- * for those two zone types too.
+ * Lumberyard/Farm/Mineshaft plots once their own specialized worker NPCs (see {@code
+ * lumberyard.LumberjackSpawnTicker}/{@code farm.FarmerSpawnTicker}/{@code
+ * mineshaft.MineshaftSpawnTicker}) replaced the generic resident for those zone types too.
  */
 public final class ResidentSpawnTicker {
 
@@ -72,8 +72,9 @@ public final class ResidentSpawnTicker {
             return; // Guardhouse already has its own guards -- no resident villager too.
         }
         if (plot.zoneTypeId().equals(net.minecraft.resources.Identifier.fromNamespaceAndPath("blueprynts", "lumberyard"))
-                || plot.zoneTypeId().equals(net.minecraft.resources.Identifier.fromNamespaceAndPath("blueprynts", "farm"))) {
-            return; // 2026-10-05: these get their own specialized worker instead (see lumberyard/farm packages).
+                || plot.zoneTypeId().equals(net.minecraft.resources.Identifier.fromNamespaceAndPath("blueprynts", "farm"))
+                || plot.zoneTypeId().equals(net.minecraft.resources.Identifier.fromNamespaceAndPath("blueprynts", "mineshaft"))) {
+            return; // These get their own specialized worker instead (see lumberyard/farm/mineshaft packages).
         }
 
         UUID existing = sign.residentVillagerId();

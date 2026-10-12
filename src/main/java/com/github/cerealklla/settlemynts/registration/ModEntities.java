@@ -9,6 +9,7 @@ import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.farm.FarmerWorkerEntity;
 import com.github.cerealklla.settlemynts.guardhouse.GuardEntity;
 import com.github.cerealklla.settlemynts.lumberyard.LumberjackWorkerEntity;
+import com.github.cerealklla.settlemynts.mineshaft.MinerWorkerEntity;
 import com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity;
 import com.github.cerealklla.settlemynts.zone.GhostPlotFencePostEntity;
 import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
@@ -179,6 +180,15 @@ public final class ModEntities {
     public static final DeferredHolder<EntityType<?>, EntityType<FarmerWorkerEntity>> FARMER_WORKER = ENTITIES.registerEntityType(
             "farmer_worker",
             FarmerWorkerEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(0.6f, 1.95f).clientTrackingRange(10));
+
+    // Mineshaft worker NPC (design doc Section 14a, added 2026-10-11) -- same shape as
+    // LUMBERJACK_WORKER/FARMER_WORKER above, just with a mining job instead. Never naturally
+    // spawned -- only ever created by mineshaft.MineshaftSpawnTicker.
+    public static final DeferredHolder<EntityType<?>, EntityType<MinerWorkerEntity>> MINER_WORKER = ENTITIES.registerEntityType(
+            "miner_worker",
+            MinerWorkerEntity::new,
             MobCategory.MISC,
             builder -> builder.sized(0.6f, 1.95f).clientTrackingRange(10));
 }

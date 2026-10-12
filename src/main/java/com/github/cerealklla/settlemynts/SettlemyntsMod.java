@@ -188,6 +188,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.lumberyard.LumberjackSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.farm.FarmerSpawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.mineshaft.MineshaftSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.TownHallCoreLocatorTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.LocatorCancelListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotStakeTossGuard());
@@ -229,6 +230,7 @@ public class SettlemyntsMod {
         event.put(ModEntities.RESIDENT_VILLAGER.get(), com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity.createAttributes().build());
         event.put(ModEntities.LUMBERJACK_WORKER.get(), com.github.cerealklla.settlemynts.lumberyard.LumberjackWorkerEntity.createAttributes().build());
         event.put(ModEntities.FARMER_WORKER.get(), com.github.cerealklla.settlemynts.farm.FarmerWorkerEntity.createAttributes().build());
+        event.put(ModEntities.MINER_WORKER.get(), com.github.cerealklla.settlemynts.mineshaft.MinerWorkerEntity.createAttributes().build());
     }
 
     /** Payload registrations for the staking mechanic (design doc Section 6) -- see founding.* payload classes' own docs. */

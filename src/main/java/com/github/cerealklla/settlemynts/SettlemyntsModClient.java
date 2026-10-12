@@ -116,6 +116,7 @@ public class SettlemyntsModClient {
         // subclasses, reusing vanilla's own renderer.
         event.registerEntityRenderer(ModEntities.LUMBERJACK_WORKER.get(), net.minecraft.client.renderer.entity.VillagerRenderer::new);
         event.registerEntityRenderer(ModEntities.FARMER_WORKER.get(), net.minecraft.client.renderer.entity.VillagerRenderer::new);
+        event.registerEntityRenderer(ModEntities.MINER_WORKER.get(), net.minecraft.client.renderer.entity.VillagerRenderer::new);
     }
 
     @SubscribeEvent

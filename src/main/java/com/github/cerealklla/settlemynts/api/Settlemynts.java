@@ -468,6 +468,27 @@ public final class Settlemynts {
     }
 
     /**
+     * Every real container's own {@link BlockPos} located within {@code plotId}'s own polygon --
+     * added 2026-10-11 for the Mineshaft worker ({@code mineshaft.MinerWorkGoal}), the first plot NPC
+     * that needs to actually *walk to* a chest rather than deposit into it in place (every existing
+     * worker only ever calls {@link #resolvePlotBoxes}, which hands back live {@link Container}s with
+     * no position attached). Empty for a natural-village plot, same as {@link #resolvePlotBoxes}'s
+     * own fallback condition -- a Mineshaft can't exist there (no player-founded settlement to stake
+     * one on), so no natural-vault fallback is needed here.
+     */
+    public static List<BlockPos> resolvePlotBoxPositions(ServerLevel level, UUID plotId) {
+        Optional<Geometry.Polygon> polygon = findPolygonForPlot(level, plotId);
+        if (polygon.isEmpty()) {
+            return List.of();
+        }
+        List<BlockPos> positions = new ArrayList<>();
+        for (UUID boxId : Cartography.getBoxesAt(level, polygon.get())) {
+            Cartography.getBoxLocation(level, boxId).ifPresent(globalPos -> positions.add(globalPos.pos()));
+        }
+        return positions;
+    }
+
+    /**
      * A finalized player-founded plot's own real polygon, if resolvable -- exposed publicly 2026-10-09
      * so {@code zone.PlotCraftingStructures} (NPC plot crafting) can scan the same area this plot's own
      * boxes are found in, without duplicating the settlement/core lookup here. {@code Optional.empty()}
