@@ -298,6 +298,40 @@ public final class Settlemynts {
     }
 
     /**
+     * Same as {@link #getAllSettlementListings}, but filtered down to listings whose vendor plot
+     * actually has at least 1 unit of the concrete item physically sitting in its boxes right now --
+     * added 2026-10-12 for Myssions' "A Useful Errand" quest, which picked its target purely from
+     * {@link #getAllSettlementListings} (listed for sale, regardless of stock) and could hand a
+     * player an item the vendor had no real stock of at all. Tag-based listings are skipped (same as
+     * every existing caller on the Myssions side -- {@code bridge.SettlemyntsShopBridge} only ever
+     * resolves a listing with a concrete {@code itemId} to begin with, since a tag doesn't name one
+     * item to hand over). Deliberately a new method rather than changing {@link #getAllSettlementListings}
+     * itself -- that method's existing callers ({@link #findSellingPlots} included) intentionally don't
+     * stock-check, per their own doc.
+     */
+    public static List<YconomicsShopBridge.ShopListingView> getAllSettlementListingsInStock(ServerLevel level, UUID settlementCoreId) {
+        List<YconomicsShopBridge.ShopListingView> result = new ArrayList<>();
+        if (!YconomicsShopBridge.isAvailable() || !(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
+            return result;
+        }
+        for (PlotRecord plot : core.getPlots()) {
+            List<YconomicsShopBridge.ShopListingView> listings = getListings(level, plot.plotId());
+            if (listings.isEmpty()) {
+                continue;
+            }
+            Map<Identifier, Integer> stock = scanPlotItemStock(level, plot.plotId());
+            for (YconomicsShopBridge.ShopListingView listing : listings) {
+                listing.resource().itemId().ifPresent(itemId -> {
+                    if (stock.getOrDefault(itemId, 0) > 0) {
+                        result.add(listing);
+                    }
+                });
+            }
+        }
+        return result;
+    }
+
+    /**
      * Buys up to {@code quantity} units of {@code resource} from {@code shopId} (the Shop that owns
      * {@code plotId}'s boxes), draining stock from every box located on {@code plotId}'s own plot (via
      * Cartographyr's Box Identity over the plot's real polygon) and depositing nuggets into {@code
