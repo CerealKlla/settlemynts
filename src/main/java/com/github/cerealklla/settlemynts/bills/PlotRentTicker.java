@@ -27,10 +27,17 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * <p>Same periodic-scan shape as {@code construction.NpcAutoFundingTicker} (a single large-radius
  * world scan rather than a maintained registry -- only currently-loaded settlements/plots are
  * reachable this way, same known limitation that ticker already has).
+ *
+ * <p>Staggered 2026-10-12 -- this and {@code NpcAutoFundingTicker} both ran the identical
+ * full-world-bounding-box scan shape at the same 20-tick cadence with no offset, guaranteeing they
+ * always collided on the same tick (the same "thundering herd" pattern fixed for the 100-tick group
+ * earlier the same day -- see {@code farm.FarmerSpawnTicker}'s own doc). This one gets the other
+ * half of the window.
  */
 public class PlotRentTicker {
 
     private static final int SCAN_INTERVAL_TICKS = 20;
+    private static final int TICK_OFFSET = 10;
     private static final double WORLD_SCAN_RADIUS = 3.0E7;
 
     @SubscribeEvent
@@ -39,7 +46,7 @@ public class PlotRentTicker {
             return;
         }
         MinecraftServer server = event.getServer();
-        if (server.getTickCount() % SCAN_INTERVAL_TICKS != 0) {
+        if ((server.getTickCount() + TICK_OFFSET) % SCAN_INTERVAL_TICKS != 0) {
             return;
         }
         for (ServerLevel level : server.getAllLevels()) {

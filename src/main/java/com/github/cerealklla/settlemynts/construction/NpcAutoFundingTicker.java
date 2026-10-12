@@ -62,6 +62,12 @@ public class NpcAutoFundingTicker {
     // reliably catch any box's own drop-off window (see isDeliveryWindow) without needing per-box
     // "last delivered" state.
     private static final int SCAN_INTERVAL_TICKS = 20;
+    // Staggered 2026-10-12 -- found during the quest-mob-spawn performance audit: this and
+    // bills.PlotRentTicker both run a full-world GhostTownHallCoreEntity bounding-box scan at the
+    // exact same 20-tick cadence with no offset, so they always collided on the same tick, the same
+    // "thundering herd" shape as the 100-tick group fixed earlier the same day (see
+    // farm.FarmerSpawnTicker's own doc for that writeup). This one keeps offset 0 (first).
+    private static final int TICK_OFFSET = 0;
 
     // ResourceDropOffTickInterval / ResourcesDroppedPerDelivery, both 1% -- see class doc.
     private static final double DROPOFF_INTERVAL_FRACTION = 0.01;
@@ -76,7 +82,7 @@ public class NpcAutoFundingTicker {
         }
         MinecraftServer server = event.getServer();
         int tickCount = server.getTickCount();
-        if (tickCount % SCAN_INTERVAL_TICKS != 0) {
+        if ((tickCount + TICK_OFFSET) % SCAN_INTERVAL_TICKS != 0) {
             return;
         }
         for (ServerLevel level : server.getAllLevels()) {
