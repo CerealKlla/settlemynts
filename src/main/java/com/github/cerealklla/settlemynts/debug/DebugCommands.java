@@ -76,8 +76,63 @@ public final class DebugCommands {
                         .executes(ctx -> plotInfo(ctx.getSource())))
                 .then(Commands.literal("naturalvillagers")
                         .executes(ctx -> naturalVillagers(ctx.getSource())))
+                .then(Commands.literal("resyncprotection")
+                        .executes(ctx -> resyncProtection(ctx.getSource())))
                 .then(Commands.literal("plot")
                         .then(Commands.literal("bill").then(billPlotId))));
+    }
+
+    /**
+     * DEBUG ONLY -- added 2026-10-12, real report: "I'm the mayor but it's not letting me modify any
+     * plots in my settlement," confirmed live to be a block-break/place denial (Protectyons), not a
+     * UI permission gate -- the UI-level {@code PlotPermissions#canManage} check and the founder's
+     * own recorded identity both checked out correctly against the real live data, so the most likely
+     * remaining explanation is Protectyons' own separate {@code permission.ProtectedAreaRegistry}
+     * having drifted out of sync with Settlemynts' own source of truth for some plot, for a reason
+     * not pinned down. Rather than keep guessing, this re-pushes every already-registered area's
+     * permitted-player set fresh (both every finalized plot and the settlement-wide area), the same
+     * resync {@code GrantTownPlannerPayload}'s handler already does as a side effect -- safe to run
+     * any time, a no-op if everything was already correct.
+     */
+    private static int resyncProtection(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof net.minecraft.world.entity.player.Player player) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world."));
+            return 0;
+        }
+        if (!ModList.get().isLoaded("protectyons")) {
+            source.sendFailure(Component.literal("Protectyons isn't loaded -- nothing to resync."));
+            return 0;
+        }
+        AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+        List<GhostTownHallCoreEntity> cores = level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, c -> true);
+        GhostTownHallCoreEntity nearest = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (GhostTownHallCoreEntity core : cores) {
+            double distSq = core.distanceToSqr(player);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                nearest = core;
+            }
+        }
+        if (nearest == null) {
+            source.sendFailure(Component.literal("No loaded Town Hall Core found."));
+            return 0;
+        }
+        int count = 0;
+        for (PlotRecord plot : nearest.getPlots()) {
+            com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.updatePermittedPlayers(level, plot.plotId(),
+                    com.github.cerealklla.settlemynts.zone.PlotPermissions.computeProtectionPermittedPlayers(plot, nearest));
+            count++;
+        }
+        if (nearest.isFinalized()) {
+            com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.updateSettlementPermittedPlayers(level, nearest.getUUID(), nearest.getTownPlanners());
+        }
+        int finalCount = count;
+        GhostTownHallCoreEntity finalCore = nearest;
+        source.sendSuccess(() -> Component.literal("Resynced Protectyons permissions for \"" + finalCore.getSettlementName()
+                + "\" -- " + finalCount + " plot(s) + the settlement-wide area."), false);
+        return count;
     }
 
     /**
