@@ -1137,14 +1137,27 @@ public class SettlemyntsMod {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, payload.anchor());
+        handleRequestShopWishlist(player, serverLevel, payload.anchor());
+    }
+
+    /**
+     * Real entry point behind {@link #requestShopWishlist} -- pulled out standalone 2026-10-12 so
+     * {@code resident.VillagerShopInteractListener} can trigger the exact same "Press H" chat menu
+     * directly from a right-click, not just the keybind's network round-trip. Real report, same day:
+     * right-clicking the Town Hall plot's own NPC-owned resident did nothing at all, unlike every
+     * other plot NPC -- that listener's right-click handling only ever opened a Shop
+     * ({@code npcHasOpenableShop}), with no fallback for an NPC (like the Town Hall's) that can never
+     * have one by design but can still have a quest-board offer to talk about.
+     */
+    public static void handleRequestShopWishlist(ServerPlayer player, ServerLevel serverLevel, com.github.cerealklla.settlemynts.plotsign.ShopAnchor anchor) {
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, anchor);
         if (resolved.isEmpty()) {
             player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
             return;
         }
         PlotRecord plot = resolved.get().plot();
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
-                payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
+                anchor, buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
                 buildQuestMenu(player, plot)));
     }
 

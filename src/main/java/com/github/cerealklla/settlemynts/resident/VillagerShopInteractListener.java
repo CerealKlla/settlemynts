@@ -48,6 +48,17 @@ public final class VillagerShopInteractListener {
             if (SettlemyntsMod.npcHasOpenableShop(level, anchor)) {
                 event.setCanceled(true);
                 SettlemyntsMod.handleRequestShop(player, anchor, false);
+                return;
+            }
+            // Real report, 2026-10-12: right-clicking the Town Hall plot's own resident did nothing
+            // at all -- that plot's zone type is excluded from ever having a Shop by design (see
+            // SettlemyntsMod#npcHasOpenableShop), so this fell straight through with no fallback,
+            // even though the same NPC can still have a quest-board offer/wishlist to talk about via
+            // "Press H" today. Right-click now offers the identical chat menu when there's real
+            // business, same eligibility check the "Press H" keybind/prompt already use.
+            if (SettlemyntsMod.anchorHasWishlist(level, anchor) || SettlemyntsMod.anchorHasPersonalQuestBusiness(player, level, anchor)) {
+                event.setCanceled(true);
+                SettlemyntsMod.handleRequestShopWishlist(player, level, anchor);
             }
             return;
         }
