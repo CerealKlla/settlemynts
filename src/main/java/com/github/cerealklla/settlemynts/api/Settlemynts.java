@@ -109,12 +109,21 @@ public final class Settlemynts {
     public static boolean canManagePlotAt(ServerLevel level, BlockPos pos, UUID playerId) {
         AABB worldBounds = new AABB(-WORLD_SCAN_RADIUS, level.getMinY(), -WORLD_SCAN_RADIUS,
                 WORLD_SCAN_RADIUS, level.getMaxY(), WORLD_SCAN_RADIUS);
+        int coreCount = 0;
         for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+            coreCount++;
             Optional<PlotRecord> plot = PlotGeometry.findContainingPlot(level, core, pos.getX(), pos.getZ());
             if (plot.isPresent()) {
-                return PlotPermissions.canManage(plot.get(), core, playerId);
+                boolean result = PlotPermissions.canManage(plot.get(), core, playerId);
+                com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
+                        "[CanManageDebug] canManagePlotAt pos={} player={} -> found plot {} on core '{}' (founder={}) -> canManage={}",
+                        pos, playerId, plot.get().plotId(), core.getSettlementName(), core.getFounderId(), result);
+                return result;
             }
         }
+        com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
+                "[CanManageDebug] canManagePlotAt pos={} player={} -> NO containing plot found among {} finalized core(s)",
+                pos, playerId, coreCount);
         return false;
     }
 

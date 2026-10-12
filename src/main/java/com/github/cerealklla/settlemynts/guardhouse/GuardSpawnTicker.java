@@ -36,6 +36,9 @@ public final class GuardSpawnTicker {
 
     // Cheap enough at 5 seconds to keep garrison slots filled promptly without scanning every tick.
     private static final int SCAN_INTERVAL_TICKS = 100;
+    // Staggered 2026-10-12 against the other seven 100-tick full-world scan tickers across this
+    // suite -- see FarmerSpawnTicker's own doc for the full "thundering herd" root cause.
+    private static final int TICK_OFFSET = 12;
 
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
@@ -43,7 +46,7 @@ public final class GuardSpawnTicker {
             return; // No guards ever spawn on a Kyt-less server.
         }
         MinecraftServer server = event.getServer();
-        if (server.getTickCount() % SCAN_INTERVAL_TICKS != 0) {
+        if ((server.getTickCount() + TICK_OFFSET) % SCAN_INTERVAL_TICKS != 0) {
             return;
         }
         for (Map.Entry<UUID, GlobalPos> entry : GuardhouseIndex.get(server).all().entrySet()) {

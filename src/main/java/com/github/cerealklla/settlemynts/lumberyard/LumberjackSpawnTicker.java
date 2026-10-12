@@ -29,11 +29,14 @@ public final class LumberjackSpawnTicker {
 
     private static final Identifier LUMBERYARD_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "lumberyard");
     private static final int SCAN_INTERVAL_TICKS = 100; // 5 seconds, same cadence as the other spawn tickers.
+    // Staggered 2026-10-12 against the other seven 100-tick full-world scan tickers across this
+    // suite -- see FarmerSpawnTicker's own doc for the full "thundering herd" root cause.
+    private static final int TICK_OFFSET = 25;
 
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
         MinecraftServer server = event.getServer();
-        if (server.getTickCount() % SCAN_INTERVAL_TICKS != 0) {
+        if ((server.getTickCount() + TICK_OFFSET) % SCAN_INTERVAL_TICKS != 0) {
             return;
         }
         for (Map.Entry<UUID, GlobalPos> entry : PlotConfigSignIndex.get(server).all().entrySet()) {

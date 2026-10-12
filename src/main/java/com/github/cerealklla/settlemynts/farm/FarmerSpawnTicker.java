@@ -25,11 +25,23 @@ public final class FarmerSpawnTicker {
 
     private static final Identifier FARM_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "farm");
     private static final int SCAN_INTERVAL_TICKS = 100;
+    // Staggered 2026-10-12 -- real report: every mob near the player stutter-moving in lockstep,
+    // same symptom as an earlier guard-lag investigation. Root cause found this time: eight
+    // independent full-world-scanning tickers across three mods (this one, GuardSpawnTicker,
+    // LumberjackSpawnTicker, MineshaftSpawnTicker, ResidentSpawnTicker, VillagerRespawnTicker,
+    // NaturalVillageShopLinkTicker, Myssions' QuestDeadlineTicker) all independently picked the same
+    // "every 100 ticks" cadence with no offset, so every one of their scans landed on the exact same
+    // tick (0, 100, 200, ...) and their costs compounded into one periodic ~50-180ms spike every 5
+    // seconds -- confirmed live via the already-present [LagDiagnostics] slow-tick logger, which was
+    // firing almost exactly every 5.00s. Each ticker keeps its own 100-tick (5s) cadence unchanged;
+    // only *which* tick within that window it fires on changes, spreading the same total work out
+    // instead of piling it onto one tick.
+    private static final int TICK_OFFSET = 0;
 
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
         MinecraftServer server = event.getServer();
-        if (server.getTickCount() % SCAN_INTERVAL_TICKS != 0) {
+        if ((server.getTickCount() + TICK_OFFSET) % SCAN_INTERVAL_TICKS != 0) {
             return;
         }
         for (Map.Entry<UUID, GlobalPos> entry : PlotConfigSignIndex.get(server).all().entrySet()) {
