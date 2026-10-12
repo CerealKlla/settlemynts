@@ -248,4 +248,24 @@ fully built and calling back into this mod via four new `api.Settlemynts` method
 **Not yet live-tested** -- no Message Board UI exists yet for a player to actually post/accept one
 of these quests through; see myssions-context's decisions.md for the full remaining-work list.
 
+**Shop/NPC proximity prompt reworked from a server-side poll to a client-triggered scan, 2026-10-12**
+(see `plotsign.PlotShopProximityTicker`'s own doc) -- explicit user request after discussing the
+architecture: "let the client's machine do the time-based polling and only alert the server when
+it's relevant." The old `PlotShopProximityTicker` was a `PlayerTickEvent` subscriber that
+unconditionally re-scanned a 4-block cube (signs) and two Villager AABB queries (NPCs, plus the
+wider 48-block "!" marker scan), twice a second, for every online player, regardless of whether
+anything was nearby or had changed. New `plotsign.client.ClientProximityScanner` does the
+equivalent scan client-side instead (cheap by construction -- it's just distance math against
+entities/blocks the client already has loaded for rendering, no new network fetch) and sends a new
+`ProximityScanPayload` to the server only when its candidate set changes, plus a slow 5-second
+heartbeat while something is actually nearby (so server-side state riding on "nothing changed" --
+the public wishlist nameplate, the personal-business cache -- can't go stale indefinitely while a
+player stands still). `PlotShopProximityTicker` itself is now fully static with no tick-event
+subscription at all; every candidate the client reports is still independently re-validated
+server-side (real distance from the player's actual position, real shop/plot/quest eligibility)
+before being acted on -- only the *trigger* moved client-side, not the authoritative computation,
+since the eligibility checks themselves depend on server-only state (Myssions quest history,
+Planned Inventory deficits) that has no client-side equivalent to check against. `./gradlew build`
+green, whole-suite (8 mods) rebuild + boot-smoke-test clean. **Not yet live-tested.**
+
 See [context/classes/](context/classes/) for per-class reference.

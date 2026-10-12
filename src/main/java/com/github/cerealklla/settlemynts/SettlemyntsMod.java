@@ -181,7 +181,9 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.construction.NpcAutoFundingTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.bills.PlotRentTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardSpawnTicker());
-        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.plotsign.PlotShopProximityTicker());
+        // PlotShopProximityTicker is no longer a tick-event subscriber as of 2026-10-12 -- it's
+        // purely static now, driven by ProximityScanPayload instead of PlayerTickEvent (see its own
+        // doc). No registration needed here any more.
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.ResidentSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.ResidentConversionGuard());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.ShopMidnightRestockTicker());
@@ -525,6 +527,12 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.PersonalQuestMarkerPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientPersonalQuestMarkerState.set(payload.entityIds()));
 
+        // Client-triggered proximity scan (2026-10-12) -- see ProximityScanPayload/
+        // PlotShopProximityTicker's own docs. Replaces the old server-side polling ticker.
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.ProximityScanPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.ProximityScanPayload.STREAM_CODEC,
+                (payload, context) -> handleProximityScan(payload, context));
+
         // "Distance from Stake" readout for Plot Placement Stakes/Roadway Stakes (2026-10-09).
         registrar.playToClient(com.github.cerealklla.settlemynts.founding.AnchorDistancePayload.TYPE,
                 com.github.cerealklla.settlemynts.founding.AnchorDistancePayload.STREAM_CODEC,
@@ -656,6 +664,20 @@ public class SettlemyntsMod {
             return;
         }
         handleRequestShop(player, payload.anchor(), payload.manage());
+    }
+
+    /**
+     * Server-side half of the 2026-10-12 proximity rework -- see {@code
+     * plotsign.PlotShopProximityTicker}/{@code plotsign.ProximityScanPayload}'s own docs. Just
+     * resolves the real {@link ServerLevel} and hands off; all the actual re-validation/eligibility
+     * logic lives in the ticker class, same as every other anchor-resolving handler in this file.
+     */
+    private static void handleProximityScan(com.github.cerealklla.settlemynts.plotsign.ProximityScanPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        com.github.cerealklla.settlemynts.plotsign.PlotShopProximityTicker.handleProximityScan(
+                player, serverLevel, payload.nearCandidates(), payload.farVillagerEntityIds());
     }
 
     /**

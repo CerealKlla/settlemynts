@@ -16,6 +16,7 @@ import com.github.cerealklla.settlemynts.guardhouse.client.SelectKytScreen;
 import com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests;
 import com.github.cerealklla.settlemynts.plotsign.RequestShopPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestShopWishlistPayload;
+import com.github.cerealklla.settlemynts.plotsign.client.ClientProximityScanner;
 import com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotConfigSignMenuScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotDetailsScreen;
@@ -137,6 +138,10 @@ public class SettlemyntsModClient {
     // (registerPayloads runs on both sides) never itself references Screen/Minecraft.
     @SubscribeEvent
     static void onClientTick(ClientTickEvent.Post event) {
+        // Client-side proximity scan (2026-10-12) -- see ClientProximityScanner's own doc. Replaces
+        // the old server-side PlotShopProximityTicker poll with a client-triggered one.
+        ClientProximityScanner.tick();
+
         ClientFoundingRequests.takePendingFoundingScreen().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
                 Minecraft.getInstance().setScreen(new FoundingScreen(request));
