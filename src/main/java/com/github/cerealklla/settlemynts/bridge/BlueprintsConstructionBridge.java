@@ -73,6 +73,18 @@ public final class BlueprintsConstructionBridge {
                 .flatMap(pos -> Blueprynts.getConstructionBoxStatus(level, pos));
     }
 
+    /**
+     * Appends one line to a plot's Building Supply Box transaction ledger (added 2026-10-12, real
+     * user report: "the lumberjack seems to be getting infinite money" -- a standing record of
+     * every purchase/sale beats re-adding temporary debug logging each time something looks off).
+     * Thin pass-through to {@link Blueprynts#appendLedgerEntry} -- callers must still guard with
+     * {@code ModList.get().isLoaded("blueprynts")} and a present {@code plot.boxPos()} themselves,
+     * same as every other method on this class.
+     */
+    public static void appendLedgerEntry(ServerLevel level, BlockPos boxPos, String line) {
+        Blueprynts.appendLedgerEntry(level, boxPos, line);
+    }
+
     /** A plot's current Construction Box Tier -- added 2026-10-05 for {@code zone.ShopSeeding}, which needs to know how far up a Zone Type's seed catalog it's allowed to reach. */
     public static Optional<Integer> resolveTier(ServerLevel level, UUID constructionBoxId) {
         return Blueprynts.getConstructionBoxPos(level, constructionBoxId)

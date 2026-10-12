@@ -12,6 +12,7 @@ import java.util.UUID;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
+import com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge;
 import com.github.cerealklla.settlemynts.bridge.LyfeCraftingBridge;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 
@@ -22,6 +23,7 @@ import net.minecraft.tags.TagKey;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.neoforged.fml.ModList;
 
 /**
  * Automated inter-plot shop trading at midnight (design doc Section 14a, added 2026-10-09, explicit
@@ -59,6 +61,13 @@ public final class PlannedInventoryClearing {
     }
 
     private static final ShopResource GOLD_NUGGETS = ShopResource.ofItem(BuiltInRegistries.ITEM.getKey(Items.GOLD_NUGGET));
+
+    /** Ledger entry for a midnight inter-plot trade (2026-10-12) -- same hook as the real player buy/sell handlers in SettlemyntsMod, see BlueprintsConstructionBridge's own doc. No-op if the plot has no box or Blueprynts isn't loaded. */
+    private static void appendLedger(ServerLevel level, PlotRecord plot, String line) {
+        if (plot.boxPos().isPresent() && ModList.get().isLoaded("blueprynts")) {
+            BlueprintsConstructionBridge.appendLedgerEntry(level, plot.boxPos().get(), line);
+        }
+    }
     private static final int MAX_CRAFTS_PER_PLOT_PER_TARGET = 64;
 
     private record Participant(PlotRecord plot, List<Container> boxes) {
@@ -266,6 +275,10 @@ public final class PlannedInventoryClearing {
                 sellers.set(si, new Seller(seller.participant(), seller.remainingSurplus() - split.totalUnits(), seller.pricePerUnit()));
                 SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} bought {}x {} from plot {} for {} nuggets",
                         buyer.participant().plot().plotId(), split.totalUnits(), key.id(), seller.participant().plot().plotId(), split.totalCost());
+                appendLedger(level, buyer.participant().plot(),
+                        "Bought " + split.totalUnits() + "x " + key.id() + " from neighboring plot for " + split.totalCost() + " nuggets");
+                appendLedger(level, seller.participant().plot(),
+                        "Sold " + split.totalUnits() + "x " + key.id() + " to neighboring plot for " + split.totalCost() + " nuggets");
                 ShopWishlistCache.invalidate(buyer.participant().plot().plotId());
                 ShopWishlistCache.invalidate(seller.participant().plot().plotId());
             }
@@ -525,6 +538,8 @@ public final class PlannedInventoryClearing {
             }
             SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} direct-bought 1x {} from plot {} for {} nuggets (craftable resource)",
                     buyer.plot().plotId(), key.id(), seller.plot().plotId(), realPrice.get());
+            appendLedger(level, buyer.plot(), "Bought 1x " + key.id() + " from neighboring plot for " + realPrice.get() + " nuggets");
+            appendLedger(level, seller.plot(), "Sold 1x " + key.id() + " to neighboring plot for " + realPrice.get() + " nuggets");
             ShopWishlistCache.invalidate(buyer.plot().plotId());
             ShopWishlistCache.invalidate(seller.plot().plotId());
             return true;

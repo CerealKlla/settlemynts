@@ -964,6 +964,13 @@ public class SettlemyntsMod {
         // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
         com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
         com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plotId);
+        // Ledger entry (2026-10-12) -- recorded from the shop's own side, since the ledger lives on
+        // this plot's Building Supply Box.
+        if (resolvedBuy.get().plot().boxPos().isPresent() && ModList.get().isLoaded("blueprynts")) {
+            com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
+                    serverLevel, resolvedBuy.get().plot().boxPos().get(),
+                    "Sold " + filled + "x to " + player.getGameProfile().name() + " for " + result.nuggetsCharged() + " nuggets");
+        }
     }
 
     /**
@@ -1078,6 +1085,12 @@ public class SettlemyntsMod {
         // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
         com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
         com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plotId);
+        // Ledger entry (2026-10-12) -- see buyFromShop's own identical hook.
+        if (resolvedSell.get().plot().boxPos().isPresent() && ModList.get().isLoaded("blueprynts")) {
+            com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
+                    serverLevel, resolvedSell.get().plot().boxPos().get(),
+                    "Bought " + result.itemsSold() + "x from " + player.getGameProfile().name() + " for " + nuggetsOwed + " nuggets");
+        }
     }
 
     /**
