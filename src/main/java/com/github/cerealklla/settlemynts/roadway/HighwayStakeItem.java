@@ -3,7 +3,6 @@ package com.github.cerealklla.settlemynts.roadway;
 import java.util.Optional;
 import java.util.UUID;
 
-import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModItems;
 
 import net.minecraft.core.BlockPos;
@@ -57,14 +56,13 @@ public class HighwayStakeItem extends Item {
 
         BlockPos placePos = context.getClickedPos().above();
 
-        // Real live-test report, 2026-10-13: a stake could be planted inside either endpoint
-        // settlement's own territory -- Highway Stakes connect two settlements, they don't belong
-        // inside one. Checked against both candidate settlements regardless of which one is nearer,
-        // since the very first stake in a chain (no anchor yet) could be placed near either end.
-        GhostTownHallCoreEntity coreA = coreIdA != null && serverLevel.getEntity(coreIdA) instanceof GhostTownHallCoreEntity a ? a : null;
-        GhostTownHallCoreEntity coreB = coreIdB != null && serverLevel.getEntity(coreIdB) instanceof GhostTownHallCoreEntity b ? b : null;
-        if (HighwayPaver.isInsideSettlement(serverLevel, coreA, placePos.getX(), placePos.getZ())
-                || HighwayPaver.isInsideSettlement(serverLevel, coreB, placePos.getX(), placePos.getZ())) {
+        // Real live-test report, 2026-10-13: a stake could be planted inside a settlement's own
+        // territory -- Highway Stakes connect two settlements, they don't belong inside one. Checked
+        // against ANY settlement at this point (see HighwayPaver#isInsideAnySettlement's own doc),
+        // not just this quest's own two named endpoints -- a natural (NPC) village has no real core
+        // entity at all, so the original endpoint-specific check (keyed off the item's own core-id
+        // data components, always absent for a natural settlement) never caught placement inside one.
+        if (HighwayPaver.isInsideAnySettlement(serverLevel, placePos.getX(), placePos.getZ())) {
             player.sendSystemMessage(Component.literal(
                     "Highway Stakes can only be placed outside the settlement -- start just past its edge."));
             return InteractionResult.FAIL;

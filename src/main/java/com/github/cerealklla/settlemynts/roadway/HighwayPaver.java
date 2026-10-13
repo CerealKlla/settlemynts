@@ -14,6 +14,7 @@ import com.github.cerealklla.cartographyr.geo.Classification;
 import com.github.cerealklla.cartographyr.geo.EntityDefinition;
 import com.github.cerealklla.cartographyr.geo.EntityId;
 import com.github.cerealklla.cartographyr.geo.EntityType;
+import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.cartographyr.geo.Layer;
 import com.github.cerealklla.cartographyr.geo.LifecycleState;
@@ -131,33 +132,33 @@ public final class HighwayPaver {
     }
 
     /**
-     * True if {@code (x, z)} falls inside {@code core}'s own real, registered settlement polygon --
-     * added 2026-10-13, real live-test report: "It allowed me to place a highway stake within the
-     * settlement. These are only allowed to be placed outside the settlement." {@code false} when
-     * {@code core} is {@code null} (a natural settlement -- no real core entity, hence no polygon
-     * to check here; same graceful-degradation precedent as {@link #crossesPlot} above) or its
-     * Cartographyr registration can't be resolved.
+     * True if {@code (x, z)} falls inside ANY settlement's real, unpadded boundary -- player-founded
+     * or natural. Added 2026-10-13, real live-test report: a natural (NPC) village has no {@link
+     * GhostTownHallCoreEntity} at all, so {@link #isInsideSettlement} (which requires one) never
+     * blocked placement inside one, letting a Highway Stake be planted fully inside an NPC town --
+     * "not necessarily a problem" per the user's own framing, but still a real gap worth closing,
+     * especially since it covers every settlement along the route, not just the quest's own two named
+     * endpoints (an unrelated settlement passed over elsewhere along the path should block the same
+     * way). A player-founded settlement's own entry here is its padded {@code EntityType.SETTLEMENT}
+     * buffer AND its tighter {@code SettlemyntsMod#SETTLEMENT_CORE_ENTITY_TYPE} core as two separate
+     * entities at the same point -- only the real core (or a lone polygon with no core at all, i.e. a
+     * natural village) should block; the padded-only case is deliberately let through, matching {@link
+     * #isInsideSettlement}'s own "No Man's Land stays placeable" reasoning.
      */
-    public static boolean isInsideSettlement(ServerLevel level, GhostTownHallCoreEntity core, int x, int z) {
-        if (core == null) {
-            return false;
+    public static boolean isInsideAnySettlement(ServerLevel level, int x, int z) {
+        for (GeographicEntity entity : Cartography.getEntitiesAt(level, x, z)) {
+            if (!entity.layerId().equals(Layer.SETTLEMENT_ID) || entity.lifecycleState() != LifecycleState.REALIZED) {
+                continue;
+            }
+            if (entity.type().equals(SettlemyntsMod.SETTLEMENT_CORE_ENTITY_TYPE)) {
+                return true;
+            }
+            if (entity.type().equals(EntityType.SETTLEMENT)
+                    && GhostTownHallCoreEntity.findByCartographyrEntityId(level, entity.id().value()).isEmpty()) {
+                return true; // No core registered for this one -- a natural village's own real boundary.
+            }
         }
-        // The real, unpadded core boundary -- NOT core.getCartographyrEntityId()'s own padded
-        // buffer entity. Real live-test correction, 2026-10-13: the padded buffer is exactly what
-        // Lyfe's own HUD calls "No Man's Land" (see that mod's location.LocationTracker), which the
-        // user explicitly expects a Highway Stake to be placeable in -- "technically outside the
-        // perimeter of my town" -- only the settlement's real built-up area ("Outskirts"/"Town
-        // Proper") should block placement. Falls back to the padded buffer only if this settlement
-        // somehow has no core entity registered at all (shouldn't happen for a real core, but keeps
-        // this from silently no-op'ing the whole check if it ever does).
-        Long coreEntityId = core.getCartographyrCoreEntityId() != null
-                ? core.getCartographyrCoreEntityId() : core.getCartographyrEntityId();
-        if (coreEntityId == null) {
-            return false;
-        }
-        return Cartography.getEntity(level, new EntityId(coreEntityId))
-                .map(entity -> entity.geometry().contains(x, z))
-                .orElse(false);
+        return false;
     }
 
     /** No-op (never crosses) when {@code core} is {@code null} -- a natural settlement has no finalized plots in this data model to protect. */
