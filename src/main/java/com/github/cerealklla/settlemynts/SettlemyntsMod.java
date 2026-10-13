@@ -2982,6 +2982,14 @@ public class SettlemyntsMod {
             if (anchor != null) {
                 anchorPos = net.minecraft.core.BlockPos.containing(anchor.getX(), anchor.getY(), anchor.getZ());
             }
+        } else if (player.getMainHandItem().is(ModItems.HIGHWAY_STAKE.get())) {
+            // Real live report, 2026-10-13: Highway Stakes never got this readout at all when this
+            // method was built for Roadway Stakes -- Highway Stakes didn't exist yet that day.
+            com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity anchor =
+                    com.github.cerealklla.settlemynts.roadway.HighwayStakeLeash.resolveGhostAnchor(serverLevel, player.getUUID());
+            if (anchor != null) {
+                anchorPos = net.minecraft.core.BlockPos.containing(anchor.getX(), anchor.getY(), anchor.getZ());
+            }
         }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.founding.AnchorDistancePayload(anchorPos != null, anchorPos == null ? net.minecraft.core.BlockPos.ZERO : anchorPos));
     }
