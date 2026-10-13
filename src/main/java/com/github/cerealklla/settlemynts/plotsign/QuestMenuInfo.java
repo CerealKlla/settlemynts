@@ -20,9 +20,24 @@ import net.minecraft.resources.Identifier;
  * other at the one call site that's already gated behind {@code
  * ModList.get().isLoaded("myssions")}.
  */
-public record QuestMenuInfo(List<ActiveEntry> activeQuests, List<NewOffer> newOffers) {
+public record QuestMenuInfo(List<ActiveEntry> activeQuests, List<NewOffer> newOffers, List<RoadQuestOffer> roadQuestOffers) {
 
-    public static final QuestMenuInfo EMPTY = new QuestMenuInfo(List.of(), List.of());
+    public static final QuestMenuInfo EMPTY = new QuestMenuInfo(List.of(), List.of(), List.of());
+
+    /**
+     * A not-yet-accepted Establish Highway offer this Town Hall has posted out (added 2026-10-13) --
+     * distinct from {@link NewOffer} since accepting it needs a settlement-pair placeId, not a
+     * {@code questId}+{@code plotId} board-offer lookup (see {@code bridge.MyssionsQuestBridge
+     * #acceptRoadQuestOffer}'s own doc). {@code destinationName} is already resolved server-side
+     * (Cartographyr display text), never computed client-side.
+     */
+    public record RoadQuestOffer(long destinationPlaceId, String destinationName) {
+
+        public static final StreamCodec<ByteBuf, RoadQuestOffer> STREAM_CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_LONG, RoadQuestOffer::destinationPlaceId,
+                ByteBufCodecs.STRING_UTF8, RoadQuestOffer::destinationName,
+                RoadQuestOffer::new);
+    }
 
     /** One of the player's own active (in-progress) quest instances from this NPC's pool -- {@code instanceId} is Myssions' own hidden per-acceptance UUID, never shown directly, only round-tripped. */
     public record ActiveEntry(UUID instanceId, String questName, boolean readyToComplete) {
@@ -47,5 +62,6 @@ public record QuestMenuInfo(List<ActiveEntry> activeQuests, List<NewOffer> newOf
     public static final StreamCodec<ByteBuf, QuestMenuInfo> STREAM_CODEC = StreamCodec.composite(
             ActiveEntry.STREAM_CODEC.apply(ByteBufCodecs.list()), QuestMenuInfo::activeQuests,
             NewOffer.STREAM_CODEC.apply(ByteBufCodecs.list()), QuestMenuInfo::newOffers,
+            RoadQuestOffer.STREAM_CODEC.apply(ByteBufCodecs.list()), QuestMenuInfo::roadQuestOffers,
             QuestMenuInfo::new);
 }

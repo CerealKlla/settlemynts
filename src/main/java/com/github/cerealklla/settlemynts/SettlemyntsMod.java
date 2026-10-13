@@ -508,6 +508,10 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.CompleteQuestPayload.STREAM_CODEC,
                 (payload, context) -> completeQuest(payload, context));
 
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AcceptRoadQuestOfferPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.AcceptRoadQuestOfferPayload.STREAM_CODEC,
+                (payload, context) -> acceptRoadQuestOffer(payload, context));
+
         // Planned Inventory (2026-10-09) -- see zone.PlannedInventoryClearing's own doc.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload.STREAM_CODEC,
@@ -566,6 +570,18 @@ public class SettlemyntsMod {
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestUpgradePlotPreview(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestEstablishHighwayMapPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestEstablishHighwayMapPayload.STREAM_CODEC,
+                (payload, context) -> requestEstablishHighwayMap(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.EstablishHighwayCandidatesPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.EstablishHighwayCandidatesPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestEstablishHighwayMap(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestCreateHighwayQuestPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestCreateHighwayQuestPayload.STREAM_CODEC,
+                (payload, context) -> requestCreateHighwayQuest(payload, context));
 
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.STREAM_CODEC,
@@ -1159,7 +1175,7 @@ public class SettlemyntsMod {
         PlotRecord plot = resolved.get().plot();
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 anchor, buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
-                buildQuestMenu(player, plot)));
+                buildQuestMenu(serverLevel, player, plot)));
     }
 
     /**
@@ -1188,7 +1204,44 @@ public class SettlemyntsMod {
         }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
-                buildQuestMenu(player, plot)));
+                buildQuestMenu(serverLevel, player, plot)));
+    }
+
+    /**
+     * "Establish Highway: <destination>" -> "Accept Quest" on {@code client.RoadQuestAcceptScreen}
+     * -- added 2026-10-13. Re-resolves this Town Hall's own settlement placeId from the anchor
+     * itself (never trusts the client) before calling Myssions' already-built {@code
+     * quest.RoadQuestLogic#acceptOffer} via {@code bridge.MyssionsQuestBridge#acceptRoadQuestOffer}.
+     */
+    private static void acceptRoadQuestOffer(com.github.cerealklla.settlemynts.plotsign.AcceptRoadQuestOfferPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, payload.anchor());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        if (!com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded() || plot.boxPos().isEmpty()) {
+            return;
+        }
+        java.util.Optional<com.github.cerealklla.settlemynts.api.Settlemynts.PlotHandle> handle =
+                com.github.cerealklla.settlemynts.api.Settlemynts.findPlotAt(serverLevel, plot.boxPos().get());
+        if (handle.isEmpty() || !(serverLevel.getEntity(handle.get().settlementCoreId()) instanceof GhostTownHallCoreEntity core)
+                || core.getCartographyrEntityId() == null) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this settlement anymore."));
+            return;
+        }
+        boolean accepted = com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.acceptRoadQuestOffer(
+                player, core.getCartographyrEntityId(), payload.destinationPlaceId());
+        if (!accepted) {
+            player.sendSystemMessage(Component.literal("Couldn't accept that quest -- it may have already been taken."));
+            return;
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
+                payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
+                buildQuestMenu(serverLevel, player, plot)));
     }
 
     /**
@@ -1219,15 +1272,37 @@ public class SettlemyntsMod {
         }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
-                buildQuestMenu(player, plot)));
+                buildQuestMenu(serverLevel, player, plot)));
     }
 
-    /** Per-player quest-giver menu for {@link #requestShopWishlist}/{@link #sellToShopWishlist}/{@link #acceptBoardOffer}/{@link #completeQuest}'s own payload -- empty if Myssions isn't loaded. */
-    private static com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo buildQuestMenu(ServerPlayer player, PlotRecord plot) {
+    /**
+     * Per-player quest-giver menu for {@link #requestShopWishlist}/{@link #sellToShopWishlist}/
+     * {@link #acceptBoardOffer}/{@link #completeQuest}'s own payload -- empty if Myssions isn't
+     * loaded. For a Town Hall plot specifically, also folds in any not-yet-accepted Establish Highway
+     * offer the settlement has posted out (added 2026-10-13) -- these never go through {@code
+     * IssuerQuestBoard}, so {@code bridge.MyssionsQuestBridge#getMenu}'s own board-offer scan would
+     * never find them on its own.
+     */
+    private static com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo buildQuestMenu(ServerLevel level, ServerPlayer player, PlotRecord plot) {
         if (!com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
             return com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo.EMPTY;
         }
-        return com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.getMenu(player, plot.plotId(), plot.zoneTypeId().toString());
+        com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo menu =
+                com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.getMenu(player, plot.plotId(), plot.zoneTypeId().toString());
+        if (!plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID) || plot.boxPos().isEmpty()) {
+            return menu;
+        }
+        java.util.Optional<com.github.cerealklla.settlemynts.api.Settlemynts.PlotHandle> handle =
+                com.github.cerealklla.settlemynts.api.Settlemynts.findPlotAt(level, plot.boxPos().get());
+        if (handle.isEmpty() || !(level.getEntity(handle.get().settlementCoreId()) instanceof GhostTownHallCoreEntity core)
+                || core.getCartographyrEntityId() == null) {
+            return menu;
+        }
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo.RoadQuestOffer> roadQuestOffers = new java.util.ArrayList<>();
+        for (var offer : com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.getPostedRoadQuestOffers(level, core.getCartographyrEntityId())) {
+            roadQuestOffers.add(new com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo.RoadQuestOffer(offer.destinationPlaceId(), offer.destinationName()));
+        }
+        return new com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo(menu.activeQuests(), menu.newOffers(), roadQuestOffers);
     }
 
     /** Shared row-assembly for {@link #requestShopWishlist} and {@link #sellToShopWishlist}'s own post-sale refresh. */
@@ -1347,7 +1422,7 @@ public class SettlemyntsMod {
         sendShopGoldUpdate(player, serverLevel, plot.plotId());
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopWishlistPayload(
                 payload.anchor(), buildWishlistEntries(serverLevel, plot, resolved.get().anchorPos()),
-                buildQuestMenu(player, plot)));
+                buildQuestMenu(serverLevel, player, plot)));
     }
 
     /**
@@ -1796,6 +1871,158 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.notifyPlotUpgraded(player, plot.plotId());
         }
         player.sendSystemMessage(Component.literal("Plot upgraded to Tier " + newTier + "! Use the Construction Box to build at the new Tier."));
+    }
+
+    // 2 real miles (1 block ~= 1 meter, 1 mile ~= 1609 blocks, same convention as every other
+    // distance constant in this suite) -- matches the user's own explicit spec for the Establish
+    // Highway map picker's candidate search radius.
+    private static final double ESTABLISH_HIGHWAY_SEARCH_RADIUS_BLOCKS = 2.0 * 1609.0;
+    private static final int ESTABLISH_HIGHWAY_COST_GOLD = 1000;
+
+    /**
+     * "Establish Highway" button click -- added 2026-10-13. Resolves this Town Hall's own real
+     * Cartographyr placeId and every settlement the Mayor has personal knowledge of within {@link
+     * #ESTABLISH_HIGHWAY_SEARCH_RADIUS_BLOCKS} (via {@code bridge.LyfeKnownSettlementsBridge}),
+     * excluding any pair that already has a road-quest entry of any kind, then sends the candidate
+     * list to open {@code client.EstablishHighwayMapScreen}. No cost/permission check happens here
+     * beyond "can this player even see the button's own gates" -- real re-validation (founder-only,
+     * gold, pair-still-free) happens at {@link #requestCreateHighwayQuest}.
+     */
+    private static void requestEstablishHighwayMap(com.github.cerealklla.settlemynts.plotsign.RequestEstablishHighwayMapPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)
+                || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        if (!core.isFounder(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("Only this settlement's Mayor can establish a Highway."));
+            return;
+        }
+        Long originPlaceId = core.getCartographyrEntityId();
+        if (originPlaceId == null) {
+            player.sendSystemMessage(Component.literal("This settlement isn't registered with the world map yet."));
+            return;
+        }
+        if (!com.github.cerealklla.settlemynts.bridge.LyfeKnownSettlementsBridge.isLoaded()
+                || !com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
+            player.sendSystemMessage(Component.literal("Establish Highway needs both Lyfe and Myssions loaded."));
+            return;
+        }
+        net.minecraft.core.BlockPos origin = core.blockPosition();
+        var known = com.github.cerealklla.settlemynts.bridge.LyfeKnownSettlementsBridge.getKnownSettlementsNear(
+                player, serverLevel, origin, ESTABLISH_HIGHWAY_SEARCH_RADIUS_BLOCKS);
+        List<com.github.cerealklla.settlemynts.plotsign.EstablishHighwayCandidatesPayload.Candidate> candidates = new ArrayList<>();
+        for (var result : known) {
+            if (result.placeId() == originPlaceId
+                    || com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.hasAnyRoadQuestEntry(
+                            serverLevel.getServer(), originPlaceId, result.placeId())) {
+                continue; // Can't target itself, or a pair that already has a road-quest entry of any kind.
+            }
+            double dx = result.x() - origin.getX();
+            double dz = result.z() - origin.getZ();
+            var thresholds = com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.computeRoadQuestStakeThresholds(Math.sqrt(dx * dx + dz * dz));
+            candidates.add(new com.github.cerealklla.settlemynts.plotsign.EstablishHighwayCandidatesPayload.Candidate(
+                    result.placeId(), result.x(), result.z(), result.displayText(), result.fullyKnown(),
+                    thresholds.minStakes(), thresholds.optimalStakeCap()));
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.EstablishHighwayCandidatesPayload(
+                payload.signPos(), originPlaceId, origin.getX(), origin.getZ(), candidates));
+    }
+
+    /**
+     * "Create Quest" button click on {@code client.EstablishHighwayMapScreen} -- added 2026-10-13.
+     * Re-resolves and re-validates everything from scratch (never trusts the client): founder-only,
+     * the settlement pair still free, and 1000 Gold Nuggets physically present in the Town Hall
+     * plot's own boxes. Posts the quest (via Myssions' already-built {@code
+     * quest.RoadQuestLogic#postOffer}) BEFORE draining any gold -- if posting fails for any reason
+     * (e.g. the pair was just taken by a concurrent post), nothing is charged.
+     */
+    private static void requestCreateHighwayQuest(com.github.cerealklla.settlemynts.plotsign.RequestCreateHighwayQuestPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)
+                || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        if (!core.isFounder(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("Only this settlement's Mayor can establish a Highway."));
+            return;
+        }
+        Long originPlaceId = core.getCartographyrEntityId();
+        if (originPlaceId == null || !com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this settlement anymore."));
+            return;
+        }
+        if (plot.boxPos().isEmpty()) {
+            player.sendSystemMessage(Component.literal("This plot has no Construction Box to draw gold from."));
+            return;
+        }
+        List<net.minecraft.world.Container> boxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, plot.plotId());
+        int goldOnHand = countGoldNuggets(boxes);
+        if (goldOnHand < ESTABLISH_HIGHWAY_COST_GOLD) {
+            player.sendSystemMessage(Component.literal(
+                    "Not enough gold in the Town Hall's boxes -- need " + (ESTABLISH_HIGHWAY_COST_GOLD - goldOnHand) + " more Gold Nuggets."));
+            return;
+        }
+        boolean posted = com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.postRoadQuestOffer(
+                serverLevel, originPlaceId, payload.destinationPlaceId(), plot.plotId(), player.getUUID());
+        if (!posted) {
+            player.sendSystemMessage(Component.literal("Couldn't post the Highway quest -- that pair may already have one."));
+            return;
+        }
+        drainGoldNuggets(boxes, ESTABLISH_HIGHWAY_COST_GOLD);
+        if (net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
+            com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
+                    serverLevel, plot.boxPos().get(), "Highway Quest Creation -" + ESTABLISH_HIGHWAY_COST_GOLD);
+        }
+        player.sendSystemMessage(Component.literal("Highway quest posted! It'll appear at the Town Hall under Mayor's Special Assignments."));
+    }
+
+    private static int countGoldNuggets(List<net.minecraft.world.Container> boxes) {
+        int total = 0;
+        for (net.minecraft.world.Container box : boxes) {
+            for (int slot = 0; slot < box.getContainerSize(); slot++) {
+                ItemStack stack = box.getItem(slot);
+                if (stack.is(net.minecraft.world.item.Items.GOLD_NUGGET)) {
+                    total += stack.getCount();
+                }
+            }
+        }
+        return total;
+    }
+
+    private static void drainGoldNuggets(List<net.minecraft.world.Container> boxes, int amount) {
+        int remaining = amount;
+        for (net.minecraft.world.Container box : boxes) {
+            for (int slot = 0; slot < box.getContainerSize() && remaining > 0; slot++) {
+                ItemStack stack = box.getItem(slot);
+                if (!stack.is(net.minecraft.world.item.Items.GOLD_NUGGET)) {
+                    continue;
+                }
+                int take = Math.min(remaining, stack.getCount());
+                stack.shrink(take);
+                remaining -= take;
+            }
+        }
     }
 
     /**

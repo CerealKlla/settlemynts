@@ -84,6 +84,13 @@ public final class PlotConfigSignMenuScreen extends Screen {
             addRenderableWidget(Button.builder(Component.literal("Plot Management"), b -> plotManagement())
                     .bounds(centerX - 100, y, 200, 20).build());
             y += 30;
+
+            // Shown to any Town Planner who can manage this plot -- the stricter Mayor(founder)-only
+            // check happens server-side on click, same "visible but re-validated" discipline as every
+            // other button here (e.g. "Upgrade Plot" re-checks canManage itself too).
+            addRenderableWidget(Button.builder(Component.literal("Establish Highway"), b -> establishHighway())
+                    .bounds(centerX - 100, y, 200, 20).build());
+            y += 30;
         }
 
         y += 10;
@@ -118,6 +125,11 @@ public final class PlotConfigSignMenuScreen extends Screen {
 
     private void upgradePlot() {
         send(new com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPreviewPayload(data.signPos()));
+        onClose();
+    }
+
+    private void establishHighway() {
+        send(new com.github.cerealklla.settlemynts.plotsign.RequestEstablishHighwayMapPayload(data.signPos()));
         onClose();
     }
 

@@ -33,7 +33,7 @@ public final class QuestListScreen extends Screen {
     protected void init() {
         QuestMenuInfo menu = data.questMenu();
         int centerX = width / 2;
-        int rowCount = menu.activeQuests().size() + menu.newOffers().size();
+        int rowCount = menu.activeQuests().size() + menu.newOffers().size() + menu.roadQuestOffers().size();
         int top = height / 2 - (rowCount * 24 + 30) / 2;
         int y = top;
 
@@ -49,6 +49,16 @@ public final class QuestListScreen extends Screen {
                     .bounds(centerX - 110, y, 220, 20).build());
             y += 24;
         }
+        // Mayor's Special Assignments (2026-10-13) -- a not-yet-accepted Establish Highway offer,
+        // shown alongside everything else here rather than a separate heading; this menu is already
+        // a flat list of "things you can pick," and the only real distinction (unlimited, no 5-slot
+        // cap) is purely a server-side bookkeeping fact with nothing to show the player about it here.
+        for (QuestMenuInfo.RoadQuestOffer offer : menu.roadQuestOffers()) {
+            addRenderableWidget(Button.builder(Component.literal("Establish Highway: " + offer.destinationName()),
+                            b -> Minecraft.getInstance().setScreen(new RoadQuestAcceptScreen(data, offer)))
+                    .bounds(centerX - 110, y, 220, 20).build());
+            y += 24;
+        }
 
         addRenderableWidget(Button.builder(Component.literal("Back"), b -> Minecraft.getInstance().setScreen(new ChatMenuScreen(data)))
                 .bounds(centerX - 50, y + 10, 100, 20).build());
@@ -57,7 +67,7 @@ public final class QuestListScreen extends Screen {
     @Override
     public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         QuestMenuInfo menu = data.questMenu();
-        int rowCount = menu.activeQuests().size() + menu.newOffers().size();
+        int rowCount = menu.activeQuests().size() + menu.newOffers().size() + menu.roadQuestOffers().size();
         int centerX = width / 2;
         int centerY = height / 2;
         int halfHeight = (rowCount * 24 + 50) / 2;

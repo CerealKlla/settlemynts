@@ -39,7 +39,7 @@ public final class MyssionsQuestBridge {
         var newOffers = menu.newOffers().stream()
                 .map(o -> new QuestMenuInfo.NewOffer(o.questId(), o.questName(), o.description()))
                 .collect(Collectors.toList());
-        return new QuestMenuInfo(activeEntries, newOffers);
+        return new QuestMenuInfo(activeEntries, newOffers, java.util.List.of());
     }
 
     /** Accepts one specific offer (by definition id) sitting on the plot's board. */
@@ -78,5 +78,51 @@ public final class MyssionsQuestBridge {
     /** Player-specific -- used for the issuer NPC's personal "!" head marker, see {@code Myssions#hasUrgentPersonalBusiness}'s own doc. */
     public static boolean hasUrgentPersonalBusiness(ServerPlayer player, UUID plotId, String zoneTypeId) {
         return Myssions.hasUrgentPersonalBusiness(player, plotId, zoneTypeId);
+    }
+
+    /**
+     * Posts a new Establish Highway offer from {@code originPlaceId} to {@code destinationPlaceId}
+     * -- added 2026-10-13 for the Town Hall Plot Config Sign's own button. Thin pass-through to
+     * Myssions' already-built {@code quest.RoadQuestLogic#postOffer} (via {@code
+     * api.Myssions#postRoadQuestOffer}) -- the road-connection quest mechanics themselves (stake
+     * granting, progress checking, buyback, the 6-hour deadline, fail/abandon cleanup) needed no new
+     * work at all; this is purely a new way to call the same real post. False if the pair already
+     * has any entry (posted/in-progress/connected), or either settlement can't currently be resolved.
+     */
+    public static boolean postRoadQuestOffer(ServerLevel level, long originPlaceId, long destinationPlaceId,
+                                              UUID postingPlotId, UUID posterPlayerId) {
+        return Myssions.postRoadQuestOffer(level, originPlaceId, destinationPlaceId,
+                java.util.Optional.of(postingPlotId), java.util.Optional.of(posterPlayerId));
+    }
+
+    /** Current state (if any) of a road-connection offer between these two settlements -- used to exclude already-posted/in-progress/connected pairs from the Establish Highway map picker's candidate list. */
+    public static boolean hasAnyRoadQuestEntry(net.minecraft.server.MinecraftServer server, long placeIdA, long placeIdB) {
+        return Myssions.getRoadQuestState(server, placeIdA, placeIdB).isPresent();
+    }
+
+    public record StakeThresholds(int minStakes, int optimalStakeCap) {
+    }
+
+    /** Read-only preview of real min/optimal Highway Stake counts for a distance -- see {@code api.Myssions#computeRoadQuestStakeThresholds}'s own doc. */
+    public static StakeThresholds computeRoadQuestStakeThresholds(double straightLineDistanceBlocks) {
+        var result = Myssions.computeRoadQuestStakeThresholds(straightLineDistanceBlocks);
+        return new StakeThresholds(result.minStakes(), result.optimalStakeCap());
+    }
+
+    public record PostedOffer(long destinationPlaceId, String destinationName) {
+    }
+
+    /** Every not-yet-accepted road-quest offer this settlement has posted out -- see {@code api.Myssions#getPostedRoadQuestOffers}'s own doc. */
+    public static java.util.List<PostedOffer> getPostedRoadQuestOffers(ServerLevel level, long postingPlaceId) {
+        java.util.List<PostedOffer> offers = new java.util.ArrayList<>();
+        for (var offer : Myssions.getPostedRoadQuestOffers(level.getServer(), level, postingPlaceId)) {
+            offers.add(new PostedOffer(offer.destinationPlaceId(), offer.destinationName()));
+        }
+        return offers;
+    }
+
+    /** Accepts a posted road-quest offer -- see {@code api.Myssions#acceptRoadQuestOffer}'s own doc. */
+    public static boolean acceptRoadQuestOffer(ServerPlayer player, long postingPlaceId, long destinationPlaceId) {
+        return Myssions.acceptRoadQuestOffer(player, postingPlaceId, destinationPlaceId);
     }
 }

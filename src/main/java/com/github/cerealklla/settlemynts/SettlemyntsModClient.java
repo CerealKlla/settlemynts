@@ -208,6 +208,12 @@ public class SettlemyntsModClient {
             }
         });
 
+        ClientPlotSignRequests.takePendingEstablishHighwayMap().ifPresent(request -> {
+            if (Minecraft.getInstance().screen == null) {
+                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.EstablishHighwayMapScreen(request));
+            }
+        });
+
         ClientPlotSignRequests.takePendingShop().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
                 Minecraft.getInstance().setScreen(request.manage()

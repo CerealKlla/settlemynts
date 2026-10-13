@@ -18,6 +18,7 @@ public final class ClientPlotSignRequests {
     private static volatile UpgradePlotPreviewPayload pendingUpgradePlotPreview;
     private static volatile OpenPlannedInventoryPayload pendingPlannedInventory;
     private static volatile OpenShopWishlistPayload pendingWishlist;
+    private static volatile EstablishHighwayCandidatesPayload pendingEstablishHighwayMap;
 
     private ClientPlotSignRequests() {
     }
@@ -109,6 +110,16 @@ public final class ClientPlotSignRequests {
     public static Optional<OpenShopWishlistPayload> takePendingWishlist() {
         OpenShopWishlistPayload request = pendingWishlist;
         pendingWishlist = null;
+        return Optional.ofNullable(request);
+    }
+
+    public static void requestEstablishHighwayMap(EstablishHighwayCandidatesPayload payload) {
+        pendingEstablishHighwayMap = payload;
+    }
+
+    public static Optional<EstablishHighwayCandidatesPayload> takePendingEstablishHighwayMap() {
+        EstablishHighwayCandidatesPayload request = pendingEstablishHighwayMap;
+        pendingEstablishHighwayMap = null;
         return Optional.ofNullable(request);
     }
 }
