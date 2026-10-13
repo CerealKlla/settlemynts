@@ -26,16 +26,12 @@ import net.minecraft.world.item.ItemStack;
 public final class HighwayQuestSupport {
 
     // How close a stake must be to a settlement's own registered edge to count as "anchoring" the
-    // road to it. Widened 3 -> 20, 2026-10-13 -- real live report: a road to a natural (NPC) village
-    // didn't auto-complete after the player deliberately moved its end stake outside the settlement.
-    // This value's own original 3-block tightness assumed placement itself stayed hugging the edge
-    // (this class's own doc used to say so) -- true back when placement was tightly restricted, no
-    // longer true now that a Highway Stake can be placed any distance outside a settlement (see
-    // HighwayPaver#isInsideAnySettlement, same day), so a stake placed comfortably outside a village
-    // -- especially a natural one, whose registered polygon is a convex hull over structure corners
-    // and can extend further than the visible buildings suggest in some directions -- could easily
-    // miss the old tight tolerance and never register as a real anchor at all.
-    private static final double PERIMETER_ANCHOR_SLACK_BLOCKS = 20.0;
+    // road to it. A same-day attempt widened this 3 -> 20 on the unconfirmed guess that a natural
+    // village's convex-hull polygon might extend further than its visible buildings -- an invented
+    // requirement the user explicitly corrected, never having asked for it: "by that I mean the last
+    // stake must be directly outside the settlement perimeter. 1 block, not 20." Set to the user's
+    // own exact spec.
+    private static final double PERIMETER_ANCHOR_SLACK_BLOCKS = 1.0;
 
     private HighwayQuestSupport() {
     }
