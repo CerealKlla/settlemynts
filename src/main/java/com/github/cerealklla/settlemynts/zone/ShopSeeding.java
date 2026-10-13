@@ -181,7 +181,21 @@ public final class ShopSeeding {
             owner.updatePlot(plot);
         }
         int tier = resolveTier(level, plot);
-        applyCatalog(level, plot, catalog.get(), plotAnchor, tier);
+        // NPC-owned (plot.owner().isEmpty()) must use applyCatalogFull, not applyCatalog -- real
+        // live report, 2026-10-13: an NPC-owned Armorer plot upgraded to Tier 3 never actually
+        // listed its new Tier's offerings. applyCatalog's "never auto-list a resource, only the
+        // owner's own explicit Save Changes creates a new listing" rule is correct for a
+        // player-owned plot, but an NPC-owned one has no owner who could ever make that choice --
+        // same reasoning #seedNewPlotSharingShop/#restockNaturalShop already apply for a natural
+        // settlement's shared Shop, just never extended to this, the lazy per-open catch-up path
+        // for an NPC-owned plot inside a player-founded settlement.
+        if (plot.owner().isEmpty()) {
+            UUID plotId = plot.plotId();
+            applyCatalogFull(level, owner, plot, catalog.get(), plotAnchor, tier);
+            plot = owner.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(plot);
+        } else {
+            applyCatalog(level, plot, catalog.get(), plotAnchor, tier);
+        }
         // Owner-agnostic default listings/Planned Inventory for a tiered catalog (2026-10-10) -- see
         // applyTieredDefaults' own doc. This is the main trigger point for a player-owned plot's own
         // Tier increase, since it runs every time Enter/Manage Shop opens.

@@ -12,6 +12,7 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import com.github.cerealklla.cartographyr.api.Cartography;
 import com.github.cerealklla.cartographyr.geo.Classification;
 import com.github.cerealklla.cartographyr.geo.EntityDefinition;
+import com.github.cerealklla.cartographyr.geo.EntityId;
 import com.github.cerealklla.cartographyr.geo.EntityType;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.cartographyr.geo.Layer;
@@ -99,6 +100,23 @@ public final class HighwayPaver {
             return y1 != y2;
         }
         return Math.abs(y2 - y1) > horizontalSteps * MAX_SLOPE_PER_STEP;
+    }
+
+    /**
+     * True if {@code (x, z)} falls inside {@code core}'s own real, registered settlement polygon --
+     * added 2026-10-13, real live-test report: "It allowed me to place a highway stake within the
+     * settlement. These are only allowed to be placed outside the settlement." {@code false} when
+     * {@code core} is {@code null} (a natural settlement -- no real core entity, hence no polygon
+     * to check here; same graceful-degradation precedent as {@link #crossesPlot} above) or its
+     * Cartographyr registration can't be resolved.
+     */
+    public static boolean isInsideSettlement(ServerLevel level, GhostTownHallCoreEntity core, int x, int z) {
+        if (core == null || core.getCartographyrEntityId() == null) {
+            return false;
+        }
+        return Cartography.getEntity(level, new EntityId(core.getCartographyrEntityId()))
+                .map(entity -> entity.geometry().contains(x, z))
+                .orElse(false);
     }
 
     /** No-op (never crosses) when {@code core} is {@code null} -- a natural settlement has no finalized plots in this data model to protect. */
