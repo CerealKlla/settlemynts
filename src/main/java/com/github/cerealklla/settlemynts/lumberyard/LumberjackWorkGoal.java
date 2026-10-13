@@ -8,7 +8,6 @@ import java.util.Optional;
 import java.util.Set;
 
 import com.github.cerealklla.cartographyr.geo.Geometry;
-import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.zone.ContainerDeposit;
 
@@ -124,24 +123,15 @@ public class LumberjackWorkGoal extends Goal {
         }
         Optional<Geometry.Polygon> area = worker.resolvePatrolArea(level);
         if (area.isEmpty()) {
-            // Temporary debug logging (2026-10-11, real report: "still just standing next to grown
-            // trees not cutting them down" -- chasing whether this worker even has a resolvable
-            // patrol area to scan at all, which would explain it never picking any target.
-            SettlemyntsMod.LOGGER.info("[LumberjackDebug] worker {} at {} -- no resolvable patrol area, can't scan for work",
-                    worker.getUUID(), worker.blockPosition());
             return false;
         }
         WorkTarget found = findTarget(level, area.get());
         if (found == null) {
-            SettlemyntsMod.LOGGER.info("[LumberjackDebug] worker {} at {} -- scanned patrol area, found nothing to do",
-                    worker.getUUID(), worker.blockPosition());
             return false;
         }
         pendingTarget = found.pos();
         pendingIsHarvest = found.isHarvest();
         pendingHarvestIdentity = found.identityBase();
-        SettlemyntsMod.LOGGER.info("[LumberjackDebug] worker {} at {} -- picked {} target {}",
-                worker.getUUID(), worker.blockPosition(), found.isHarvest() ? "HARVEST" : "PLANT", found.pos());
         return true;
     }
 
@@ -174,10 +164,6 @@ public class LumberjackWorkGoal extends Goal {
         double currentDistSq = worker.blockPosition().distSqr(pendingTarget);
         if (currentDistSq > arriveDistSq) {
             if (++pursueTicks > MAX_PURSUE_TICKS) {
-                SettlemyntsMod.LOGGER.info(
-                        "[LumberjackDebug] worker {} GAVE UP on {} target {} -- stuck at {}, distSq={} (need <= {})",
-                        worker.getUUID(), pendingIsHarvest ? "HARVEST" : "PLANT", pendingTarget,
-                        worker.blockPosition(), currentDistSq, arriveDistSq);
                 // Keyed off the tree's stable identity (ground-level base), not pendingTarget itself --
                 // see pendingHarvestIdentity's own doc. For a plant target there's no separate
                 // identity, so pendingTarget is still the right (and only) key.
@@ -193,8 +179,6 @@ public class LumberjackWorkGoal extends Goal {
             }
             return;
         }
-        SettlemyntsMod.LOGGER.info("[LumberjackDebug] worker {} ARRIVED at {} target {} -- distSq={}, acting now",
-                worker.getUUID(), pendingIsHarvest ? "HARVEST" : "PLANT", pendingTarget, currentDistSq);
         if (pendingIsHarvest) {
             harvest(level, pendingTarget);
         } else {
