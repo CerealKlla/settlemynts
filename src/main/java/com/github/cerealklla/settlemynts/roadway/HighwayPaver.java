@@ -200,7 +200,10 @@ public final class HighwayPaver {
                 captureAndSet(level, new BlockPos(x, y, z), roadState, snapshot, captured);
             }
         } else if (targetY < naturalY) {
-            for (int y = targetY + 1; y <= naturalY; y++) {
+            // Capped to the same clearance band as every other column (fixed 2026-10-12) -- see
+            // RoadwayPaver#paveColumn's own doc for the full real-live-report root cause.
+            int cutTop = Math.min(naturalY, targetY + CLEARANCE_BLOCKS);
+            for (int y = targetY + 1; y <= cutTop; y++) {
                 BlockPos pos = new BlockPos(x, y, z);
                 if (!level.getBlockState(pos).isAir()) {
                     captureOriginal(level, pos, snapshot, captured);

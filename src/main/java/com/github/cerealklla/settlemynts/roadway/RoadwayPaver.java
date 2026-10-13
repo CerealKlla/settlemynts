@@ -198,15 +198,6 @@ public final class RoadwayPaver {
         // perfectly flat ground.
         int[] profile = slopeLimitedProfile(medianSmooth(naturalY), Mth.floor(a.getY()) - 1, Mth.floor(b.getY()) - 1);
 
-        // TEMPORARY diagnostic logging (2026-10-12) -- the first dedup fix for the "angled roads
-        // clear too high" report didn't resolve it per a live re-test; logging the real per-edge
-        // arrays to find the actual cause from ground truth instead of guessing again. Remove once
-        // the real bug is found and fixed.
-        SettlemyntsMod.LOGGER.info("[RoadwayDebug] edge a=({},{}) b=({},{}) startY={} endY={} n={}",
-                x1, z1, x2, z2, Mth.floor(a.getY()) - 1, Mth.floor(b.getY()) - 1, n);
-        SettlemyntsMod.LOGGER.info("[RoadwayDebug] naturalY={}", java.util.Arrays.toString(naturalY));
-        SettlemyntsMod.LOGGER.info("[RoadwayDebug] profile ={}", java.util.Arrays.toString(profile));
-
         List<SnapshotEntry> snapshot = new ArrayList<>();
         List<BlockPos> roadCells = new ArrayList<>();
         Set<BlockPos> captured = new HashSet<>();
@@ -361,9 +352,6 @@ public final class RoadwayPaver {
     }
 
     private static void paveColumn(ServerLevel level, int x, int targetY, int z, int naturalY, int tier, BlockState stepState, List<SnapshotEntry> snapshot, Set<BlockPos> captured) {
-        // TEMPORARY diagnostic logging (2026-10-12) -- see paveEdge's own doc.
-        SettlemyntsMod.LOGGER.info("[RoadwayDebug] paveColumn x={} z={} targetY={} naturalY={} clearTo={}",
-                x, z, targetY, naturalY, targetY + CLEARANCE_BLOCKS);
         BlockState roadState = stepState != null ? stepState : ModBlocks.ROADWAY.get().defaultBlockState().setValue(TieredRoadwayBlock.TIER, tier);
         if (targetY > naturalY) {
             // Causeway -- fill a solid support earthwork from natural terrain up to road level.
@@ -371,8 +359,22 @@ public final class RoadwayPaver {
                 captureAndSet(level, new BlockPos(x, y, z), roadState, snapshot, captured);
             }
         } else if (targetY < naturalY) {
-            // Cut -- clear everything from just above road level up through the old natural surface.
-            for (int y = targetY + 1; y <= naturalY; y++) {
+            // Cut -- clear from just above road level up through the old natural surface, but never
+            // higher than the same CLEARANCE_BLOCKS band every other column gets (fixed 2026-10-12,
+            // real live report + diagram: "it still destroyed land above the road too high"). This
+            // was the actual bug the whole time, not the clearance band below (which was always
+            // computing correctly per column) -- when a road's pinned endpoint sits well below the
+            // real natural surface at that exact spot (e.g. diving toward a cave/ravine), the
+            // slope-limited profile has to dive away from a still-near-surface naturalY as fast as
+            // the per-step clamp allows, so for a long stretch targetY ends up far below naturalY.
+            // Uncapped, this carved a full vertical shaft from road level all the way up to the old
+            // surface at every one of those columns -- tens of blocks tall at the deepest point,
+            // tapering to nothing as the road approached where it actually meets natural grade. That
+            // tapering wedge is exactly the triangular over-clearing shape reported. A deep cut now
+            // reads as a proper tunnel (solid rock/terrain left overhead beyond the clearance band)
+            // instead of an open-air gash down to the surface.
+            int cutTop = Math.min(naturalY, targetY + CLEARANCE_BLOCKS);
+            for (int y = targetY + 1; y <= cutTop; y++) {
                 BlockPos pos = new BlockPos(x, y, z);
                 if (!level.getBlockState(pos).isAir()) {
                     captureOriginal(level, pos, snapshot, captured);
