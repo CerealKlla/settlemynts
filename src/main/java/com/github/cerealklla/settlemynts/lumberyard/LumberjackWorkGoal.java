@@ -87,6 +87,12 @@ public class LumberjackWorkGoal extends Goal {
     private final double speedModifier;
 
     private BlockPos pendingTarget;
+    // The tree's own stable identity point (its ground-level base) for a harvest target -- null for a
+    // plant target. Kept separate from pendingTarget (the worker's actual navigation goal, which may
+    // be a different, more reachable log in the same connected tree -- see findTarget's own doc)
+    // specifically so avoidance tracking stays keyed to the tree itself, not to wherever the worker
+    // happened to be aiming for that attempt.
+    private BlockPos pendingHarvestIdentity;
     private boolean pendingIsHarvest;
     private int repathCooldown;
     private int pursueTicks;
@@ -129,6 +135,7 @@ public class LumberjackWorkGoal extends Goal {
         }
         pendingTarget = found.pos();
         pendingIsHarvest = found.isHarvest();
+        pendingHarvestIdentity = found.identityBase();
         SettlemyntsMod.LOGGER.info("[LumberjackDebug] worker {} at {} -- picked {} target {}",
                 worker.getUUID(), worker.blockPosition(), found.isHarvest() ? "HARVEST" : "PLANT", found.pos());
         return true;
@@ -151,6 +158,7 @@ public class LumberjackWorkGoal extends Goal {
     @Override
     public void stop() {
         pendingTarget = null;
+        pendingHarvestIdentity = null;
     }
 
     @Override
@@ -166,8 +174,13 @@ public class LumberjackWorkGoal extends Goal {
                         "[LumberjackDebug] worker {} GAVE UP on {} target {} -- stuck at {}, distSq={} (need <= {})",
                         worker.getUUID(), pendingIsHarvest ? "HARVEST" : "PLANT", pendingTarget,
                         worker.blockPosition(), currentDistSq, arriveDistSq);
-                recentlyAvoided.add(new AvoidedTarget(pendingTarget, level.getGameTime() + AVOID_DURATION_TICKS));
+                // Keyed off the tree's stable identity (ground-level base), not pendingTarget itself --
+                // see pendingHarvestIdentity's own doc. For a plant target there's no separate
+                // identity, so pendingTarget is still the right (and only) key.
+                BlockPos avoidKey = pendingIsHarvest && pendingHarvestIdentity != null ? pendingHarvestIdentity : pendingTarget;
+                recentlyAvoided.add(new AvoidedTarget(avoidKey, level.getGameTime() + AVOID_DURATION_TICKS));
                 pendingTarget = null;
+                pendingHarvestIdentity = null;
                 return;
             }
             if (worker.getNavigation().isDone() && repathCooldown-- <= 0) {
@@ -184,9 +197,11 @@ public class LumberjackWorkGoal extends Goal {
             plant(level, pendingTarget);
         }
         pendingTarget = null;
+        pendingHarvestIdentity = null;
     }
 
-    private record WorkTarget(BlockPos pos, boolean isHarvest) {
+    // identityBase is only meaningful when isHarvest is true -- null for a plant target.
+    private record WorkTarget(BlockPos pos, boolean isHarvest, BlockPos identityBase) {
     }
 
     /** Prunes expired entries, then true if {@code pos} is within {@link #AVOID_RADIUS_BLOCKS} of a still-active one. */
@@ -225,7 +240,7 @@ public class LumberjackWorkGoal extends Goal {
                     continue;
                 }
                 if (scanned++ > MAX_COLUMNS_SCANNED) {
-                    return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false);
+                    return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null);
                 }
                 int topY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                 BlockPos topSolid = new BlockPos(x, topY - 1, z);
@@ -233,7 +248,23 @@ public class LumberjackWorkGoal extends Goal {
                 if (topState.is(BlockTags.LOGS)) {
                     BlockPos base = findTrunkBase(level, topSolid);
                     if (isRealTree(level, base) && !isAvoided(level, base)) {
-                        return new WorkTarget(base, true); // Harvest always wins immediately once found.
+                        // Real live report, 2026-10-12: "Lumberjacks are very clearly targeting the
+                        // tops of trees... they just climb to the top and then stand there instead of
+                        // chopping." The ground-level base is still this method's stable identity for
+                        // isRealTree/avoidance tracking (same log, no matter which direction the
+                        // worker approaches from) -- but a wide-trunked or buttressed tree (dark oak
+                        // 2x2, jungle) can have every ground-level neighbor of the base ALSO be solid
+                        // trunk, making the base itself physically unreachable within
+                        // HARVEST_ARRIVE_DIST_SQ from any ground path. The worker's pathfinder then
+                        // has nothing better to do than climb the trunk's exterior looking for
+                        // somewhere within range, and gets stuck there, repeatedly failing to arrive.
+                        // Since harvest() already flood-fills the whole connected tree from wherever
+                        // the worker actually ends up, the real fix is to aim it at whichever log in
+                        // that same connected structure is nearest the worker's OWN current position
+                        // -- almost always something near the worker's own height, genuinely
+                        // reachable on foot, not the base specifically.
+                        BlockPos approach = nearestConnectedLog(level, base, worker.blockPosition());
+                        return new WorkTarget(approach, true, base); // Harvest always wins immediately once found.
                     }
                     // Not a real tree (no leaves anywhere nearby) -- almost certainly a player-built
                     // log structure (2026-10-05, real report: "destroyed the building to try to plant
@@ -249,7 +280,7 @@ public class LumberjackWorkGoal extends Goal {
                 }
             }
         }
-        return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false);
+        return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null);
     }
 
     /**
@@ -277,6 +308,25 @@ public class LumberjackWorkGoal extends Goal {
             }
         }
         return lowest;
+    }
+
+    /**
+     * Whichever log in {@code base}'s own connected structure sits closest to {@code workerPos} --
+     * see this method's own call site for why the navigation target and the stable tree-identity
+     * point ({@code base}) are deliberately kept separate now. Always includes {@code base} itself in
+     * the search, so a tree the worker can genuinely reach at ground level behaves exactly as before.
+     */
+    private static BlockPos nearestConnectedLog(ServerLevel level, BlockPos base, BlockPos workerPos) {
+        BlockPos nearest = base;
+        double nearestDistSq = workerPos.distSqr(base);
+        for (BlockPos pos : findConnectedLogs(level, base)) {
+            double distSq = workerPos.distSqr(pos);
+            if (distSq < nearestDistSq) {
+                nearest = pos;
+                nearestDistSq = distSq;
+            }
+        }
+        return nearest;
     }
 
     /**
