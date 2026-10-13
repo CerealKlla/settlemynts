@@ -1,6 +1,5 @@
 package com.github.cerealklla.settlemynts.zone;
 
-import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.farm.FarmerWorkerEntity;
 import com.github.cerealklla.settlemynts.lumberyard.LumberjackWorkerEntity;
 import com.github.cerealklla.settlemynts.mineshaft.MinerWorkerEntity;
@@ -37,6 +36,21 @@ import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
  * something other than a real death (e.g. corrupted save data silently dropping the entity), its
  * slot would stay stuck non-null with no worker and no automatic respawn -- a quiet, easily-noticed,
  * easily-fixed failure mode, and a much better one than silently duplicating on every restart.
+ *
+ * <p><b>Second real bug, found 2026-10-13</b> -- live report ("I keep killing both of them and
+ * seeing it respawning both of them") plus {@code [FarmerSpawnDebug]} logging added to chase it:
+ * this handler matched a dying {@link PlotNpc} to a sign purely by {@code plotId} + entity type,
+ * never checking that the *specific dying entity* was actually the one the slot currently had
+ * registered. Once an orphan duplicate worker exists for any reason (a stale leftover from before
+ * the fix above, a chunk-reload edge case, anything), killing *either* copy -- including the
+ * genuinely still-alive, still-registered one -- cleared the slot, and the matching spawn ticker
+ * then saw "null" and spawned a replacement while the other copy kept right on living, unregistered.
+ * Confirmed directly from the log: killing {@code bd2a3c95-...} (not the sign's own recorded
+ * {@code 61ee037b-...}) still cleared the slot anyway, orphaning the real {@code 61ee037b-...}
+ * worker and triggering a brand-new spawn next tick -- repeating indefinitely, one duplicate at a
+ * time, every single kill. Fixed by only clearing a slot when the dying entity's UUID equals what's
+ * currently registered there; a death that doesn't match (an untracked orphan) now just lets that
+ * copy die and stay dead, with no slot change and no replacement spawn.
  */
 public final class PlotNpcDeathListener {
 
@@ -48,27 +62,29 @@ public final class PlotNpcDeathListener {
         if (!(event.getEntity().level() instanceof ServerLevel level)) {
             return;
         }
-        // TEMPORARY diagnostic logging (2026-10-12) -- see farm.FarmerSpawnTicker's own doc for the
-        // real live report this is chasing.
-        SettlemyntsMod.LOGGER.info("[FarmerSpawnDebug] PlotNpc death: entity={} uuid={} plotId={} indexHasEntry={}",
-                event.getEntity().getClass().getSimpleName(), event.getEntity().getUUID(), npc.plotId(),
-                PlotConfigSignIndex.get(level.getServer()).get(npc.plotId()).isPresent());
         PlotConfigSignIndex.get(level.getServer()).get(npc.plotId()).ifPresent(pos -> {
             GlobalPos signPos = pos;
             ServerLevel signLevel = level.getServer().getLevel(signPos.dimension());
             if (signLevel == null || !(signLevel.getBlockEntity(signPos.pos()) instanceof PlotConfigSignBlockEntity sign)) {
-                SettlemyntsMod.LOGGER.info("[FarmerSpawnDebug] death handler couldn't resolve the sign block entity at {}", signPos);
                 return;
             }
+            java.util.UUID deadId = event.getEntity().getUUID();
             if (event.getEntity() instanceof ResidentVillagerEntity) {
-                sign.setResidentVillagerId(null);
+                if (deadId.equals(sign.residentVillagerId())) {
+                    sign.setResidentVillagerId(null);
+                }
             } else if (event.getEntity() instanceof LumberjackWorkerEntity) {
-                sign.setLumberjackWorkerId(null);
+                if (deadId.equals(sign.lumberjackWorkerId())) {
+                    sign.setLumberjackWorkerId(null);
+                }
             } else if (event.getEntity() instanceof FarmerWorkerEntity) {
-                SettlemyntsMod.LOGGER.info("[FarmerSpawnDebug] clearing farmerWorkerId on sign at {} (was {})", signPos, sign.farmerWorkerId());
-                sign.setFarmerWorkerId(null);
+                if (deadId.equals(sign.farmerWorkerId())) {
+                    sign.setFarmerWorkerId(null);
+                }
             } else if (event.getEntity() instanceof MinerWorkerEntity) {
-                sign.setMinerWorkerId(null);
+                if (deadId.equals(sign.minerWorkerId())) {
+                    sign.setMinerWorkerId(null);
+                }
             }
         });
     }

@@ -3,7 +3,6 @@ package com.github.cerealklla.settlemynts.farm;
 import java.util.Map;
 import java.util.UUID;
 
-import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignIndex;
@@ -65,11 +64,6 @@ public final class FarmerSpawnTicker {
         if (plot == null || plot.owner().isPresent() || !plot.zoneTypeId().equals(FARM_ZONE_TYPE_ID)) {
             return;
         }
-        // TEMPORARY diagnostic logging (2026-10-12, real live report: "it keep spawning 2 farmers
-        // for this plot too... I keep killing both of them and seeing it respawning both of them").
-        SettlemyntsMod.LOGGER.info("[FarmerSpawnDebug] plotId={} plotName={} signPos={} existingWorkerId={}",
-                plotId, plot.name(), signPos, sign.farmerWorkerId());
-
         // Real, confirmed-live duplicate-worker bug fixed 2026-10-12 (see
         // zone.PlotNpcDeathListener's own doc for the full root-cause trace, found via Mineshaft's
         // twin) -- this used to also check `level.getEntity(existing)` here and treat "not currently
@@ -85,7 +79,6 @@ public final class FarmerSpawnTicker {
             return;
         }
 
-        SettlemyntsMod.LOGGER.info("[FarmerSpawnDebug] plotId={} slot was null -- spawning a new worker at {}", plotId, signPos);
         FarmerWorkerEntity worker = new FarmerWorkerEntity(ModEntities.FARMER_WORKER.get(), level);
         worker.setPos(signPos.getX() + 0.5, signPos.getY(), signPos.getZ() + 0.5);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
