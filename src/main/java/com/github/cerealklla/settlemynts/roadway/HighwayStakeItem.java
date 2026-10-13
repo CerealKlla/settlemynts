@@ -73,13 +73,15 @@ public class HighwayStakeItem extends Item {
         HighwayStakeEntity anchor = HighwayStakeLeash.resolveGhostAnchor(serverLevel, player.getUUID());
 
         if (anchor != null) {
-            double distance = Math.sqrt(anchor.distanceToSqr(placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5));
-            if (distance > HighwayStakeEntity.MAX_CONNECTION_LENGTH_BLOCKS) {
-                player.sendSystemMessage(Component.literal(
-                        "That's too far for one connection -- place the stake no more than "
-                                + (int) HighwayStakeEntity.MAX_CONNECTION_LENGTH_BLOCKS + " blocks from your anchor."));
-                return InteractionResult.FAIL;
-            }
+            // Deliberately no placement-time distance check against the anchor -- explicit user
+            // request, 2026-10-13, matching Plot Stakes' own established reasoning exactly (see
+            // zone.PlotPlacementStakeItem's own doc): the physical leash pull (SettlemyntsMod's tick
+            // handler, now wired up for Highway Stakes too) is what keeps placement within
+            // MAX_CONNECTION_LENGTH_BLOCKS; a separate hard gate here fights normal vanilla reach and
+            // forces the player to face backward to place forward progress. This was Highway's own
+            // deliberate original difference from Roadway Stakes (which never had this hard check at
+            // all) -- the user corrected that choice directly: "don't block me from placing the stake
+            // at the distance limit, just leave that limit on the rope."
             var core = anchor.resolveNearestRealCore(serverLevel);
             if (HighwayPaver.crossesPlot(serverLevel, core,
                     Mth.floor(anchor.getX()), Mth.floor(anchor.getZ()), placePos.getX(), placePos.getZ())) {
