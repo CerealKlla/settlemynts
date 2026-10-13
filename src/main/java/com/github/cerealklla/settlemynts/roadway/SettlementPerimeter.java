@@ -24,7 +24,16 @@ public final class SettlementPerimeter {
         if (!(settlement.geometry() instanceof Geometry.Polygon polygon)) {
             return false; // A placeholder (PLANNED, Geometry.Point) settlement has no real edge to measure against yet.
         }
-        double distance = polygon.distanceOutside(pos.getX(), pos.getZ());
-        return distance > 0.0 && distance <= maxDistanceBlocks;
+        // Real live bug, 2026-10-13: a fully-connected 31-stake chain between two settlements never
+        // completed the quest. Live [HighwayAnchorDebug] logging showed both endpoint stakes reading
+        // distanceOutside()=0.0 against their own settlement, and the old `distance > 0.0` check
+        // rejected both as a result -- distanceOutside() can't tell "sitting exactly on the fitted
+        // polygon edge" (which a snug, intentional placement will often land on, via integer
+        // rounding) from "well inside the settlement," since both collapse to 0.0 via its own
+        // contains()-based short-circuit. distanceToNearestEdge() always measures the real distance
+        // to the boundary regardless of which side the point falls on, so a stake within slack of the
+        // edge counts as anchoring whether it rounds a hair inside or outside.
+        double distance = polygon.distanceToNearestEdge(pos.getX(), pos.getZ());
+        return distance <= maxDistanceBlocks;
     }
 }
