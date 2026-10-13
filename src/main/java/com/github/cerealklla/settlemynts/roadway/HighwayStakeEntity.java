@@ -324,6 +324,11 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
             if (entry != null) {
                 HighwayPaver.restoreEdge(serverLevel, entry.snapshot());
                 Cartography.retireEntity(serverLevel, entry.roadEntityId());
+                // Highway tunnel protection (2026-10-13) cleans up alongside the road entity itself
+                // -- same id, see HighwayPaver#paveEdge's own doc.
+                if (net.neoforged.fml.ModList.get().isLoaded("protectyons")) {
+                    com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.unregisterHighwayTunnel(serverLevel, entry.roadEntityId().value());
+                }
             }
             if (serverLevel.getEntity(otherId) instanceof HighwayStakeEntity other) {
                 other.removeConnectionIdAndSnapshot(getUUID());

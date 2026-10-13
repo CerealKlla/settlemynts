@@ -55,6 +55,9 @@ public final class HighwayPaver {
     private static final int CLEARANCE_BLOCKS = 4;
     private static final double PATH_HALF_WIDTH_BLOCKS = 1.5;
     private static final int MAX_SLOPE_PER_STEP = 1;
+    // "Within 10 of the direct line between stakes" -- explicit user spec for Highway tunnel
+    // protection, 2026-10-13. See bridge.ProtectyonsPlotBridge#registerHighwayTunnel's own doc.
+    private static final double TUNNEL_PROTECTION_RADIUS_BLOCKS = 10.0;
 
     private HighwayPaver() {
     }
@@ -175,6 +178,18 @@ public final class HighwayPaver {
                 Optional.empty(), new Geometry.Path(centerline, PATH_HALF_WIDTH_BLOCKS), LifecycleState.REALIZED, Optional.empty()));
         a.setSnapshotFor(b.getUUID(), snapshot, roadEntity.id());
         b.setSnapshotFor(a.getUUID(), snapshot, roadEntity.id());
+
+        // Highway tunnel protection (2026-10-13) -- the real 3D line is between the two stakes'
+        // own positions, not the paved profile's terrain-hugging centerline (explicit user spec:
+        // "the direct line between stakes"). Reuses the road entity's own id as the tunnel
+        // segment's id, so cleanup (snapAllConnections/despawnAllForInstance) needs no extra
+        // tracking beyond what ConnectionSnapshot already carries.
+        if (net.neoforged.fml.ModList.get().isLoaded("protectyons")) {
+            com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.registerHighwayTunnel(level, roadEntity.id().value(),
+                    new net.minecraft.world.phys.Vec3(a.getX(), a.getY(), a.getZ()),
+                    new net.minecraft.world.phys.Vec3(b.getX(), b.getY(), b.getZ()),
+                    TUNNEL_PROTECTION_RADIUS_BLOCKS);
+        }
 
         SettlemyntsMod.LOGGER.info("[Highway] Added road: {} centerline cells, {} snapshot entries captured", n, snapshot.size());
     }

@@ -70,4 +70,19 @@ public final class ProtectyonsPlotBridge {
     public static void updateSettlementPermittedPlayers(ServerLevel level, UUID settlementCoreId, Set<UUID> permittedPlayers) {
         Protectyons.updatePermittedPlayers(level.getServer(), settlementCoreId, permittedPlayers);
     }
+
+    /**
+     * Registers a permanent, no-exemptions protected capsule around a paved Highway edge's own
+     * stake-to-stake line -- added 2026-10-13 for the Highway tunnel protection feature. {@code
+     * segmentId} reuses the edge's own Cartographyr road entity id ({@code EntityId#value()}), so
+     * cleanup needs no extra tracking -- {@link #unregisterHighwayTunnel} with that same id, called
+     * right alongside the existing {@code Cartography#retireEntity} call.
+     */
+    public static void registerHighwayTunnel(ServerLevel level, long segmentId, net.minecraft.world.phys.Vec3 start, net.minecraft.world.phys.Vec3 end, double radiusBlocks) {
+        Protectyons.registerHighwayTunnel(level.getServer(), segmentId, start, end, radiusBlocks);
+    }
+
+    public static void unregisterHighwayTunnel(ServerLevel level, long segmentId) {
+        Protectyons.unregisterHighwayTunnel(level.getServer(), segmentId);
+    }
 }
