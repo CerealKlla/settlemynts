@@ -16,6 +16,7 @@ import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.bridge.YconomicsBillBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
+import com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity;
 import com.github.cerealklla.settlemynts.roadway.HighwayStakeGraph;
 import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
 import com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore;
@@ -82,6 +83,9 @@ public final class DebugCommands {
                 .then(Commands.literal("highwayinfo")
                         .then(Commands.argument("instanceId", StringArgumentType.string())
                                 .executes(ctx -> highwayInfo(ctx.getSource(), StringArgumentType.getString(ctx, "instanceId")))))
+                .then(Commands.literal("highwaycleanup")
+                        .then(Commands.argument("instanceId", StringArgumentType.string())
+                                .executes(ctx -> highwayCleanup(ctx.getSource(), StringArgumentType.getString(ctx, "instanceId")))))
                 .then(Commands.literal("plot")
                         .then(Commands.literal("bill").then(billPlotId))));
     }
@@ -126,6 +130,41 @@ public final class DebugCommands {
 
     private static String shortId(UUID id) {
         return id.toString().substring(0, 8);
+    }
+
+    /**
+     * DEBUG ONLY -- added 2026-10-13 alongside the fix for abandoned/expired Highway Stake quests
+     * leaving orphaned stakes/terrain behind in unloaded chunks (see {@code
+     * roadway.HighwayStakeEntity#despawnAllForInstance}'s own doc). Manually re-runs that same
+     * despawn pass for an already-ended quest instance so existing debris doesn't have to wait for a
+     * player to coincidentally walk past every leftover stake before it self-cleans.
+     */
+    private static int highwayCleanup(CommandSourceStack source, String instanceIdRaw) {
+        if (!(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run in a real level."));
+            return 0;
+        }
+        UUID instanceId;
+        try {
+            instanceId = UUID.fromString(instanceIdRaw);
+        } catch (IllegalArgumentException e) {
+            source.sendFailure(Component.literal("Not a valid instance id: " + instanceIdRaw));
+            return 0;
+        }
+        List<HighwayStakeGraph.StakeRecord> before = HighwayStakeGraph.get(level.getServer()).byInstance(instanceId);
+        if (before.isEmpty()) {
+            source.sendFailure(Component.literal("No persisted Highway Stakes found for instance " + instanceId));
+            return 0;
+        }
+        BlockPos hint = before.get(0).pos();
+        HighwayStakeEntity.despawnAllForInstance(level, instanceId, hint);
+        int remaining = HighwayStakeGraph.get(level.getServer()).byInstance(instanceId).size();
+        int cleaned = before.size() - remaining;
+        source.sendSuccess(() -> Component.literal("Cleaned up " + cleaned + "/" + before.size()
+                + " stake(s) for instance " + instanceId + (remaining > 0
+                ? (" -- " + remaining + " still in unloaded chunks, marked to self-clean on next load.")
+                : " -- all done.")), false);
+        return cleaned;
     }
 
     /**

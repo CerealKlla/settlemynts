@@ -65,25 +65,38 @@ public final class HighwayStakeGraph extends SavedData {
     }
 
     private final Map<UUID, StakeRecord> stakes;
+    // Instance ids whose quest ended (abandoned/expired/failed) while some of their stakes were in
+    // unloaded chunks -- see #markPendingCleanup's own doc for why this has to be persisted rather
+    // than handled synchronously at despawn time.
+    private final Set<UUID> pendingCleanupInstanceIds;
 
     HighwayStakeGraph() {
-        this(new HashMap<>());
+        this(new HashMap<>(), new HashSet<>());
     }
 
-    private HighwayStakeGraph(Map<UUID, StakeRecord> stakes) {
+    private HighwayStakeGraph(Map<UUID, StakeRecord> stakes, Set<UUID> pendingCleanupInstanceIds) {
         this.stakes = stakes;
+        this.pendingCleanupInstanceIds = pendingCleanupInstanceIds;
+    }
+
+    private record PersistedState(List<StakeRecord> stakes, List<UUID> pendingCleanupInstanceIds) {
+        static final Codec<PersistedState> CODEC = RecordCodecBuilder.create(i -> i.group(
+                StakeRecord.CODEC.listOf().fieldOf("stakes").forGetter(PersistedState::stakes),
+                UUIDUtil.CODEC.listOf().optionalFieldOf("pending_cleanup_instance_ids", List.of())
+                        .forGetter(PersistedState::pendingCleanupInstanceIds)
+        ).apply(i, PersistedState::new));
     }
 
     private static Codec<HighwayStakeGraph> codec() {
-        return StakeRecord.CODEC.listOf().xmap(
-                entries -> {
+        return PersistedState.CODEC.xmap(
+                state -> {
                     Map<UUID, StakeRecord> map = new HashMap<>();
-                    for (StakeRecord entry : entries) {
+                    for (StakeRecord entry : state.stakes()) {
                         map.put(entry.stakeId(), entry);
                     }
-                    return new HighwayStakeGraph(map);
+                    return new HighwayStakeGraph(map, new HashSet<>(state.pendingCleanupInstanceIds()));
                 },
-                data -> List.copyOf(data.stakes.values()));
+                data -> new PersistedState(List.copyOf(data.stakes.values()), List.copyOf(data.pendingCleanupInstanceIds)));
     }
 
     public static HighwayStakeGraph get(MinecraftServer server) {
@@ -156,6 +169,37 @@ public final class HighwayStakeGraph extends SavedData {
 
     public void removeAllForInstance(UUID instanceId) {
         if (stakes.values().removeIf(r -> r.instanceId().equals(instanceId))) {
+            setDirty();
+        }
+        if (pendingCleanupInstanceIds.remove(instanceId)) {
+            setDirty();
+        }
+    }
+
+    /**
+     * Marks an instance whose quest just ended (abandoned/expired/failed) as still having stakes
+     * this server couldn't find and revert because their chunks weren't loaded at the time -- real
+     * live report, 2026-10-13: abandoning a quest with most of a long road's chunks unloaded left the
+     * un-reverted terrain and orphaned ghost stakes behind permanently, since the old despawn path
+     * only ever found entities in currently-loaded chunks, same root cause as the completion-check
+     * bug above. Each straggling stake's own {@code tick()} checks this flag and self-cleans
+     * (reverts its connections' terrain, discards itself) the moment its chunk loads again -- no
+     * ticker polling every unloaded stake is needed, since loading is the only way it could become
+     * reachable at all.
+     */
+    public void markPendingCleanup(UUID instanceId) {
+        if (pendingCleanupInstanceIds.add(instanceId)) {
+            setDirty();
+        }
+    }
+
+    public boolean isPendingCleanup(UUID instanceId) {
+        return pendingCleanupInstanceIds.contains(instanceId);
+    }
+
+    /** Called after a stake removes itself -- clears the pending flag once nothing's left to clean up. */
+    public void clearPendingCleanupIfDone(UUID instanceId) {
+        if (byInstance(instanceId).isEmpty() && pendingCleanupInstanceIds.remove(instanceId)) {
             setDirty();
         }
     }

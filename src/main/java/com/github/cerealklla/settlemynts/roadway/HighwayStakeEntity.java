@@ -387,6 +387,32 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         }
     }
 
+    private boolean selfCleaned = false;
+
+    /**
+     * Self-cleans this stake the moment its chunk loads, if its whole instance was marked for
+     * cleanup while this stake specifically was unreachable -- see {@link
+     * HighwayStakeGraph#markPendingCleanup}'s own doc. Covers every real trigger of a quest ending
+     * (player-initiated abandon, a timeout firing while the player is offline, or an outright fail)
+     * uniformly, since all three already funnel through the one shared {@link
+     * #despawnAllForInstance} call -- this doesn't need its own separate offline/timeout handling.
+     */
+    @Override
+    public void tick() {
+        super.tick();
+        if (!selfCleaned && linkedInstanceId != null && level() instanceof ServerLevel serverLevel) {
+            HighwayStakeGraph graph = HighwayStakeGraph.get(serverLevel.getServer());
+            if (graph.isPendingCleanup(linkedInstanceId)) {
+                selfCleaned = true;
+                UUID instanceId = linkedInstanceId;
+                snapAllConnections(serverLevel);
+                graph.removeStake(getUUID());
+                graph.clearPendingCleanupIfDone(instanceId);
+                discard();
+            }
+        }
+    }
+
     /**
      * Despawns every Highway Stake tied to {@code instanceId} -- called on quest fail/expire/cancel
      * (see {@code quest.QuestHooks}' Establish Highway completion-hook registration). Fixed
@@ -399,14 +425,23 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
      * pickup would, before being discarded.
      */
     public static void despawnAllForInstance(ServerLevel level, UUID instanceId, net.minecraft.core.BlockPos nearHint) {
+        HighwayStakeGraph graph = HighwayStakeGraph.get(level.getServer());
         for (HighwayStakeEntity stake : findByInstanceId(level, instanceId, nearHint)) {
             stake.snapAllConnections(level);
+            graph.removeStake(stake.getUUID());
             stake.discard();
         }
-        // Best-effort for any stake outside a loaded chunk right now (missed by the live-entity scan
-        // above, same reason the graph exists at all) -- at minimum stops the persisted index itself
-        // from accumulating zombie entries for a cancelled/failed quest.
-        HighwayStakeGraph.get(level.getServer()).removeAllForInstance(instanceId);
+        // Real live report, 2026-10-13: abandoning a quest while most of a long road's chunks were
+        // unloaded left most of its stakes/terrain behind permanently -- the scan above only ever
+        // finds what's currently loaded, same limitation that motivated the graph itself. Anything
+        // the graph still knows about for this instance gets marked so each straggling stake reverts
+        // and discards itself the moment its own chunk loads again (see #tick), instead of staying
+        // orphaned forever.
+        if (graph.byInstance(instanceId).isEmpty()) {
+            graph.clearPendingCleanupIfDone(instanceId);
+        } else {
+            graph.markPendingCleanup(instanceId);
+        }
     }
 
     @Override
