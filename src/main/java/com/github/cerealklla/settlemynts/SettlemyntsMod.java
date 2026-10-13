@@ -1788,6 +1788,13 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.roadway.RoadwayRetier.repaintSettlementRoads(serverLevel, core.getUUID(), newTier);
         }
         grantMayorSkillXpForPlotUpgrade(serverLevel.getServer(), core, newTier);
+        // Real live report, 2026-10-12: a Myssions "help upgrade this plot" quest themed around this
+        // exact upgrade had no way to find out it happened, and stayed stuck forever even though the
+        // real materials were spent and the Tier really did go up. See bridge.MyssionsQuestBridge
+        // #notifyPlotUpgraded's own doc.
+        if (com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
+            com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.notifyPlotUpgraded(player, plot.plotId());
+        }
         player.sendSystemMessage(Component.literal("Plot upgraded to Tier " + newTier + "! Use the Construction Box to build at the new Tier."));
     }
 

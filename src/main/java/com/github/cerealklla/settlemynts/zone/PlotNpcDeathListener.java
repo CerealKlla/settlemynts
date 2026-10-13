@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.zone;
 
+import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.farm.FarmerWorkerEntity;
 import com.github.cerealklla.settlemynts.lumberyard.LumberjackWorkerEntity;
 import com.github.cerealklla.settlemynts.mineshaft.MinerWorkerEntity;
@@ -47,10 +48,16 @@ public final class PlotNpcDeathListener {
         if (!(event.getEntity().level() instanceof ServerLevel level)) {
             return;
         }
+        // TEMPORARY diagnostic logging (2026-10-12) -- see farm.FarmerSpawnTicker's own doc for the
+        // real live report this is chasing.
+        SettlemyntsMod.LOGGER.info("[FarmerSpawnDebug] PlotNpc death: entity={} uuid={} plotId={} indexHasEntry={}",
+                event.getEntity().getClass().getSimpleName(), event.getEntity().getUUID(), npc.plotId(),
+                PlotConfigSignIndex.get(level.getServer()).get(npc.plotId()).isPresent());
         PlotConfigSignIndex.get(level.getServer()).get(npc.plotId()).ifPresent(pos -> {
             GlobalPos signPos = pos;
             ServerLevel signLevel = level.getServer().getLevel(signPos.dimension());
             if (signLevel == null || !(signLevel.getBlockEntity(signPos.pos()) instanceof PlotConfigSignBlockEntity sign)) {
+                SettlemyntsMod.LOGGER.info("[FarmerSpawnDebug] death handler couldn't resolve the sign block entity at {}", signPos);
                 return;
             }
             if (event.getEntity() instanceof ResidentVillagerEntity) {
@@ -58,6 +65,7 @@ public final class PlotNpcDeathListener {
             } else if (event.getEntity() instanceof LumberjackWorkerEntity) {
                 sign.setLumberjackWorkerId(null);
             } else if (event.getEntity() instanceof FarmerWorkerEntity) {
+                SettlemyntsMod.LOGGER.info("[FarmerSpawnDebug] clearing farmerWorkerId on sign at {} (was {})", signPos, sign.farmerWorkerId());
                 sign.setFarmerWorkerId(null);
             } else if (event.getEntity() instanceof MinerWorkerEntity) {
                 sign.setMinerWorkerId(null);

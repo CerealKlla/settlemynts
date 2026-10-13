@@ -59,6 +59,17 @@ public final class MyssionsQuestBridge {
         return Myssions.tryCompleteQuest(player, instanceId);
     }
 
+    /**
+     * Called right after {@code SettlemyntsMod#requestUpgradePlot}'s own real "Upgrade Plot" action
+     * succeeds -- real live report, 2026-10-12: a player paid for and completed a real plot Tier
+     * upgrade through this mod's own UI, but a Myssions "help upgrade this plot" quest themed around
+     * the exact same upgrade had no way to find out, and stayed stuck forever. See Myssions'
+     * {@code QuestEngine#completePlotUpgradeQuestsForPlot}'s own doc for the full fix.
+     */
+    public static void notifyPlotUpgraded(ServerPlayer player, UUID plotId) {
+        Myssions.completePlotUpgradeQuestsForPlot(player, plotId);
+    }
+
     /** Player-independent -- used for the global "?" nameplate, see {@code Myssions#hasPendingBoardOffer}'s own doc. */
     public static boolean hasPendingBoardOffer(ServerLevel level, UUID plotId) {
         return Myssions.hasPendingBoardOffer(level.getServer(), plotId);
