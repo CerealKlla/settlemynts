@@ -179,6 +179,27 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider {
         setChanged();
     }
 
+    /**
+     * Clears whichever slot (if any) currently holds this guard id -- called from {@link
+     * GuardEntity#die} on real death. Added 2026-10-13, real live report: "there are definitely too
+     * many guards walking around right now" (9 guards found on one plot whose absolute max garrison
+     * size is 8). Root cause: {@link GuardSpawnTicker#fillSlot} used to treat "can't currently resolve
+     * this guard's entity" (chunk unloaded, since a patrolling guard easily wanders out of render
+     * range) as equivalent to "dead," spawning a redundant replacement -- but an entity can only
+     * actually die while its own chunk is loaded and ticking, so "unloaded" was never real evidence of
+     * death. This push-based clear (only ever called from an actual death) replaces that poll
+     * entirely -- a slot's guard id is now trusted as still-correct until this explicitly says
+     * otherwise.
+     */
+    public void clearGuardIdIfMatches(UUID guardId) {
+        for (int i = 0; i < garrisonGuardIds.size(); i++) {
+            if (guardId.equals(garrisonGuardIds.get(i))) {
+                clearGuardId(i);
+                return;
+            }
+        }
+    }
+
     @Override
     public Component getDisplayName() {
         return Component.literal("Guardhouse Food Stores");

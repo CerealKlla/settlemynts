@@ -83,12 +83,18 @@ public final class GuardSpawnTicker {
         if (slot.kytLoadoutName().isEmpty()) {
             return;
         }
-        Optional<UUID> existing = guardhouse.guardId(index);
-        if (existing.isPresent()) {
-            if (level.getEntity(existing.get()) instanceof GuardEntity living && living.isAlive()) {
-                return; // Slot already filled.
-            }
-            guardhouse.clearGuardId(index);
+        // Trusts the persisted slot outright now -- fixed 2026-10-13, real live bug: this used to
+        // also require resolving the guard's live entity (level.getEntity + isAlive) before counting
+        // the slot as filled, but a patrolling guard easily wanders outside currently-loaded chunks
+        // (it can patrol the whole settlement's road network, not just stand next to the Guardhouse),
+        // and an entity can only ever actually die while its own chunk is loaded and ticking -- so
+        // "can't resolve it right now" was never real evidence of death, just evidence it was out of
+        // render range. That false "it died" conclusion spawned a redundant guard into the same slot
+        // every time, compounding across restarts (confirmed live: 9 guards found tagged to one plot,
+        // whose absolute max garrison size is 8). See GuardEntity#die/GuardhouseBlockEntity#clearGuardIdIfMatches
+        // for the real, push-based replacement -- a slot is only ever cleared by an actual death now.
+        if (guardhouse.guardId(index).isPresent()) {
+            return;
         }
         Optional<LoadoutRecord> record = KytGuardhouseBridge.getKyt(slot.kytLoadoutName().get());
         if (record.isEmpty()) {

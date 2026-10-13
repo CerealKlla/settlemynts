@@ -222,6 +222,26 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
      * target-picking (which, separately, never intentionally aims below the surface -- see {@code
      * GuardPatrolAreaGoal}).
      */
+    /**
+     * Notifies this guard's own Guardhouse to clear its slot -- see {@code
+     * GuardhouseBlockEntity#clearGuardIdIfMatches}'s own doc for why this replaced {@link
+     * GuardSpawnTicker}'s old "can't resolve this guard, assume dead" poll (a real, 2026-10-13 live
+     * bug: that poll false-positived on nothing more than a patrolling guard being out of render
+     * range, spawning a redundant replacement into the same slot).
+     */
+    @Override
+    public void die(net.minecraft.world.damagesource.DamageSource damageSource) {
+        super.die(damageSource);
+        if (plotId != null && level() instanceof ServerLevel serverLevel) {
+            GuardhouseIndex.get(serverLevel.getServer()).get(plotId).ifPresent(pos -> {
+                ServerLevel guardhouseLevel = serverLevel.getServer().getLevel(pos.dimension());
+                if (guardhouseLevel != null && guardhouseLevel.getBlockEntity(pos.pos()) instanceof GuardhouseBlockEntity guardhouse) {
+                    guardhouse.clearGuardIdIfMatches(getUUID());
+                }
+            });
+        }
+    }
+
     @Override
     protected void customServerAiStep(ServerLevel level) {
         super.customServerAiStep(level);
