@@ -198,6 +198,15 @@ public final class RoadwayPaver {
         // perfectly flat ground.
         int[] profile = slopeLimitedProfile(medianSmooth(naturalY), Mth.floor(a.getY()) - 1, Mth.floor(b.getY()) - 1);
 
+        // TEMPORARY diagnostic logging (2026-10-12) -- the first dedup fix for the "angled roads
+        // clear too high" report didn't resolve it per a live re-test; logging the real per-edge
+        // arrays to find the actual cause from ground truth instead of guessing again. Remove once
+        // the real bug is found and fixed.
+        SettlemyntsMod.LOGGER.info("[RoadwayDebug] edge a=({},{}) b=({},{}) startY={} endY={} n={}",
+                x1, z1, x2, z2, Mth.floor(a.getY()) - 1, Mth.floor(b.getY()) - 1, n);
+        SettlemyntsMod.LOGGER.info("[RoadwayDebug] naturalY={}", java.util.Arrays.toString(naturalY));
+        SettlemyntsMod.LOGGER.info("[RoadwayDebug] profile ={}", java.util.Arrays.toString(profile));
+
         List<SnapshotEntry> snapshot = new ArrayList<>();
         List<BlockPos> roadCells = new ArrayList<>();
         Set<BlockPos> captured = new HashSet<>();
@@ -352,6 +361,9 @@ public final class RoadwayPaver {
     }
 
     private static void paveColumn(ServerLevel level, int x, int targetY, int z, int naturalY, int tier, BlockState stepState, List<SnapshotEntry> snapshot, Set<BlockPos> captured) {
+        // TEMPORARY diagnostic logging (2026-10-12) -- see paveEdge's own doc.
+        SettlemyntsMod.LOGGER.info("[RoadwayDebug] paveColumn x={} z={} targetY={} naturalY={} clearTo={}",
+                x, z, targetY, naturalY, targetY + CLEARANCE_BLOCKS);
         BlockState roadState = stepState != null ? stepState : ModBlocks.ROADWAY.get().defaultBlockState().setValue(TieredRoadwayBlock.TIER, tier);
         if (targetY > naturalY) {
             // Causeway -- fill a solid support earthwork from natural terrain up to road level.
