@@ -352,9 +352,20 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         return Component.literal("Highway Stake");
     }
 
-    /** Despawns every Highway Stake tied to {@code instanceId} -- called on quest fail/expire/cancel. Already-paved road blocks are deliberately left in place (accepted minor debris, see decisions.md). */
+    /**
+     * Despawns every Highway Stake tied to {@code instanceId} -- called on quest fail/expire/cancel
+     * (see {@code quest.QuestHooks}' Establish Highway completion-hook registration). Fixed
+     * 2026-10-13: this used to discard stakes directly with no terrain revert at all, unlike a
+     * player's own manual pickup (right-click, which calls {@link #snapAllConnections}) -- the doc
+     * comment that used to sit here claimed this was an accepted tradeoff ("minor debris"), but no
+     * matching decisions.md entry was ever actually found backing that up, and leaving behind full
+     * dig-outs/causeways/clearance from an abandoned or failed quest doesn't match "will be deleted"
+     * (explicit user spec). Each stake now reverts its own connections' terrain exactly like a manual
+     * pickup would, before being discarded.
+     */
     public static void despawnAllForInstance(ServerLevel level, UUID instanceId, net.minecraft.core.BlockPos nearHint) {
         for (HighwayStakeEntity stake : findByInstanceId(level, instanceId, nearHint)) {
+            stake.snapAllConnections(level);
             stake.discard();
         }
     }
