@@ -111,10 +111,23 @@ public final class HighwayPaver {
      * Cartographyr registration can't be resolved.
      */
     public static boolean isInsideSettlement(ServerLevel level, GhostTownHallCoreEntity core, int x, int z) {
-        if (core == null || core.getCartographyrEntityId() == null) {
+        if (core == null) {
             return false;
         }
-        return Cartography.getEntity(level, new EntityId(core.getCartographyrEntityId()))
+        // The real, unpadded core boundary -- NOT core.getCartographyrEntityId()'s own padded
+        // buffer entity. Real live-test correction, 2026-10-13: the padded buffer is exactly what
+        // Lyfe's own HUD calls "No Man's Land" (see that mod's location.LocationTracker), which the
+        // user explicitly expects a Highway Stake to be placeable in -- "technically outside the
+        // perimeter of my town" -- only the settlement's real built-up area ("Outskirts"/"Town
+        // Proper") should block placement. Falls back to the padded buffer only if this settlement
+        // somehow has no core entity registered at all (shouldn't happen for a real core, but keeps
+        // this from silently no-op'ing the whole check if it ever does).
+        Long coreEntityId = core.getCartographyrCoreEntityId() != null
+                ? core.getCartographyrCoreEntityId() : core.getCartographyrEntityId();
+        if (coreEntityId == null) {
+            return false;
+        }
+        return Cartography.getEntity(level, new EntityId(coreEntityId))
                 .map(entity -> entity.geometry().contains(x, z))
                 .orElse(false);
     }
