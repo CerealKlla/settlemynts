@@ -258,13 +258,12 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
             int az = Mth.floor(anchor.getZ());
             int tx = Mth.floor(getX());
             int tz = Mth.floor(getZ());
-            double distance = Math.sqrt(anchor.distanceToSqr(this));
-            if (distance > MAX_CONNECTION_LENGTH_BLOCKS) {
-                player.sendSystemMessage(Component.literal(
-                        "That's too far for one connection -- place a Highway Stake no more than "
-                                + (int) MAX_CONNECTION_LENGTH_BLOCKS + " blocks from your anchor."));
-                return InteractionResult.SUCCESS;
-            }
+            // Deliberately no hard distance check here either -- same real live-test correction as
+            // HighwayStakeItem#useOn's own doc (2026-10-13): "this concept should not exist anymore."
+            // This was the entity's own direct-connect-to-an-existing-stake path, a second copy of
+            // the same now-removed check the item's placement path had -- RoadwayStakeEntity's own
+            // equivalent interact() never had one at all, confirming it should go here too. The
+            // physical leash pull is what should keep two connectable stakes in range.
             var core = resolveNearestRealCore(serverLevel);
             if (core != null && HighwayPaver.crossesPlot(serverLevel, core, ax, az, tx, tz)) {
                 player.sendSystemMessage(Component.literal(
