@@ -64,11 +64,15 @@ public class LumberjackWorkGoal extends Goal {
     // Harvest-only. Was briefly widened to 225.0 (~15 blocks) on 2026-10-06 to work around a
     // teleport-onto-trunk edge case (LumberjackWorkerEntity#customServerAiStep's underground-escape
     // safety net could perch a worker high up a tall trunk, out of the old flat 2-block arrive
-    // radius). Set back down to 4.0, 2026-10-11 (explicit user request) now that harvest() flood-
-    // fills every connected log from wherever the worker actually arrives (findConnectedLogs, added
-    // 2026-10-09) rather than acting on a fixed box anchored at the trunk base -- a close arrive
-    // radius is no longer at odds with catching the whole tree.
-    private static final double HARVEST_ARRIVE_DIST_SQ = 4.0;
+    // radius). Set to 4.0, 2026-10-11, then widened to 9.0 (3 blocks), 2026-10-12 (explicit user
+    // spec, same live report that led to the reachable-approach fix just above: "walking up to the
+    // base of the tree, gets stuck on the leaves, and then gives up... should consider getting with
+    // 3 blocks of the target as success, and then chop the tree"). The reachable-approach fix fixed
+    // most cases, but a dense leaf canopy around the base can still block the final approach to
+    // within 2 blocks even when the worker can get close -- harvest() flood-fills the whole connected
+    // tree from wherever the worker ends up regardless of exact distance, so there's no reason to
+    // demand the tightest possible radius here.
+    private static final double HARVEST_ARRIVE_DIST_SQ = 9.0;
     // Randomized per scan (2026-10-05, explicit user request: "5-7 instead of flat 4") -- varies the
     // plot's planting pattern instead of a perfectly uniform grid.
     private static final int MIN_SAPLING_SPACING_BLOCKS = 5;
