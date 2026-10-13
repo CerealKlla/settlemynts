@@ -16,6 +16,7 @@ import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.bridge.YconomicsBillBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
+import com.github.cerealklla.settlemynts.roadway.HighwayStakeGraph;
 import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
 import com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore;
 import com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator;
@@ -78,8 +79,53 @@ public final class DebugCommands {
                         .executes(ctx -> naturalVillagers(ctx.getSource())))
                 .then(Commands.literal("resyncprotection")
                         .executes(ctx -> resyncProtection(ctx.getSource())))
+                .then(Commands.literal("highwayinfo")
+                        .then(Commands.argument("instanceId", StringArgumentType.string())
+                                .executes(ctx -> highwayInfo(ctx.getSource(), StringArgumentType.getString(ctx, "instanceId")))))
                 .then(Commands.literal("plot")
                         .then(Commands.literal("bill").then(billPlotId))));
+    }
+
+    /**
+     * DEBUG ONLY -- added 2026-10-13 per explicit user request while chasing a real road-connection
+     * quest completion bug: lists every stake {@link HighwayStakeGraph} (the persisted,
+     * entity-liveness-independent index -- see its own doc) has recorded for a given quest instance
+     * id, with its position and which other stakes it's connected to, regardless of whether any of
+     * those stakes' chunks are currently loaded. The instance id is the same UUID shown in the
+     * quest's own saved data (e.g. via Myssions' quest-instance NBT).
+     */
+    private static int highwayInfo(CommandSourceStack source, String instanceIdRaw) {
+        if (!(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run in a real level."));
+            return 0;
+        }
+        UUID instanceId;
+        try {
+            instanceId = UUID.fromString(instanceIdRaw);
+        } catch (IllegalArgumentException e) {
+            source.sendFailure(Component.literal("Not a valid instance id: " + instanceIdRaw));
+            return 0;
+        }
+        List<HighwayStakeGraph.StakeRecord> stakes = HighwayStakeGraph.get(level.getServer()).byInstance(instanceId);
+        if (stakes.isEmpty()) {
+            source.sendFailure(Component.literal("No persisted Highway Stakes found for instance " + instanceId));
+            return 0;
+        }
+        int total = stakes.size();
+        source.sendSuccess(() -> Component.literal(total + " Highway Stake(s) persisted for instance " + instanceId + ":"), false);
+        for (HighwayStakeGraph.StakeRecord stake : stakes) {
+            boolean loaded = level.getEntity(stake.stakeId()) != null;
+            String connections = stake.connections().isEmpty() ? "none"
+                    : stake.connections().stream().map(c -> shortId(c.otherStakeId())).reduce((a, b) -> a + ", " + b).orElse("none");
+            String line = "  - " + shortId(stake.stakeId()) + " @ " + stake.pos().toShortString()
+                    + (loaded ? " [loaded]" : " [not loaded]") + " -> connected to: " + connections;
+            source.sendSuccess(() -> Component.literal(line), false);
+        }
+        return total;
+    }
+
+    private static String shortId(UUID id) {
+        return id.toString().substring(0, 8);
     }
 
     /**

@@ -109,6 +109,8 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         stake.highwayTier = Math.max(1, highwayTier);
         GhostBlockDisplays.setBlockState(stake, ModBlocks.ROPE_FENCE_POST.get().defaultBlockState());
         GhostBlockDisplays.setTranslation(stake, -0.5f, 0f, -0.5f);
+        // addFreshEntity triggers onAddedToLevel below, which registers this stake into
+        // HighwayStakeGraph -- no separate call needed here.
         level.addFreshEntity(stake);
         return stake;
     }
@@ -176,6 +178,9 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         }
         current.add(new ConnectionSnapshot(otherStakeId, snapshot, roadEntityId));
         connectionSnapshots = current;
+        if (level() instanceof ServerLevel serverLevel) {
+            HighwayStakeGraph.get(serverLevel.getServer()).setConnection(getUUID(), otherStakeId, roadEntityId);
+        }
     }
 
     private static String joinIds(List<UUID> ids) {
@@ -302,6 +307,7 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
             return InteractionResult.SUCCESS;
         }
         ItemStack returned = toItemStack();
+        HighwayStakeGraph.get(serverLevel.getServer()).removeStake(getUUID());
         discard();
         if (!player.getInventory().add(returned)) {
             player.drop(returned, false);
@@ -335,6 +341,7 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         }
         entityData.set(DATA_CONNECTIONS, "");
         connectionSnapshots = List.of();
+        HighwayStakeGraph.get(serverLevel.getServer()).clearConnections(getUUID());
         HighwayConnectionMarkerEntity.regenerateAll(serverLevel, ownerPlayerId, linkedInstanceId, blockPosition());
     }
 
@@ -349,11 +356,35 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
             }
         }
         connectionSnapshots = remaining;
+        if (level() instanceof ServerLevel serverLevel) {
+            HighwayStakeGraph.get(serverLevel.getServer()).removeConnection(getUUID(), otherId);
+        }
     }
 
     @Override
     public Component getDisplayName() {
         return Component.literal("Highway Stake");
+    }
+
+    /**
+     * Self-heals this stake's entry in {@link HighwayStakeGraph} every time it actually becomes live
+     * in the world (fresh placement, or a chunk load bringing back a stake placed before this graph
+     * existed at all) -- added 2026-10-13 alongside the graph itself. A stake placed under the old
+     * code has no graph entry yet; re-asserting its own position and every one of its own
+     * {@code connectionSnapshots} entries here (each already recorded symmetrically by both
+     * endpoints at pave time) lets the graph reconstruct itself purely from stakes loading naturally,
+     * with no explicit migration step needed.
+     */
+    @Override
+    public void onAddedToLevel() {
+        super.onAddedToLevel();
+        if (!level().isClientSide() && level() instanceof ServerLevel serverLevel && linkedInstanceId != null) {
+            HighwayStakeGraph graph = HighwayStakeGraph.get(serverLevel.getServer());
+            graph.putStake(getUUID(), linkedInstanceId, blockPosition());
+            for (ConnectionSnapshot snapshot : connectionSnapshots) {
+                graph.setConnection(getUUID(), snapshot.otherStakeId(), snapshot.roadEntityId());
+            }
+        }
     }
 
     /**
@@ -372,6 +403,10 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
             stake.snapAllConnections(level);
             stake.discard();
         }
+        // Best-effort for any stake outside a loaded chunk right now (missed by the live-entity scan
+        // above, same reason the graph exists at all) -- at minimum stops the persisted index itself
+        // from accumulating zombie entries for a cancelled/failed quest.
+        HighwayStakeGraph.get(level.getServer()).removeAllForInstance(instanceId);
     }
 
     @Override

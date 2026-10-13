@@ -81,45 +81,57 @@ public final class HighwayQuestSupport {
         public static final HighwayProgress NONE = new HighwayProgress(0, false);
     }
 
-    /** Live progress check for an in-progress road-connection instance -- see this class's own doc. */
+    /**
+     * Live progress check for an in-progress road-connection instance -- see this class's own doc.
+     *
+     * <p>Walks {@link HighwayStakeGraph}'s persisted, entity-liveness-independent record of stake
+     * positions/connections rather than scanning live entities -- fixed 2026-10-13 after a real,
+     * confident live report ("I placed every single stake, and they are all connected") that the old
+     * live-entity-scan version flatly contradicted. Root cause: {@code
+     * HighwayStakeEntity#findByInstanceId} only ever sees entities in currently loaded chunks; a road
+     * spanning more than render distance will never have its whole placed-and-connected chain loaded
+     * at once, so the old check could structurally never confirm a real, complete path -- no amount
+     * of anchor-slack tuning (the dead end chased right before this) could have fixed that.
+     */
     public static HighwayProgress checkProgress(ServerLevel level, UUID instanceId, BlockPos nearHint, long placeIdA, long placeIdB) {
         Optional<GeographicEntity> settlementA = Cartography.getEntity(level, new EntityId(placeIdA));
         Optional<GeographicEntity> settlementB = Cartography.getEntity(level, new EntityId(placeIdB));
         if (settlementA.isEmpty() || settlementB.isEmpty()) {
             return HighwayProgress.NONE;
         }
-        List<HighwayStakeEntity> stakes = HighwayStakeEntity.findByInstanceId(level, instanceId, nearHint);
+        HighwayStakeGraph graph = HighwayStakeGraph.get(level.getServer());
+        List<HighwayStakeGraph.StakeRecord> stakes = graph.byInstance(instanceId);
         if (stakes.isEmpty()) {
             return HighwayProgress.NONE;
         }
 
-        HighwayStakeEntity anchorA = null;
-        HighwayStakeEntity anchorB = null;
-        for (HighwayStakeEntity stake : stakes) {
-            BlockPos pos = stake.blockPosition();
+        UUID anchorA = null;
+        UUID anchorB = null;
+        for (HighwayStakeGraph.StakeRecord stake : stakes) {
+            BlockPos pos = stake.pos();
             double distA = settlementA.get().geometry() instanceof Geometry.Polygon pA ? pA.distanceOutside(pos.getX(), pos.getZ()) : Double.NaN;
             double distB = settlementB.get().geometry() instanceof Geometry.Polygon pB ? pB.distanceOutside(pos.getX(), pos.getZ()) : Double.NaN;
             LOGGER.info("[HighwayAnchorDebug] stake at {} -- distanceOutside(A)={} distanceOutside(B)={} (slack={})",
                     pos, distA, distB, PERIMETER_ANCHOR_SLACK_BLOCKS);
             if (anchorA == null && SettlementPerimeter.isJustOutside(settlementA.get(), pos, PERIMETER_ANCHOR_SLACK_BLOCKS)) {
-                anchorA = stake;
+                anchorA = stake.stakeId();
             }
             if (anchorB == null && SettlementPerimeter.isJustOutside(settlementB.get(), pos, PERIMETER_ANCHOR_SLACK_BLOCKS)) {
-                anchorB = stake;
+                anchorB = stake.stakeId();
             }
         }
         LOGGER.info("[HighwayAnchorDebug] {} stakes total, anchorA={} anchorB={}",
-                stakes.size(), anchorA == null ? "none" : anchorA.blockPosition(), anchorB == null ? "none" : anchorB.blockPosition());
+                stakes.size(), anchorA, anchorB);
         if (anchorA == null || anchorB == null) {
             return new HighwayProgress(0, false);
         }
-        List<HighwayStakeEntity> path = RoadwayGraph.shortestPath(stakes, anchorA, anchorB);
-        LOGGER.info("[HighwayAnchorDebug] shortestPath size={}", path.size());
+        Optional<List<UUID>> path = graph.findPath(instanceId, anchorA, anchorB);
+        LOGGER.info("[HighwayAnchorDebug] path={}", path.map(List::size).orElse(-1));
         if (path.isEmpty()) {
             return new HighwayProgress(0, false);
         }
-        registerTunnelProtectionForPath(level, path);
-        return new HighwayProgress(path.size(), true);
+        registerTunnelProtectionForPath(level, graph, path.get());
+        return new HighwayProgress(path.get().size(), true);
     }
 
     /**
@@ -130,19 +142,20 @@ public final class HighwayQuestSupport {
      * {@link HighwayTunnelRegistry}-side storage is keyed by each edge's own road entity id, so
      * calling this again for an already-registered edge (e.g. {@code checkProgress} re-confirming
      * "connected" for a few more ticks before the quest instance's own status flips away from
-     * IN_PROGRESS) is a harmless, idempotent overwrite, not a duplicate.
+     * IN_PROGRESS) is a harmless, idempotent overwrite, not a duplicate. Reads entirely from the
+     * persisted graph (2026-10-13), so a stake entity being unloaded no longer blocks this either.
      */
-    private static void registerTunnelProtectionForPath(ServerLevel level, List<HighwayStakeEntity> path) {
+    private static void registerTunnelProtectionForPath(ServerLevel level, HighwayStakeGraph graph, List<UUID> path) {
         for (int i = 0; i + 1 < path.size(); i++) {
-            HighwayStakeEntity from = path.get(i);
-            HighwayStakeEntity to = path.get(i + 1);
-            for (HighwayStakeEntity.ConnectionSnapshot snapshot : from.getConnectionSnapshots()) {
-                if (snapshot.otherStakeId().equals(to.getUUID())) {
-                    HighwayPaver.registerTunnelProtection(level, snapshot.roadEntityId(),
-                            new net.minecraft.world.phys.Vec3(from.getX(), from.getY(), from.getZ()),
-                            new net.minecraft.world.phys.Vec3(to.getX(), to.getY(), to.getZ()));
-                    break;
-                }
+            UUID fromId = path.get(i);
+            UUID toId = path.get(i + 1);
+            Optional<EntityId> roadEntityId = graph.roadEntityIdBetween(fromId, toId);
+            Optional<BlockPos> fromPos = graph.posOf(fromId);
+            Optional<BlockPos> toPos = graph.posOf(toId);
+            if (roadEntityId.isPresent() && fromPos.isPresent() && toPos.isPresent()) {
+                HighwayPaver.registerTunnelProtection(level, roadEntityId.get(),
+                        new net.minecraft.world.phys.Vec3(fromPos.get().getX() + 0.5, fromPos.get().getY(), fromPos.get().getZ() + 0.5),
+                        new net.minecraft.world.phys.Vec3(toPos.get().getX() + 0.5, toPos.get().getY(), toPos.get().getZ() + 0.5));
             }
         }
     }
