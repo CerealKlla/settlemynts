@@ -179,6 +179,12 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider {
         setChanged();
     }
 
+    // [GuardCloneDebug] -- temporary, see GuardSpawnTicker's own doc. Raw read of this BlockEntity's
+    // own in-memory tracking list, for logging only.
+    public java.util.List<UUID> garrisonGuardIdsDebug() {
+        return garrisonGuardIds;
+    }
+
     @Override
     public Component getDisplayName() {
         return Component.literal("Guardhouse Food Stores");

@@ -10,6 +10,10 @@ import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
+import org.slf4j.Logger;
+
+import com.mojang.logging.LogUtils;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.server.MinecraftServer;
@@ -34,6 +38,13 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  */
 public final class GuardSpawnTicker {
 
+    // [GuardCloneDebug] -- temporary, chasing a real live report (2026-10-13): one Guardhouse plot
+    // grew from 10 to 47+ living guards, well past GuardhouseConstants.MAX_GARRISON_SIZE (8), and
+    // kept growing even after GuardhouseSpawner#spawn was made idempotent against a second Guardhouse
+    // block for the same plotId -- meaning this ticker's own "is this slot already filled" check is
+    // itself failing to recognize an already-spawned, still-alive guard. Remove once found/fixed.
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     // Cheap enough at 5 seconds to keep garrison slots filled promptly without scanning every tick.
     private static final int SCAN_INTERVAL_TICKS = 100;
     // Staggered 2026-10-12 against the other seven 100-tick full-world scan tickers across this
@@ -49,7 +60,11 @@ public final class GuardSpawnTicker {
         if ((server.getTickCount() + TICK_OFFSET) % SCAN_INTERVAL_TICKS != 0) {
             return;
         }
-        for (Map.Entry<UUID, GlobalPos> entry : GuardhouseIndex.get(server).all().entrySet()) {
+        var all = GuardhouseIndex.get(server).all();
+        if (all.size() > 1) {
+            LOGGER.info("[GuardCloneDebug] GuardhouseIndex has {} entries this scan: {}", all.size(), all);
+        }
+        for (Map.Entry<UUID, GlobalPos> entry : all.entrySet()) {
             GlobalPos pos = entry.getValue();
             ServerLevel level = server.getLevel(pos.dimension());
             if (level == null) {
@@ -73,6 +88,8 @@ public final class GuardSpawnTicker {
                 ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(level, plot.boxPos().get()).orElse(0)
                 : 0;
         int capacity = GuardhouseConstants.capacityForTier(tier);
+        LOGGER.info("[GuardCloneDebug] fillGarrison plotId={} guardhousePos={} tier={} capacity={} currentGuardIds={}",
+                plotId, guardhousePos, tier, capacity, guardhouse.garrisonGuardIdsDebug());
         for (int i = 0; i < capacity; i++) {
             fillSlot(level, guardhouse, guardhousePos, i, plotId);
         }
@@ -85,9 +102,12 @@ public final class GuardSpawnTicker {
         }
         Optional<UUID> existing = guardhouse.guardId(index);
         if (existing.isPresent()) {
-            if (level.getEntity(existing.get()) instanceof GuardEntity living && living.isAlive()) {
+            var existingEntity = level.getEntity(existing.get());
+            LOGGER.info("[GuardCloneDebug] slot {} tracks {} -> resolved entity: {}", index, existing.get(), existingEntity);
+            if (existingEntity instanceof GuardEntity living && living.isAlive()) {
                 return; // Slot already filled.
             }
+            LOGGER.info("[GuardCloneDebug] slot {} clearing stale guardId {} (entity was {})", index, existing.get(), existingEntity);
             guardhouse.clearGuardId(index);
         }
         Optional<LoadoutRecord> record = KytGuardhouseBridge.getKyt(slot.kytLoadoutName().get());
@@ -101,5 +121,6 @@ public final class GuardSpawnTicker {
         guard.setPlotIdentity(guardhouse.settlementCoreId(), plotId);
         level.addFreshEntity(guard);
         guardhouse.setGuardId(index, guard.getUUID());
+        LOGGER.info("[GuardCloneDebug] slot {} spawned NEW guard {} at {}", index, guard.getUUID(), spawnPos);
     }
 }
