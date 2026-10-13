@@ -24,9 +24,13 @@ import com.github.cerealklla.settlemynts.registration.ModBlocks;
 import com.github.cerealklla.settlemynts.zone.PlotGeometry;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.Half;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
@@ -224,6 +228,20 @@ public final class HighwayPaver {
             int perpX = -Integer.signum(dz);
             int perpZ = Integer.signum(dx);
 
+            // Ported from RoadwayPaver 2026-10-13 (explicit user request: "need to behave the same
+            // with highway stakes too") -- see that class's #stairStateFor/#paveColumn own docs for
+            // the full real-live-report writeup, including the one-block-too-high placement bug
+            // found and fixed the same day. Identical logic, this class's own copy per convention.
+            BlockState stepState = null;
+            if (i > 0 && profile[i] != profile[i - 1]) {
+                Direction travelDirection = directionFromDelta(v.x() - centerline.get(i - 1).x(), v.z() - centerline.get(i - 1).z());
+                if (profile[i] < profile[i - 1]) {
+                    travelDirection = travelDirection.getOpposite();
+                }
+                stepState = stairStateFor(tier, travelDirection);
+            }
+            int pavedY = stepState != null ? Math.min(profile[i], profile[i - 1]) : profile[i];
+
             for (int offset = -ROAD_SIDE_OFFSET_BLOCKS; offset <= ROAD_SIDE_OFFSET_BLOCKS; offset++) {
                 int colX = v.x() + perpX * offset;
                 int colZ = v.z() + perpZ * offset;
@@ -234,9 +252,9 @@ public final class HighwayPaver {
                 if (!pavedColumns.add(columnKey)) {
                     continue; // Already paved by an earlier (nearer) centerline index -- see pavedColumns' own doc.
                 }
-                int targetY = profile[i];
+                int targetY = pavedY;
                 int natural = offset == 0 ? naturalY[i] : naturalSurfaceYNear(level, colX, colZ, targetY);
-                paveColumn(level, colX, targetY, colZ, natural, tier, snapshot, captured);
+                paveColumn(level, colX, targetY, colZ, natural, tier, stepState, snapshot, captured);
             }
         }
 
@@ -279,8 +297,31 @@ public final class HighwayPaver {
         level.setBlock(pos, desired, 3);
     }
 
-    private static void paveColumn(ServerLevel level, int x, int targetY, int z, int naturalY, int tier, List<SnapshotEntry> snapshot, Set<BlockPos> captured) {
-        BlockState roadState = ModBlocks.ROADWAY.get().defaultBlockState().setValue(TieredRoadwayBlock.TIER, tier);
+    /** Ported from RoadwayPaver -- see that class's own doc. Tier 3/4 only; other tiers have no real vanilla stairs match and keep their flat-step look. */
+    static BlockState stairStateFor(int tier, Direction facing) {
+        net.minecraft.world.level.block.Block stairBlock = switch (tier) {
+            case 3 -> Blocks.STONE_BRICK_STAIRS;
+            case 4 -> Blocks.BRICK_STAIRS;
+            default -> null;
+        };
+        if (stairBlock == null) {
+            return null;
+        }
+        return stairBlock.defaultBlockState()
+                .setValue(StairBlock.FACING, facing)
+                .setValue(StairBlock.HALF, Half.BOTTOM);
+    }
+
+    /** Ported from RoadwayPaver -- see that class's own doc. */
+    private static Direction directionFromDelta(int dx, int dz) {
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private static void paveColumn(ServerLevel level, int x, int targetY, int z, int naturalY, int tier, BlockState stepState, List<SnapshotEntry> snapshot, Set<BlockPos> captured) {
+        BlockState roadState = stepState != null ? stepState : ModBlocks.ROADWAY.get().defaultBlockState().setValue(TieredRoadwayBlock.TIER, tier);
         if (targetY > naturalY) {
             for (int y = naturalY; y < targetY; y++) {
                 captureAndSet(level, new BlockPos(x, y, z), roadState, snapshot, captured);

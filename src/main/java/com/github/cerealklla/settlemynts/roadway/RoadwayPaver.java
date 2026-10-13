@@ -295,6 +295,19 @@ public final class RoadwayPaver {
                 }
                 stepState = stairStateFor(tier, travelDirection);
             }
+            // Real live report, 2026-10-13 (screenshots): "the stairs on the downward slope are a
+            // full block too low." A single vanilla stair block's own placed Y is its LOW side --
+            // its high/full-height corner reaches placedY + 1, which is where it must meet the next
+            // flat landing. This cross-section used to place the stair at the raw profile[i] value
+            // unconditionally, same as every flat column -- correct when descending from i-1 to i
+            // (profile[i] already equals the lower of the two, i.e. min(profile[i], profile[i-1])),
+            // but one block too HIGH when ASCENDING from i-1 to i (profile[i] is the higher of the
+            // two there, so the stair's low side sat flush with the upper landing instead of the
+            // lower one, leaving a real one-block gap/overlap depending on which direction a player
+            // walks it). This is why it looked order-dependent ("based on which stake is connected
+            // first") -- paving always runs from the anchor stake to the new one, so whichever
+            // physical direction that happens to be is the one direction that was wrong.
+            int pavedY = stepState != null ? Math.min(profile[i], profile[i - 1]) : profile[i];
 
             for (int offset = -ROAD_SIDE_OFFSET_BLOCKS; offset <= ROAD_SIDE_OFFSET_BLOCKS; offset++) {
                 int colX = v.x() + perpX * offset;
@@ -306,7 +319,7 @@ public final class RoadwayPaver {
                 if (!pavedColumns.add(columnKey)) {
                     continue; // Already paved by an earlier (nearer) centerline index -- see pavedColumns' own doc.
                 }
-                int targetY = profile[i];
+                int targetY = pavedY;
                 int natural = offset == 0 ? naturalY[i] : naturalSurfaceYNear(level, colX, colZ, targetY);
                 paveColumn(level, colX, targetY, colZ, natural, tier, stepState, snapshot, captured);
                 roadCells.add(new BlockPos(colX, targetY, colZ));
