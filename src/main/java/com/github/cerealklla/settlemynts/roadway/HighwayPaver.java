@@ -133,6 +133,13 @@ public final class HighwayPaver {
 
         List<SnapshotEntry> snapshot = new ArrayList<>();
         Set<BlockPos> captured = new HashSet<>();
+        // See RoadwayPaver#pavedColumns' own doc -- identical fix, same real live report ("for
+        // angled roads it seems to be determining that height from the highest point of the road
+        // and using it along the entire length"): a direction-change in supercoverLine's zigzag
+        // (far more frequent on an angled edge than a cardinal one, which never changes direction)
+        // can make a later centerline index's cross-section re-pave a column an earlier index
+        // already claimed, silently overwriting its height. First-touch-wins keeps it deterministic.
+        Set<BlockPos> pavedColumns = new HashSet<>();
         for (int i = 0; i < n; i++) {
             Geometry.Polygon.Vertex v = centerline.get(i);
             int dx;
@@ -152,6 +159,10 @@ public final class HighwayPaver {
                 int colZ = v.z() + perpZ * offset;
                 if (offset != 0 && core != null && PlotGeometry.findContainingPlot(level, core, colX, colZ).isPresent()) {
                     continue;
+                }
+                BlockPos columnKey = new BlockPos(colX, 0, colZ);
+                if (!pavedColumns.add(columnKey)) {
+                    continue; // Already paved by an earlier (nearer) centerline index -- see pavedColumns' own doc.
                 }
                 int natural = offset == 0 ? naturalY[i] : naturalSurfaceY(level, colX, colZ);
                 int targetY = profile[i];

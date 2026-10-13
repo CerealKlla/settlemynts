@@ -201,6 +201,19 @@ public final class RoadwayPaver {
         List<SnapshotEntry> snapshot = new ArrayList<>();
         List<BlockPos> roadCells = new ArrayList<>();
         Set<BlockPos> captured = new HashSet<>();
+        // Dedupes which physical (x,z) column each centerline index is allowed to pave (added
+        // 2026-10-12, real live report: "for angled roads it seems to be determining that height
+        // from the highest point of the road and using it along the entire length"). A perfectly
+        // cardinal (N/S/E/W) road never changes direction mid-edge, so its 3-wide cross-sections
+        // never overlap -- but `supercoverLine` zigzags for any genuinely angled/diagonal edge,
+        // and the perpendicular cross-section at a direction-change index can land squarely on a
+        // column an earlier index already claimed. Without this guard, that column's target/
+        // clearance height got silently reprocessed and overwritten by whichever index happened to
+        // touch it LAST (not necessarily the nearer one) -- order-dependent, and on a long uphill
+        // angled edge, systematically biased toward whatever later (generally higher) index won.
+        // First-touch-wins makes the outcome deterministic and keeps each column's own paved
+        // height tied to its nearest real centerline point.
+        Set<BlockPos> pavedColumns = new HashSet<>();
         int roadBlocksPlaced = 0;
         for (int i = 0; i < n; i++) {
             Geometry.Polygon.Vertex v = centerline.get(i);
@@ -236,6 +249,10 @@ public final class RoadwayPaver {
                 int colZ = v.z() + perpZ * offset;
                 if (offset != 0 && PlotGeometry.findContainingPlot(level, core, colX, colZ).isPresent()) {
                     continue; // Narrows the road near a plot's edge -- never the centerline itself.
+                }
+                BlockPos columnKey = new BlockPos(colX, 0, colZ);
+                if (!pavedColumns.add(columnKey)) {
+                    continue; // Already paved by an earlier (nearer) centerline index -- see pavedColumns' own doc.
                 }
                 int natural = offset == 0 ? naturalY[i] : naturalSurfaceY(level, colX, colZ);
                 int targetY = profile[i];
