@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.construction;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.github.cerealklla.blueprynts.blueprint.GenericResource;
@@ -209,6 +210,66 @@ public final class PlotTierUpgradeFunding {
         }
         YconomicsShopBridge.withdrawNuggets(player, totalCharge);
         return Result.ok();
+    }
+
+    /**
+     * Raises {@code plot}'s Tier cap by one when its real cost was already paid entirely OUTSIDE this
+     * class's own funding paths -- added 2026-10-13 for Myssions' Plot Upgrade quest ({@code
+     * api.Settlemynts#applyPlotUpgradeFromQuest}), whose own delivery milestone collects the plot's
+     * real wood/stone shortfall directly from the player's own inventory via its own quest-delivery
+     * flow, never depositing into or otherwise touching this plot's Construction Box at all -- real
+     * live report, 2026-10-13: the quest completed and paid its reward, but the plot's real Tier never
+     * moved.
+     *
+     * <p>The box's own on-hand stock still needs draining here, exactly like {@link
+     * FundingOption#ON_HAND} would -- it already counted toward the shortfall figure the quest used
+     * (see {@code api.Settlemynts#getPlotUpgradeShortfall}'s own doc, "cost minus physical on-hand
+     * plot stock"), so leaving it untouched in the box would let those same resources both pay for
+     * this upgrade and remain sitting there, free to spend again. Applies the exact same side-effect
+     * bundle {@link #fund} triggers once payment succeeds (persisted tier, Blueprynts allowed-tier
+     * sync, Town-Hall road re-tiering, Mayor XP). Returns the new Tier, or empty if the plot is
+     * already at its real ceiling (Town Hall's own Tier for a non-Town-Hall plot, or 5 for the Town
+     * Hall itself) -- the quest's own eligibility check should normally prevent this, but the plot's
+     * real state can always have moved since the quest was accepted.
+     *
+     * <p>{@code targetTier} (added 2026-10-13) must equal {@code plot.tier() + 1} or this is a no-op
+     * -- the caller's own shortfall figure (and whatever it already collected from a player) was sized
+     * for one specific Tier at acceptance time. Without this check, two players' quest instances for
+     * the same plot (or a stale duplicate instance) could both reach here: the first legitimately
+     * raises the plot by one Tier, and the second -- still holding materials sized for the Tier the
+     * plot *used* to need -- would otherwise get silently re-evaluated against whatever Tier the plot
+     * has moved on to by then, draining the box against the wrong cost table instead of recognizing
+     * someone already took care of it.
+     */
+    public static Optional<Integer> applyPaidExternally(ServerLevel level, GhostTownHallCoreEntity core, PlotRecord plot, int targetTier) {
+        if (plot.tier() + 1 != targetTier) {
+            return Optional.empty();
+        }
+        boolean isTownHall = plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID);
+        int maxPlotTier = isTownHall ? 5 : core.townHallPlot().map(PlotRecord::tier).orElse(5);
+        if (plot.tier() >= maxPlotTier) {
+            return Optional.empty();
+        }
+
+        List<ResourceCost> cost = PlotTierUpgradeCost.costFor(plot.tier() + 1);
+        List<Container> plotBoxes = Settlemynts.resolvePlotBoxes(level, plot.plotId());
+        for (ResourceCost entry : cost) {
+            int onHand = Math.min(countAvailable(plotBoxes, entry.resource()), entry.amount());
+            if (onHand > 0) {
+                drain(plotBoxes, entry.resource(), onHand);
+            }
+        }
+
+        int newTier = plot.tier() + 1;
+        core.updatePlot(plot.withTier(newTier));
+        if (net.neoforged.fml.ModList.get().isLoaded("blueprynts") && plot.constructionBoxId().isPresent()) {
+            com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.setAllowedTier(level, plot.constructionBoxId().get(), newTier);
+        }
+        if (isTownHall) {
+            com.github.cerealklla.settlemynts.roadway.RoadwayRetier.repaintSettlementRoads(level, core.getUUID(), newTier);
+        }
+        com.github.cerealklla.settlemynts.SettlemyntsMod.grantMayorSkillXpForPlotUpgrade(level.getServer(), core, newTier);
+        return Optional.of(newTier);
     }
 
     /** Shared with {@link PlotTierMarketPurchasing}'s own identical scan (package-private there). */

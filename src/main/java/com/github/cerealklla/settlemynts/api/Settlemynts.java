@@ -615,6 +615,33 @@ public final class Settlemynts {
         });
     }
 
+    /**
+     * Applies {@code plotId}'s real Tier-cap raise when its cost was already paid entirely OUTSIDE
+     * the normal "Upgrade Plot" flow -- added 2026-10-13 for Myssions' Plot Upgrade quest ({@code
+     * bridge.SettlemyntsPlotUpgradeBridge#applyUpgrade}), whose own delivery milestone collects the
+     * real shortfall directly from the player, never depositing into the Construction Box. See
+     * {@code construction.PlotTierUpgradeFunding#applyPaidExternally}'s own doc for the full
+     * accounting (the box's own on-hand stock still gets drained, since it already counted toward the
+     * shortfall figure the quest used). {@code targetTier} is the specific Tier the caller's own
+     * shortfall figure was computed for -- guards against applying this upgrade a second time (two
+     * players' quest instances for the same plot, or a stale duplicate) once the plot's already moved
+     * past it. False if the plot can't be resolved anymore, is already at its real Tier ceiling, or
+     * has already moved past {@code targetTier}.
+     */
+    public static boolean applyPlotUpgradeFromQuest(ServerLevel level, UUID plotId, int targetTier) {
+        AABB worldBounds = new AABB(-WORLD_SCAN_RADIUS, level.getMinY(), -WORLD_SCAN_RADIUS,
+                WORLD_SCAN_RADIUS, level.getMaxY(), WORLD_SCAN_RADIUS);
+        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+            for (PlotRecord plot : core.getPlots()) {
+                if (plot.plotId().equals(plotId)) {
+                    return com.github.cerealklla.settlemynts.construction.PlotTierUpgradeFunding
+                            .applyPaidExternally(level, core, plot, targetTier).isPresent();
+                }
+            }
+        }
+        return false;
+    }
+
     private static int countAvailable(List<Container> boxes, com.github.cerealklla.blueprynts.blueprint.GenericResource resource) {
         int total = 0;
         for (Container box : boxes) {
@@ -738,5 +765,19 @@ public final class Settlemynts {
             return com.github.cerealklla.settlemynts.roadway.SettlementTierResolver.averageTier(core.getPlots());
         }
         return 1;
+    }
+
+    /**
+     * Despawns every Highway Stake tagged with {@code instanceId}, reverting each one's own paved
+     * terrain first (same effect as a player manually picking up a connected stake) -- added
+     * 2026-10-13 for Myssions' {@code quest.QuestEndHooks} cleanup on a road-connection quest's
+     * failure/abandon, so a never-finished Highway leaves no terrain scar behind. See {@code
+     * roadway.HighwayStakeEntity#despawnAllForInstance}'s own doc for the real fix this call relies
+     * on. {@code nearHint} only needs to be anywhere within the stake network's real span (2000-block
+     * search radius) -- the instance's own quest hint position (set near the destination settlement)
+     * is always within range of the whole road.
+     */
+    public static void despawnHighwayStakesForInstance(ServerLevel level, UUID instanceId, BlockPos nearHint) {
+        com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity.despawnAllForInstance(level, instanceId, nearHint);
     }
 }

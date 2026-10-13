@@ -1804,7 +1804,7 @@ public class SettlemyntsMod {
      * passive, so this always grants to every qualifying player regardless of who actually clicked
      * "Upgrade Plot," not just the acting player.
      */
-    private static void grantMayorSkillXpForPlotUpgrade(net.minecraft.server.MinecraftServer server, GhostTownHallCoreEntity core, int newTier) {
+    public static void grantMayorSkillXpForPlotUpgrade(net.minecraft.server.MinecraftServer server, GhostTownHallCoreEntity core, int newTier) {
         if (!com.github.cerealklla.settlemynts.bridge.LyfeMayorBridge.isLoaded()) {
             return;
         }
