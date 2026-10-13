@@ -3052,6 +3052,22 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.roadway.RoadwayStakeLeash.clearGhostAnchor(player.getUUID());
             }
 
+            // Highway Stakes (added 2026-10-11) never got this same block -- real live report,
+            // 2026-10-13: "exactly the same behavior as roadway stakes in a town; you'd have to go
+            // back and reattach the line for the next stake to be connected," which Roadway Stakes
+            // already get from the matching block above (switching away clears the ghost anchor, so
+            // the next placement doesn't silently resume a stale chain) but Highway Stakes never did.
+            if (player.getMainHandItem().is(ModItems.HIGHWAY_STAKE.get())) {
+                com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity anchor =
+                        com.github.cerealklla.settlemynts.roadway.HighwayStakeLeash.resolveGhostAnchor(serverLevel, player.getUUID());
+                if (anchor != null) {
+                    applyLeashPull(player, new Vec3(anchor.getX(), anchor.getY(), anchor.getZ()),
+                            com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity.MAX_CONNECTION_LENGTH_BLOCKS);
+                }
+            } else {
+                com.github.cerealklla.settlemynts.roadway.HighwayStakeLeash.clearGhostAnchor(player.getUUID());
+            }
+
             // Road Access Flag rework (2026-09-30, mirrors Plot Stakes above): the flag has no rope,
             // so this is just the CurrentPlotID reset -- independent of whether Plot Stakes is also
             // being held, since they're two separate items a planner can carry at once.
