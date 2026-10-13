@@ -230,8 +230,10 @@ public final class HighwayPaver {
 
             // Ported from RoadwayPaver 2026-10-13 (explicit user request: "need to behave the same
             // with highway stakes too") -- see that class's #stairStateFor/#paveColumn own docs for
-            // the full real-live-report writeup, including the one-block-too-high placement bug
-            // found and fixed the same day. Identical logic, this class's own copy per convention.
+            // the full real-live-report writeup, including the base-Y derivation (a stair's base must
+            // equal the HIGHER of the two flat landings it bridges, not the lower one -- confirmed by
+            // direct RCON inspection of a live placed stair's FACING + position). Identical logic,
+            // this class's own copy per convention.
             BlockState stepState = null;
             if (i > 0 && profile[i] != profile[i - 1]) {
                 Direction travelDirection = directionFromDelta(v.x() - centerline.get(i - 1).x(), v.z() - centerline.get(i - 1).z());
@@ -240,7 +242,7 @@ public final class HighwayPaver {
                 }
                 stepState = stairStateFor(tier, travelDirection);
             }
-            int pavedY = stepState != null ? Math.min(profile[i], profile[i - 1]) : profile[i];
+            int pavedY = stepState != null ? Math.max(profile[i], profile[i - 1]) : profile[i];
 
             for (int offset = -ROAD_SIDE_OFFSET_BLOCKS; offset <= ROAD_SIDE_OFFSET_BLOCKS; offset++) {
                 int colX = v.x() + perpX * offset;
