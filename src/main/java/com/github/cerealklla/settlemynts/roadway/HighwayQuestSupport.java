@@ -4,9 +4,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+
+import com.mojang.logging.LogUtils;
+
 import com.github.cerealklla.cartographyr.api.Cartography;
 import com.github.cerealklla.cartographyr.geo.EntityId;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
+import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModItems;
 
@@ -24,6 +29,12 @@ import net.minecraft.world.item.ItemStack;
  * bridge.SettlemyntsRoadQuestBridge} -- see that class's own doc.
  */
 public final class HighwayQuestSupport {
+
+    // [HighwayAnchorDebug] -- temporary, chasing a real live report (2026-10-13): a road-connection
+    // quest still won't auto-complete even with the last stake placed directly outside the
+    // destination settlement. Logs the real distanceOutside for every stake against both
+    // settlements, to see exactly why anchor resolution is or isn't matching. Remove once found/fixed.
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     // How close a stake must be to a settlement's own registered edge to count as "anchoring" the
     // road to it. A same-day attempt widened this 3 -> 20 on the unconfirmed guess that a natural
@@ -86,6 +97,10 @@ public final class HighwayQuestSupport {
         HighwayStakeEntity anchorB = null;
         for (HighwayStakeEntity stake : stakes) {
             BlockPos pos = stake.blockPosition();
+            double distA = settlementA.get().geometry() instanceof Geometry.Polygon pA ? pA.distanceOutside(pos.getX(), pos.getZ()) : Double.NaN;
+            double distB = settlementB.get().geometry() instanceof Geometry.Polygon pB ? pB.distanceOutside(pos.getX(), pos.getZ()) : Double.NaN;
+            LOGGER.info("[HighwayAnchorDebug] stake at {} -- distanceOutside(A)={} distanceOutside(B)={} (slack={})",
+                    pos, distA, distB, PERIMETER_ANCHOR_SLACK_BLOCKS);
             if (anchorA == null && SettlementPerimeter.isJustOutside(settlementA.get(), pos, PERIMETER_ANCHOR_SLACK_BLOCKS)) {
                 anchorA = stake;
             }
@@ -93,10 +108,13 @@ public final class HighwayQuestSupport {
                 anchorB = stake;
             }
         }
+        LOGGER.info("[HighwayAnchorDebug] {} stakes total, anchorA={} anchorB={}",
+                stakes.size(), anchorA == null ? "none" : anchorA.blockPosition(), anchorB == null ? "none" : anchorB.blockPosition());
         if (anchorA == null || anchorB == null) {
             return new HighwayProgress(0, false);
         }
         List<HighwayStakeEntity> path = RoadwayGraph.shortestPath(stakes, anchorA, anchorB);
+        LOGGER.info("[HighwayAnchorDebug] shortestPath size={}", path.size());
         if (path.isEmpty()) {
             return new HighwayProgress(0, false);
         }
