@@ -117,6 +117,51 @@ public final class RoadwayPaver {
         return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
     }
 
+    // How far up/down to search for the real walkable surface nearest a reference height -- generous
+    // enough to find the floor of a tunnel dug under a tall hill, without reaching into some unrelated
+    // deep cave far below if nothing reasonable exists near the reference at all.
+    private static final int SURFACE_SEARCH_RADIUS_BLOCKS = 24;
+
+    /**
+     * The real walkable surface (solid block with open air directly above it) nearest {@code
+     * referenceY} at this column -- real live report, 2026-10-13: "if I dig a tunnel through a hill
+     * and place a stake on the ground (same height), the road should follow the boundary of air and
+     * solid ground between the stakes... What is happening right now is it seems like you are simply
+     * replacing the sky facing block with road surface, making my tunnel impossible." {@link
+     * #naturalSurfaceY} always found the world's topmost surface via a heightmap, completely blind to
+     * any tunnel dug beneath it -- correct for two roads crossing at grade (see that method's own
+     * doc), wrong for an actual tunnel. Searching outward from a reference height (the interpolated
+     * straight-line height between the two stakes at this point) instead finds whichever real surface
+     * -- a tunnel floor, a road already there, open ground -- is actually nearest that reference,
+     * which satisfies both cases: a tunnel's own floor is right at the reference height and wins
+     * immediately, while a crossing road sitting at a similar grade is still the nearest match. Falls
+     * back to the old topmost-surface sample only if nothing walkable is found within {@link
+     * #SURFACE_SEARCH_RADIUS_BLOCKS} of the reference at all (e.g. the stakes are floating with no
+     * real terrain nearby).
+     */
+    private static int naturalSurfaceYNear(ServerLevel level, int x, int z, int referenceY) {
+        int minY = level.getMinY();
+        int maxY = level.getMaxY();
+        for (int d = 0; d <= SURFACE_SEARCH_RADIUS_BLOCKS; d++) {
+            int up = referenceY + d;
+            if (up <= maxY && isWalkableSurface(level, x, up, z)) {
+                return up;
+            }
+            if (d > 0) {
+                int down = referenceY - d;
+                if (down >= minY && isWalkableSurface(level, x, down, z)) {
+                    return down;
+                }
+            }
+        }
+        return naturalSurfaceY(level, x, z);
+    }
+
+    private static boolean isWalkableSurface(ServerLevel level, int x, int y, int z) {
+        BlockPos pos = new BlockPos(x, y, z);
+        return !level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir();
+    }
+
     /**
      * Removes isolated single-column height spikes before slope-limiting (added 2026-10-06, real
      * live report: a visibly "flat" forest floor still produced a staircase of 1-block steps).
@@ -185,18 +230,25 @@ public final class RoadwayPaver {
         List<Geometry.Polygon.Vertex> centerline = Geometry.Polygon.supercoverLine(
                 new Geometry.Polygon.Vertex(x1, z1), new Geometry.Polygon.Vertex(x2, z2));
         int n = centerline.size();
-        int[] naturalY = new int[n];
-        for (int i = 0; i < n; i++) {
-            Geometry.Polygon.Vertex v = centerline.get(i);
-            naturalY[i] = naturalSurfaceY(level, v.x(), v.z());
-        }
         // Stakes stand one block ABOVE the ground they're placed on (RoadwayStakeItem places at
         // clickedPos.above(), so the ghost model stands visibly on the surface) -- the pinned road
         // elevation at each endpoint is that ground level, not the stake's own render position.
         // Real bug, live report, 2026-10-06: using the stake's raw Y directly forced the road a full
         // block above natural terrain at both ends, producing a visible "lump" at each stake even on
         // perfectly flat ground.
-        int[] profile = slopeLimitedProfile(medianSmooth(naturalY), Mth.floor(a.getY()) - 1, Mth.floor(b.getY()) - 1);
+        int startY = Mth.floor(a.getY()) - 1;
+        int endY = Mth.floor(b.getY()) - 1;
+        int[] naturalY = new int[n];
+        for (int i = 0; i < n; i++) {
+            Geometry.Polygon.Vertex v = centerline.get(i);
+            // Reference height for the surface search below -- the straight-line interpolation
+            // between the two stakes' own ground level at this point, so a tunnel floor (right at
+            // this reference) is found instead of the hill's distant outer surface. See
+            // #naturalSurfaceYNear's own doc.
+            int referenceY = n <= 1 ? startY : Math.round(startY + (endY - startY) * (i / (float) (n - 1)));
+            naturalY[i] = naturalSurfaceYNear(level, v.x(), v.z(), referenceY);
+        }
+        int[] profile = slopeLimitedProfile(medianSmooth(naturalY), startY, endY);
 
         List<SnapshotEntry> snapshot = new ArrayList<>();
         List<BlockPos> roadCells = new ArrayList<>();
@@ -254,8 +306,8 @@ public final class RoadwayPaver {
                 if (!pavedColumns.add(columnKey)) {
                     continue; // Already paved by an earlier (nearer) centerline index -- see pavedColumns' own doc.
                 }
-                int natural = offset == 0 ? naturalY[i] : naturalSurfaceY(level, colX, colZ);
                 int targetY = profile[i];
+                int natural = offset == 0 ? naturalY[i] : naturalSurfaceYNear(level, colX, colZ, targetY);
                 paveColumn(level, colX, targetY, colZ, natural, tier, stepState, snapshot, captured);
                 roadCells.add(new BlockPos(colX, targetY, colZ));
                 roadBlocksPlaced++;

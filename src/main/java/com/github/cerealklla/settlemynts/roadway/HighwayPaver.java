@@ -80,6 +80,34 @@ public final class HighwayPaver {
         return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
     }
 
+    // See RoadwayPaver#naturalSurfaceYNear's own doc for the full real-live-report writeup -- this is
+    // the identical fix, duplicated here per this class's own "copy and tweak" precedent rather than
+    // shared, same as every other piece of this file.
+    private static final int SURFACE_SEARCH_RADIUS_BLOCKS = 24;
+
+    private static int naturalSurfaceYNear(ServerLevel level, int x, int z, int referenceY) {
+        int minY = level.getMinY();
+        int maxY = level.getMaxY();
+        for (int d = 0; d <= SURFACE_SEARCH_RADIUS_BLOCKS; d++) {
+            int up = referenceY + d;
+            if (up <= maxY && isWalkableSurface(level, x, up, z)) {
+                return up;
+            }
+            if (d > 0) {
+                int down = referenceY - d;
+                if (down >= minY && isWalkableSurface(level, x, down, z)) {
+                    return down;
+                }
+            }
+        }
+        return naturalSurfaceY(level, x, z);
+    }
+
+    private static boolean isWalkableSurface(ServerLevel level, int x, int y, int z) {
+        BlockPos pos = new BlockPos(x, y, z);
+        return !level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir();
+    }
+
     private static int[] medianSmooth(int[] values) {
         int n = values.length;
         int[] result = values.clone();
@@ -158,12 +186,19 @@ public final class HighwayPaver {
         List<Geometry.Polygon.Vertex> centerline = Geometry.Polygon.supercoverLine(
                 new Geometry.Polygon.Vertex(x1, z1), new Geometry.Polygon.Vertex(x2, z2));
         int n = centerline.size();
+        int startY = Mth.floor(a.getY()) - 1;
+        int endY = Mth.floor(b.getY()) - 1;
         int[] naturalY = new int[n];
         for (int i = 0; i < n; i++) {
             Geometry.Polygon.Vertex v = centerline.get(i);
-            naturalY[i] = naturalSurfaceY(level, v.x(), v.z());
+            // Reference height for the surface search -- the straight-line interpolation between the
+            // two stakes' own ground level at this point, so a tunnel dug under a hill is found
+            // instead of the hill's distant outer surface. See RoadwayPaver#naturalSurfaceYNear's own
+            // doc for the full real-live-report writeup (identical fix, this class's own copy).
+            int referenceY = n <= 1 ? startY : Math.round(startY + (endY - startY) * (i / (float) (n - 1)));
+            naturalY[i] = naturalSurfaceYNear(level, v.x(), v.z(), referenceY);
         }
-        int[] profile = slopeLimitedProfile(medianSmooth(naturalY), Mth.floor(a.getY()) - 1, Mth.floor(b.getY()) - 1);
+        int[] profile = slopeLimitedProfile(medianSmooth(naturalY), startY, endY);
 
         List<SnapshotEntry> snapshot = new ArrayList<>();
         Set<BlockPos> captured = new HashSet<>();
@@ -198,8 +233,8 @@ public final class HighwayPaver {
                 if (!pavedColumns.add(columnKey)) {
                     continue; // Already paved by an earlier (nearer) centerline index -- see pavedColumns' own doc.
                 }
-                int natural = offset == 0 ? naturalY[i] : naturalSurfaceY(level, colX, colZ);
                 int targetY = profile[i];
+                int natural = offset == 0 ? naturalY[i] : naturalSurfaceYNear(level, colX, colZ, targetY);
                 paveColumn(level, colX, targetY, colZ, natural, tier, snapshot, captured);
             }
         }
