@@ -94,6 +94,35 @@ public final class HighwayQuestSupport {
             return new HighwayProgress(0, false);
         }
         List<HighwayStakeEntity> path = RoadwayGraph.shortestPath(stakes, anchorA, anchorB);
-        return path.isEmpty() ? new HighwayProgress(0, false) : new HighwayProgress(path.size(), true);
+        if (path.isEmpty()) {
+            return new HighwayProgress(0, false);
+        }
+        registerTunnelProtectionForPath(level, path);
+        return new HighwayProgress(path.size(), true);
+    }
+
+    /**
+     * Registers real tunnel protection for every edge along a now-genuinely-completed path -- see
+     * {@code HighwayPaver#registerTunnelProtection}'s own doc for why this replaced per-edge
+     * registration at pave time (a real live report: terrain became permanently uneditable while the
+     * road was still under construction, long before the two settlements were actually connected).
+     * {@link HighwayTunnelRegistry}-side storage is keyed by each edge's own road entity id, so
+     * calling this again for an already-registered edge (e.g. {@code checkProgress} re-confirming
+     * "connected" for a few more ticks before the quest instance's own status flips away from
+     * IN_PROGRESS) is a harmless, idempotent overwrite, not a duplicate.
+     */
+    private static void registerTunnelProtectionForPath(ServerLevel level, List<HighwayStakeEntity> path) {
+        for (int i = 0; i + 1 < path.size(); i++) {
+            HighwayStakeEntity from = path.get(i);
+            HighwayStakeEntity to = path.get(i + 1);
+            for (HighwayStakeEntity.ConnectionSnapshot snapshot : from.getConnectionSnapshots()) {
+                if (snapshot.otherStakeId().equals(to.getUUID())) {
+                    HighwayPaver.registerTunnelProtection(level, snapshot.roadEntityId(),
+                            new net.minecraft.world.phys.Vec3(from.getX(), from.getY(), from.getZ()),
+                            new net.minecraft.world.phys.Vec3(to.getX(), to.getY(), to.getZ()));
+                    break;
+                }
+            }
+        }
     }
 }

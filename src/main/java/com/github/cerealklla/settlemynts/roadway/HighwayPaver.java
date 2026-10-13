@@ -210,19 +210,23 @@ public final class HighwayPaver {
         a.setSnapshotFor(b.getUUID(), snapshot, roadEntity.id());
         b.setSnapshotFor(a.getUUID(), snapshot, roadEntity.id());
 
-        // Highway tunnel protection (2026-10-13) -- the real 3D line is between the two stakes'
-        // own positions, not the paved profile's terrain-hugging centerline (explicit user spec:
-        // "the direct line between stakes"). Reuses the road entity's own id as the tunnel
-        // segment's id, so cleanup (snapAllConnections/despawnAllForInstance) needs no extra
-        // tracking beyond what ConnectionSnapshot already carries.
-        if (net.neoforged.fml.ModList.get().isLoaded("protectyons")) {
-            com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.registerHighwayTunnel(level, roadEntity.id().value(),
-                    new net.minecraft.world.phys.Vec3(a.getX(), a.getY(), a.getZ()),
-                    new net.minecraft.world.phys.Vec3(b.getX(), b.getY(), b.getZ()),
-                    TUNNEL_PROTECTION_RADIUS_BLOCKS);
-        }
+        // Highway tunnel protection is deliberately NOT registered here -- real live report,
+        // 2026-10-13: "you are making terrain uneditable BEFORE the road is finalized, which is
+        // wrong." Registering it per-edge, the instant each individual connection paves, protected
+        // a Highway quest's own still-under-construction road against the very player building it
+        // (and anyone else) long before the two settlements were actually connected. Protection is
+        // now registered once, for the whole completed path at once, only once the road-connection
+        // quest genuinely finishes -- see HighwayQuestSupport#registerTunnelProtectionForPath,
+        // called from #checkProgress the instant it confirms a real connected path.
 
         SettlemyntsMod.LOGGER.info("[Highway] Added road: {} centerline cells, {} snapshot entries captured", n, snapshot.size());
+    }
+
+    /** Real 3D tunnel protection for one already-paved edge -- {@code roadEntityId} doubles as the tunnel segment's own id (see {@link #paveEdge}'s own doc), so cleanup (snapAllConnections/despawnAllForInstance) needs no extra tracking beyond what {@code HighwayStakeEntity.ConnectionSnapshot} already carries. No-op if Protectyons isn't loaded. */
+    public static void registerTunnelProtection(ServerLevel level, EntityId roadEntityId, net.minecraft.world.phys.Vec3 posA, net.minecraft.world.phys.Vec3 posB) {
+        if (net.neoforged.fml.ModList.get().isLoaded("protectyons")) {
+            com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.registerHighwayTunnel(level, roadEntityId.value(), posA, posB, TUNNEL_PROTECTION_RADIUS_BLOCKS);
+        }
     }
 
     private static void captureOriginal(ServerLevel level, BlockPos pos, List<SnapshotEntry> snapshot, Set<BlockPos> captured) {

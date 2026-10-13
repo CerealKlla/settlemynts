@@ -69,6 +69,7 @@ public final class StakeDistanceOverlay implements GuiLayer {
         double originX;
         double originZ;
         String label;
+        double maxDistance = -1; // No "approaching the max" color scaling for the Town Hall radius case -- it's a fixed placement radius, not a chain link with a real max.
         if (isHoldingPerimeterStake(player)) {
             GhostTownHallCoreEntity nearestCore = findNearestCore(level, player);
             if (nearestCore == null) {
@@ -85,6 +86,7 @@ public final class StakeDistanceOverlay implements GuiLayer {
             originX = anchorPos.get().getX() + 0.5;
             originZ = anchorPos.get().getZ() + 0.5;
             label = "Distance from Stake: ";
+            maxDistance = maxChainDistanceFor(player);
         } else {
             return;
         }
@@ -106,6 +108,7 @@ public final class StakeDistanceOverlay implements GuiLayer {
         double dz = originZ - targetZ;
         double distance = Math.sqrt(dx * dx + dz * dz);
         String text = label + Math.round(distance) + " blocks";
+        int textColor = maxDistance > 0 ? approachingMaxColor(distance, maxDistance) : TEXT_COLOR;
 
         Font font = minecraft.font;
         int textWidth = font.width(text);
@@ -115,7 +118,32 @@ public final class StakeDistanceOverlay implements GuiLayer {
         int bottom = top + font.lineHeight + PADDING * 2;
 
         guiGraphics.fill(left, top, right, bottom, BACKGROUND_COLOR);
-        guiGraphics.text(font, text, left + PADDING, top + PADDING, TEXT_COLOR);
+        guiGraphics.text(font, text, left + PADDING, top + PADDING, textColor);
+    }
+
+    /** The real max connection length for whichever chain-stake item is actually held -- {@code -1} ("no max") is never passed in here, see the one caller. */
+    private static double maxChainDistanceFor(Player player) {
+        if (player.getMainHandItem().is(ModItems.ROADWAY_STAKE.get())) {
+            return com.github.cerealklla.settlemynts.roadway.RoadwayStakeEntity.MAX_CONNECTION_LENGTH_BLOCKS;
+        }
+        if (player.getMainHandItem().is(ModItems.HIGHWAY_STAKE.get())) {
+            return com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity.MAX_CONNECTION_LENGTH_BLOCKS;
+        }
+        return com.github.cerealklla.settlemynts.rope.RopeConnections.MAX_ROPE_LENGTH_BLOCKS; // Plot Placement Stake.
+    }
+
+    /**
+     * Red at 0 blocks, green at {@code maxDistance} -- explicit user request: "I'd like the distance
+     * from last stake text to change from red to green as the distance approaches the max between
+     * stakes." A road nearer the max spacing uses fewer total stakes to cover the same span (matches
+     * this suite's own "efficient road" stake-count-tier reward framing elsewhere), so green reading
+     * as "good, efficient placement" here is intentional, not just an arbitrary color choice.
+     */
+    private static int approachingMaxColor(double distance, double maxDistance) {
+        float fraction = net.minecraft.util.Mth.clamp((float) (distance / maxDistance), 0f, 1f);
+        int red = Math.round((1f - fraction) * 255f);
+        int green = Math.round(fraction * 255f);
+        return 0xFF000000 | (red << 16) | (green << 8);
     }
 
     private static boolean isHoldingPerimeterStake(Player player) {
@@ -124,8 +152,12 @@ public final class StakeDistanceOverlay implements GuiLayer {
     }
 
     private static boolean isHoldingChainStake(Player player) {
+        // HIGHWAY_STAKE added 2026-10-13 -- without this, the server-side AnchorDistancePayload fix
+        // for Highway Stakes would never actually be shown, since this gate returned false for it
+        // and render() bails out before ever reaching the text/color logic below.
         return player.getMainHandItem().is(ModItems.PLOT_PLACEMENT_STAKE.get())
-                || player.getMainHandItem().is(ModItems.ROADWAY_STAKE.get());
+                || player.getMainHandItem().is(ModItems.ROADWAY_STAKE.get())
+                || player.getMainHandItem().is(ModItems.HIGHWAY_STAKE.get());
     }
 
     private static GhostTownHallCoreEntity findNearestCore(ClientLevel level, Player player) {
