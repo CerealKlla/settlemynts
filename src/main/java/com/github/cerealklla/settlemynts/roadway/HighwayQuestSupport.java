@@ -94,8 +94,8 @@ public final class HighwayQuestSupport {
      * of anchor-slack tuning (the dead end chased right before this) could have fixed that.
      */
     public static HighwayProgress checkProgress(ServerLevel level, UUID instanceId, BlockPos nearHint, long placeIdA, long placeIdB) {
-        Optional<GeographicEntity> settlementA = Cartography.getEntity(level, new EntityId(placeIdA));
-        Optional<GeographicEntity> settlementB = Cartography.getEntity(level, new EntityId(placeIdB));
+        Optional<GeographicEntity> settlementA = Cartography.getEntity(level, new EntityId(placeIdA)).map(e -> SettlementPerimeter.resolveRealBoundary(level, e));
+        Optional<GeographicEntity> settlementB = Cartography.getEntity(level, new EntityId(placeIdB)).map(e -> SettlementPerimeter.resolveRealBoundary(level, e));
         if (settlementA.isEmpty() || settlementB.isEmpty()) {
             return HighwayProgress.NONE;
         }

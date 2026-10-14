@@ -1,9 +1,15 @@
 package com.github.cerealklla.settlemynts.roadway;
 
+import java.util.Optional;
+
+import com.github.cerealklla.cartographyr.api.Cartography;
+import com.github.cerealklla.cartographyr.geo.EntityId;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
+import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 
 /**
  * "Just outside a settlement's registered perimeter" -- new geometry needed for Highway Stakes
@@ -18,6 +24,32 @@ import net.minecraft.core.BlockPos;
 public final class SettlementPerimeter {
 
     private SettlementPerimeter() {
+    }
+
+    /**
+     * Resolves the settlement's own real, unpadded boundary -- explicit user spec, 2026-10-13:
+     * "No Man's Land is meant to be land not owned by the settlement," so a stake anywhere in that
+     * buffer (not just past its own far outer edge) should already count as "outside." A
+     * player-founded settlement's main Cartographyr entity (what a Highway quest's
+     * {@code origin_place_id}/{@code knowledge_place_id} actually point at) is its PADDED buffer --
+     * the real fitted perimeter is a separate {@code SettlemyntsMod#SETTLEMENT_CORE_ENTITY_TYPE}
+     * entity, resolved here via its {@link GhostTownHallCoreEntity} (same technique {@link
+     * HighwayPaver#isInsideAnySettlement} already uses). A natural (NPC) village has no core at all --
+     * its one registered polygon is already its own real, unpadded boundary, so it's returned as-is.
+     * Falls back to {@code settlement} itself if the core entity isn't currently loaded (same
+     * chunk-load caveat {@link GhostTownHallCoreEntity#findByCartographyrEntityId} already documents)
+     * or has no real-boundary entity registered yet.
+     */
+    public static GeographicEntity resolveRealBoundary(ServerLevel level, GeographicEntity settlement) {
+        Optional<GhostTownHallCoreEntity> core = GhostTownHallCoreEntity.findByCartographyrEntityId(level, settlement.id().value());
+        if (core.isEmpty()) {
+            return settlement; // Natural village, or the core isn't currently loaded -- use as-is.
+        }
+        Long coreEntityId = core.get().getCartographyrCoreEntityId();
+        if (coreEntityId == null) {
+            return settlement;
+        }
+        return Cartography.getEntity(level, new EntityId(coreEntityId)).orElse(settlement);
     }
 
     public static boolean isJustOutside(GeographicEntity settlement, BlockPos pos, double maxDistanceBlocks) {
