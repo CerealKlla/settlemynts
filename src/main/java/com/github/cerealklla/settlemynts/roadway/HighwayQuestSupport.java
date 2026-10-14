@@ -109,10 +109,14 @@ public final class HighwayQuestSupport {
         UUID anchorB = null;
         for (HighwayStakeGraph.StakeRecord stake : stakes) {
             BlockPos pos = stake.pos();
-            double distA = settlementA.get().geometry() instanceof Geometry.Polygon pA ? pA.distanceOutside(pos.getX(), pos.getZ()) : Double.NaN;
-            double distB = settlementB.get().geometry() instanceof Geometry.Polygon pB ? pB.distanceOutside(pos.getX(), pos.getZ()) : Double.NaN;
-            LOGGER.info("[HighwayAnchorDebug] stake at {} -- distanceOutside(A)={} distanceOutside(B)={} (slack={})",
-                    pos, distA, distB, PERIMETER_ANCHOR_SLACK_BLOCKS);
+            // Logs the real edge distance the check now actually uses (added 2026-10-13, same bug
+            // investigation) -- distanceOutside() alone was proven misleading (returns 0.0 for both
+            // "on the edge" and "deep inside"), so printing it was no longer enough to see WHY a
+            // stake does or doesn't anchor once isJustOutside switched to distanceToNearestEdge.
+            double edgeA = settlementA.get().geometry() instanceof Geometry.Polygon pA ? pA.distanceToNearestEdge(pos.getX(), pos.getZ()) : Double.NaN;
+            double edgeB = settlementB.get().geometry() instanceof Geometry.Polygon pB ? pB.distanceToNearestEdge(pos.getX(), pos.getZ()) : Double.NaN;
+            LOGGER.info("[HighwayAnchorDebug] stake at {} -- edgeDistance(A)={} edgeDistance(B)={} (slack={})",
+                    pos, edgeA, edgeB, PERIMETER_ANCHOR_SLACK_BLOCKS);
             if (anchorA == null && SettlementPerimeter.isJustOutside(settlementA.get(), pos, PERIMETER_ANCHOR_SLACK_BLOCKS)) {
                 anchorA = stake.stakeId();
             }
