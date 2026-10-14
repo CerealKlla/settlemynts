@@ -412,10 +412,16 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
             } else if (graph.isPendingHide(instanceId)) {
                 // Quest COMPLETED, not abandoned -- deliberately no snapAllConnections here (that
                 // would revert this stake's paved terrain, which is the player's actual finished
-                // road). Just discard the now-redundant ghost marker and forget it.
+                // road). Just discard the now-redundant ghost marker and forget it. Deliberately
+                // does NOT clear the pending-hide flag (fixed 2026-10-13, real live report: "the
+                // stakes didn't auto clear as I walked" -- HighwayConnectionMarkerEntity has no
+                // persisted graph of its own and checks this same flag to self-clean; clearing it the
+                // instant the last STAKE finished would leave any still-unloaded MARKER torch with no
+                // way to ever discover it should self-clean too, since the flag it checks would
+                // already be gone). A finished instance's flag staying set forever costs nothing --
+                // nothing still alive for that instance ever checks it again once both are gone.
                 selfCleaned = true;
                 graph.removeStake(getUUID());
-                graph.clearPendingHideIfDone(instanceId);
                 discard();
             }
         }
@@ -461,6 +467,12 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
      * {@link #despawnAllForInstance} (the abandon/fail/expire path), a completed road's paved terrain
      * is the player's real finished work and must be left untouched; only the now-redundant cosmetic
      * marker entities go away.
+     *
+     * <p>Always marks the instance pending-hide, even if every stake here was already loaded and
+     * removed -- fixed 2026-10-13, real live report ("the stakes didn't auto clear as I walked"):
+     * {@link HighwayConnectionMarkerEntity} has no persisted graph of its own and relies entirely on
+     * this same flag to self-clean, so it must stay set for any marker that hasn't loaded yet
+     * regardless of how far along the stakes themselves are.
      */
     public static void hideAllForInstance(ServerLevel level, UUID instanceId, net.minecraft.core.BlockPos nearHint) {
         HighwayStakeGraph graph = HighwayStakeGraph.get(level.getServer());
@@ -468,11 +480,7 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
             graph.removeStake(stake.getUUID());
             stake.discard();
         }
-        if (graph.byInstance(instanceId).isEmpty()) {
-            graph.clearPendingHideIfDone(instanceId);
-        } else {
-            graph.markPendingHide(instanceId);
-        }
+        graph.markPendingHide(instanceId);
     }
 
     @Override

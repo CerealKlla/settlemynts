@@ -230,15 +230,11 @@ public final class HighwayStakeGraph extends SavedData {
         }
     }
 
+    // Deliberately never auto-cleared (see #markPendingHide's own doc) -- HighwayConnectionMarkerEntity
+    // has no persisted graph of its own and relies entirely on this flag staying set to self-clean
+    // whenever its own chunk happens to load, regardless of how far along the stakes already are.
     public boolean isPendingHide(UUID instanceId) {
         return pendingHideInstanceIds.contains(instanceId);
-    }
-
-    /** Called after a stake removes itself -- clears the pending-hide flag once nothing's left. */
-    public void clearPendingHideIfDone(UUID instanceId) {
-        if (byInstance(instanceId).isEmpty() && pendingHideInstanceIds.remove(instanceId)) {
-            setDirty();
-        }
     }
 
     public List<StakeRecord> byInstance(UUID instanceId) {

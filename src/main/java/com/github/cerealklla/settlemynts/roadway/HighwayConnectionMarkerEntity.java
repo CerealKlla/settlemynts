@@ -48,6 +48,26 @@ public class HighwayConnectionMarkerEntity extends Display.BlockDisplay {
         return marker;
     }
 
+    private boolean selfCleaned = false;
+
+    /**
+     * Self-discards the moment this marker's chunk loads, if its instance was marked pending-hide --
+     * added 2026-10-13, real live report: "the stakes didn't auto clear as I walked." Markers have no
+     * persisted graph of their own (unlike {@link HighwayStakeEntity}), so this is the ONLY way a
+     * marker outside render range at the moment a road completes ever finds out it should disappear --
+     * see {@link HighwayStakeGraph#isPendingHide}'s own doc for why that flag deliberately never
+     * auto-clears, specifically so a late-loading marker like this one can still see it.
+     */
+    @Override
+    public void tick() {
+        super.tick();
+        if (!selfCleaned && linkedInstanceId != null && level() instanceof ServerLevel serverLevel
+                && HighwayStakeGraph.get(serverLevel.getServer()).isPendingHide(linkedInstanceId)) {
+            selfCleaned = true;
+            discard();
+        }
+    }
+
     private static List<HighwayConnectionMarkerEntity> findByInstanceId(ServerLevel level, UUID instanceId, net.minecraft.core.BlockPos nearHint) {
         AABB searchBox = new AABB(
                 nearHint.getX() - SEARCH_RADIUS_BLOCKS, level.getMinY(), nearHint.getZ() - SEARCH_RADIUS_BLOCKS,
