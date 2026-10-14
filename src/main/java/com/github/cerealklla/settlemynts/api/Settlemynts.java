@@ -752,6 +752,19 @@ public final class Settlemynts {
         return com.github.cerealklla.settlemynts.roadway.HighwayQuestSupport.buybackUnusedStakes(player, instanceId);
     }
 
+    /**
+     * Discards every ghost Highway Stake/connection-marker torch for {@code instanceId} with NO
+     * terrain revert -- call once the road-connection quest actually COMPLETES. Explicit user
+     * request: the ghost markers should disappear once the road is finished, and leaving them live
+     * lets a player accidentally right-click one and un-pave part of their own just-finished road
+     * (the normal stake-pickup interaction). Never use {@link #buybackUnusedHighwayStakes} as a
+     * substitute for this -- that only clears leftover inventory items, not placed ghost entities.
+     */
+    public static void hideCompletedHighwayMarkers(ServerLevel level, UUID instanceId, BlockPos nearHint) {
+        com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity.hideAllForInstance(level, instanceId, nearHint);
+        com.github.cerealklla.settlemynts.roadway.HighwayConnectionMarkerEntity.discardAll(level, instanceId, nearHint);
+    }
+
     /** Live progress of an in-progress road-connection instance's Highway Stake network -- see {@code roadway.HighwayQuestSupport.HighwayProgress}'s own doc. */
     public static com.github.cerealklla.settlemynts.roadway.HighwayQuestSupport.HighwayProgress checkHighwayProgress(
             ServerLevel level, UUID instanceId, BlockPos nearHint, long placeIdA, long placeIdB) {

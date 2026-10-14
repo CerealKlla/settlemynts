@@ -69,21 +69,29 @@ public final class HighwayStakeGraph extends SavedData {
     // unloaded chunks -- see #markPendingCleanup's own doc for why this has to be persisted rather
     // than handled synchronously at despawn time.
     private final Set<UUID> pendingCleanupInstanceIds;
+    // Instance ids whose quest COMPLETED (the road connected) while some of their stakes were in
+    // unloaded chunks -- deliberately a separate set from pendingCleanupInstanceIds, see
+    // #markPendingHide's own doc for why reusing the abandon-path's terrain-reverting cleanup here
+    // would be a real bug (it would delete a player's finished road).
+    private final Set<UUID> pendingHideInstanceIds;
 
     HighwayStakeGraph() {
-        this(new HashMap<>(), new HashSet<>());
+        this(new HashMap<>(), new HashSet<>(), new HashSet<>());
     }
 
-    private HighwayStakeGraph(Map<UUID, StakeRecord> stakes, Set<UUID> pendingCleanupInstanceIds) {
+    private HighwayStakeGraph(Map<UUID, StakeRecord> stakes, Set<UUID> pendingCleanupInstanceIds, Set<UUID> pendingHideInstanceIds) {
         this.stakes = stakes;
         this.pendingCleanupInstanceIds = pendingCleanupInstanceIds;
+        this.pendingHideInstanceIds = pendingHideInstanceIds;
     }
 
-    private record PersistedState(List<StakeRecord> stakes, List<UUID> pendingCleanupInstanceIds) {
+    private record PersistedState(List<StakeRecord> stakes, List<UUID> pendingCleanupInstanceIds, List<UUID> pendingHideInstanceIds) {
         static final Codec<PersistedState> CODEC = RecordCodecBuilder.create(i -> i.group(
                 StakeRecord.CODEC.listOf().fieldOf("stakes").forGetter(PersistedState::stakes),
                 UUIDUtil.CODEC.listOf().optionalFieldOf("pending_cleanup_instance_ids", List.of())
-                        .forGetter(PersistedState::pendingCleanupInstanceIds)
+                        .forGetter(PersistedState::pendingCleanupInstanceIds),
+                UUIDUtil.CODEC.listOf().optionalFieldOf("pending_hide_instance_ids", List.of())
+                        .forGetter(PersistedState::pendingHideInstanceIds)
         ).apply(i, PersistedState::new));
     }
 
@@ -94,9 +102,9 @@ public final class HighwayStakeGraph extends SavedData {
                     for (StakeRecord entry : state.stakes()) {
                         map.put(entry.stakeId(), entry);
                     }
-                    return new HighwayStakeGraph(map, new HashSet<>(state.pendingCleanupInstanceIds()));
+                    return new HighwayStakeGraph(map, new HashSet<>(state.pendingCleanupInstanceIds()), new HashSet<>(state.pendingHideInstanceIds()));
                 },
-                data -> new PersistedState(List.copyOf(data.stakes.values()), List.copyOf(data.pendingCleanupInstanceIds)));
+                data -> new PersistedState(List.copyOf(data.stakes.values()), List.copyOf(data.pendingCleanupInstanceIds), List.copyOf(data.pendingHideInstanceIds)));
     }
 
     public static HighwayStakeGraph get(MinecraftServer server) {
@@ -200,6 +208,35 @@ public final class HighwayStakeGraph extends SavedData {
     /** Called after a stake removes itself -- clears the pending flag once nothing's left to clean up. */
     public void clearPendingCleanupIfDone(UUID instanceId) {
         if (byInstance(instanceId).isEmpty() && pendingCleanupInstanceIds.remove(instanceId)) {
+            setDirty();
+        }
+    }
+
+    /**
+     * Marks an instance whose quest just COMPLETED (the road connected) as still having stakes this
+     * server couldn't find and discard because their chunks weren't loaded -- added 2026-10-13,
+     * explicit user request ("all the ghost stakes and torches on the finished road should be
+     * deleted/invisible again now that the road is done"). Deliberately a separate flag from {@link
+     * #markPendingCleanup} -- that one's self-heal reverts each stake's paved terrain before
+     * discarding it, which is exactly right for an abandoned road (nothing should be left behind) but
+     * would be a real bug here: a COMPLETED road's terrain is the player's actual finished work and
+     * must never be reverted, only the cosmetic ghost markers removed. Each straggler's own {@code
+     * tick()} checks this flag and just discards itself (no {@code snapAllConnections} call) the
+     * moment its chunk loads again.
+     */
+    public void markPendingHide(UUID instanceId) {
+        if (pendingHideInstanceIds.add(instanceId)) {
+            setDirty();
+        }
+    }
+
+    public boolean isPendingHide(UUID instanceId) {
+        return pendingHideInstanceIds.contains(instanceId);
+    }
+
+    /** Called after a stake removes itself -- clears the pending-hide flag once nothing's left. */
+    public void clearPendingHideIfDone(UUID instanceId) {
+        if (byInstance(instanceId).isEmpty() && pendingHideInstanceIds.remove(instanceId)) {
             setDirty();
         }
     }

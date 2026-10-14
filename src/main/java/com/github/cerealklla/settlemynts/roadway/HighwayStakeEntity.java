@@ -402,12 +402,20 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         super.tick();
         if (!selfCleaned && linkedInstanceId != null && level() instanceof ServerLevel serverLevel) {
             HighwayStakeGraph graph = HighwayStakeGraph.get(serverLevel.getServer());
-            if (graph.isPendingCleanup(linkedInstanceId)) {
+            UUID instanceId = linkedInstanceId;
+            if (graph.isPendingCleanup(instanceId)) {
                 selfCleaned = true;
-                UUID instanceId = linkedInstanceId;
                 snapAllConnections(serverLevel);
                 graph.removeStake(getUUID());
                 graph.clearPendingCleanupIfDone(instanceId);
+                discard();
+            } else if (graph.isPendingHide(instanceId)) {
+                // Quest COMPLETED, not abandoned -- deliberately no snapAllConnections here (that
+                // would revert this stake's paved terrain, which is the player's actual finished
+                // road). Just discard the now-redundant ghost marker and forget it.
+                selfCleaned = true;
+                graph.removeStake(getUUID());
+                graph.clearPendingHideIfDone(instanceId);
                 discard();
             }
         }
@@ -441,6 +449,29 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
             graph.clearPendingCleanupIfDone(instanceId);
         } else {
             graph.markPendingCleanup(instanceId);
+        }
+    }
+
+    /**
+     * Discards every Highway Stake tied to {@code instanceId} with NO terrain revert -- called on
+     * quest COMPLETION, explicit user request 2026-10-13 (two real concerns in one message: the
+     * ghost stakes/torches should disappear once the road is finished, AND right-clicking a still-live
+     * connected stake currently calls {@link #snapAllConnections}, which would actually un-pave part
+     * of a just-finished road). Deliberately does not call {@link #snapAllConnections} -- unlike
+     * {@link #despawnAllForInstance} (the abandon/fail/expire path), a completed road's paved terrain
+     * is the player's real finished work and must be left untouched; only the now-redundant cosmetic
+     * marker entities go away.
+     */
+    public static void hideAllForInstance(ServerLevel level, UUID instanceId, net.minecraft.core.BlockPos nearHint) {
+        HighwayStakeGraph graph = HighwayStakeGraph.get(level.getServer());
+        for (HighwayStakeEntity stake : findByInstanceId(level, instanceId, nearHint)) {
+            graph.removeStake(stake.getUUID());
+            stake.discard();
+        }
+        if (graph.byInstance(instanceId).isEmpty()) {
+            graph.clearPendingHideIfDone(instanceId);
+        } else {
+            graph.markPendingHide(instanceId);
         }
     }
 

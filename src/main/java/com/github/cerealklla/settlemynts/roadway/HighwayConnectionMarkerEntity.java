@@ -55,6 +55,20 @@ public class HighwayConnectionMarkerEntity extends Display.BlockDisplay {
         return level.getEntities(ModEntities.HIGHWAY_CONNECTION_MARKER.get(), searchBox, marker -> instanceId.equals(marker.linkedInstanceId));
     }
 
+    /**
+     * Discards every connection-marker torch for {@code instanceId} with nothing regenerated --
+     * called on quest completion (explicit user request 2026-10-13: "all the ghost stakes and
+     * torches on the finished road should be deleted/invisible again now that the road is done").
+     * Purely cosmetic entities, no persisted graph of their own (unlike {@link HighwayStakeEntity}),
+     * so this only reaches whatever's currently loaded -- an acceptable best-effort gap for a marker
+     * with no gameplay effect, unlike the stake-terrain-revert risk that graph exists to prevent.
+     */
+    public static void discardAll(ServerLevel level, UUID instanceId, net.minecraft.core.BlockPos nearHint) {
+        for (HighwayConnectionMarkerEntity existing : findByInstanceId(level, instanceId, nearHint)) {
+            existing.discard();
+        }
+    }
+
     public static void regenerateAll(ServerLevel level, UUID ownerPlayerId, UUID instanceId, net.minecraft.core.BlockPos nearHint) {
         for (HighwayConnectionMarkerEntity existing : findByInstanceId(level, instanceId, nearHint)) {
             existing.discard();
