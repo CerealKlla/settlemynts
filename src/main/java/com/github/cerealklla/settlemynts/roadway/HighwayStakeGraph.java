@@ -44,11 +44,34 @@ public final class HighwayStakeGraph extends SavedData {
             HighwayStakeGraph::new,
             codec());
 
-    public record Connection(UUID otherStakeId, EntityId roadEntityId) {
+    public record Connection(UUID otherStakeId, EntityId roadEntityId, List<BlockPos> roadCells) {
         static final Codec<Connection> CODEC = RecordCodecBuilder.create(i -> i.group(
                 UUIDUtil.CODEC.fieldOf("other_stake_id").forGetter(Connection::otherStakeId),
-                EntityId.CODEC.fieldOf("road_entity_id").forGetter(Connection::roadEntityId)
+                EntityId.CODEC.fieldOf("road_entity_id").forGetter(Connection::roadEntityId),
+                // Added 2026-10-13 for HighwayRetier -- empty for any connection saved before this
+                // existed, same "accepted gap, not a migration" precedent as RoadwayStakeEntity's own
+                // identical field (see RoadwayRetier's own doc).
+                BlockPos.CODEC.listOf().optionalFieldOf("road_cells", List.of()).forGetter(Connection::roadCells)
         ).apply(i, Connection::new));
+    }
+
+    /**
+     * Which two settlements a Highway instance connects, and its current paved Tier -- added
+     * 2026-10-13 for {@link HighwayRetier}, explicit user spec: "the trigger should only fire when a
+     * plot tier increases. Recalculate its settlement's average plot tier, and then average that with
+     * the connected settlement. If the average increases, increase the tier of the connecting road to
+     * match." Stored per-instance (not per-stake) since every stake in one instance shares the same
+     * two endpoints and Tier. Survives the stakes themselves being hidden on completion (see
+     * HighwayStakeEntity#hideAllForInstance) -- deliberately NOT removed when stakes are, since a
+     * completed road's own settlement/Tier identity has to outlive its now-discarded ghost markers for
+     * a later re-tier to ever find it again.
+     */
+    public record InstanceMeta(Optional<UUID> settlementCoreIdA, Optional<UUID> settlementCoreIdB, int tier) {
+        static final Codec<InstanceMeta> CODEC = RecordCodecBuilder.create(i -> i.group(
+                UUIDUtil.CODEC.optionalFieldOf("settlement_core_id_a").forGetter(InstanceMeta::settlementCoreIdA),
+                UUIDUtil.CODEC.optionalFieldOf("settlement_core_id_b").forGetter(InstanceMeta::settlementCoreIdB),
+                Codec.INT.fieldOf("tier").forGetter(InstanceMeta::tier)
+        ).apply(i, InstanceMeta::new));
     }
 
     public record StakeRecord(UUID stakeId, UUID instanceId, BlockPos pos, List<Connection> connections) {
@@ -74,24 +97,53 @@ public final class HighwayStakeGraph extends SavedData {
     // #markPendingHide's own doc for why reusing the abandon-path's terrain-reverting cleanup here
     // would be a real bug (it would delete a player's finished road).
     private final Set<UUID> pendingHideInstanceIds;
+    private final Map<UUID, InstanceMeta> instanceMeta;
+    // Separately-accumulated road cells per instance (added 2026-10-13 for HighwayRetier) -- NOT
+    // derived from the live `stakes` map, deliberately, since a completed Highway's own stakes are
+    // discarded once hidden (see HighwayStakeEntity#hideAllForInstance) and a later re-tier has to be
+    // able to repaint an already-completed, already-hidden road. Accumulated (never replaced) by
+    // #setConnection, same append-only shape as everything else in this class.
+    private final Map<UUID, Set<BlockPos>> instanceRoadCells;
 
     HighwayStakeGraph() {
-        this(new HashMap<>(), new HashSet<>(), new HashSet<>());
+        this(new HashMap<>(), new HashSet<>(), new HashSet<>(), new HashMap<>(), new HashMap<>());
     }
 
-    private HighwayStakeGraph(Map<UUID, StakeRecord> stakes, Set<UUID> pendingCleanupInstanceIds, Set<UUID> pendingHideInstanceIds) {
+    private HighwayStakeGraph(Map<UUID, StakeRecord> stakes, Set<UUID> pendingCleanupInstanceIds, Set<UUID> pendingHideInstanceIds,
+                               Map<UUID, InstanceMeta> instanceMeta, Map<UUID, Set<BlockPos>> instanceRoadCells) {
         this.stakes = stakes;
         this.pendingCleanupInstanceIds = pendingCleanupInstanceIds;
         this.pendingHideInstanceIds = pendingHideInstanceIds;
+        this.instanceMeta = instanceMeta;
+        this.instanceRoadCells = instanceRoadCells;
     }
 
-    private record PersistedState(List<StakeRecord> stakes, List<UUID> pendingCleanupInstanceIds, List<UUID> pendingHideInstanceIds) {
+    private record InstanceMetaEntry(UUID instanceId, InstanceMeta meta) {
+        static final Codec<InstanceMetaEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
+                UUIDUtil.CODEC.fieldOf("instance_id").forGetter(InstanceMetaEntry::instanceId),
+                InstanceMeta.CODEC.fieldOf("meta").forGetter(InstanceMetaEntry::meta)
+        ).apply(i, InstanceMetaEntry::new));
+    }
+
+    private record InstanceRoadCellsEntry(UUID instanceId, List<BlockPos> roadCells) {
+        static final Codec<InstanceRoadCellsEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
+                UUIDUtil.CODEC.fieldOf("instance_id").forGetter(InstanceRoadCellsEntry::instanceId),
+                BlockPos.CODEC.listOf().fieldOf("road_cells").forGetter(InstanceRoadCellsEntry::roadCells)
+        ).apply(i, InstanceRoadCellsEntry::new));
+    }
+
+    private record PersistedState(List<StakeRecord> stakes, List<UUID> pendingCleanupInstanceIds, List<UUID> pendingHideInstanceIds,
+                                   List<InstanceMetaEntry> instanceMeta, List<InstanceRoadCellsEntry> instanceRoadCells) {
         static final Codec<PersistedState> CODEC = RecordCodecBuilder.create(i -> i.group(
                 StakeRecord.CODEC.listOf().fieldOf("stakes").forGetter(PersistedState::stakes),
                 UUIDUtil.CODEC.listOf().optionalFieldOf("pending_cleanup_instance_ids", List.of())
                         .forGetter(PersistedState::pendingCleanupInstanceIds),
                 UUIDUtil.CODEC.listOf().optionalFieldOf("pending_hide_instance_ids", List.of())
-                        .forGetter(PersistedState::pendingHideInstanceIds)
+                        .forGetter(PersistedState::pendingHideInstanceIds),
+                InstanceMetaEntry.CODEC.listOf().optionalFieldOf("instance_meta", List.of())
+                        .forGetter(PersistedState::instanceMeta),
+                InstanceRoadCellsEntry.CODEC.listOf().optionalFieldOf("instance_road_cells", List.of())
+                        .forGetter(PersistedState::instanceRoadCells)
         ).apply(i, PersistedState::new));
     }
 
@@ -102,9 +154,25 @@ public final class HighwayStakeGraph extends SavedData {
                     for (StakeRecord entry : state.stakes()) {
                         map.put(entry.stakeId(), entry);
                     }
-                    return new HighwayStakeGraph(map, new HashSet<>(state.pendingCleanupInstanceIds()), new HashSet<>(state.pendingHideInstanceIds()));
+                    Map<UUID, InstanceMeta> metaMap = new HashMap<>();
+                    for (InstanceMetaEntry entry : state.instanceMeta()) {
+                        metaMap.put(entry.instanceId(), entry.meta());
+                    }
+                    Map<UUID, Set<BlockPos>> roadCellsMap = new HashMap<>();
+                    for (InstanceRoadCellsEntry entry : state.instanceRoadCells()) {
+                        roadCellsMap.put(entry.instanceId(), new HashSet<>(entry.roadCells()));
+                    }
+                    return new HighwayStakeGraph(map, new HashSet<>(state.pendingCleanupInstanceIds()), new HashSet<>(state.pendingHideInstanceIds()),
+                            metaMap, roadCellsMap);
                 },
-                data -> new PersistedState(List.copyOf(data.stakes.values()), List.copyOf(data.pendingCleanupInstanceIds), List.copyOf(data.pendingHideInstanceIds)));
+                data -> {
+                    List<InstanceMetaEntry> metaEntries = new ArrayList<>();
+                    data.instanceMeta.forEach((id, meta) -> metaEntries.add(new InstanceMetaEntry(id, meta)));
+                    List<InstanceRoadCellsEntry> roadCellsEntries = new ArrayList<>();
+                    data.instanceRoadCells.forEach((id, cells) -> roadCellsEntries.add(new InstanceRoadCellsEntry(id, List.copyOf(cells))));
+                    return new PersistedState(List.copyOf(data.stakes.values()), List.copyOf(data.pendingCleanupInstanceIds),
+                            List.copyOf(data.pendingHideInstanceIds), metaEntries, roadCellsEntries);
+                });
     }
 
     public static HighwayStakeGraph get(MinecraftServer server) {
@@ -129,19 +197,26 @@ public final class HighwayStakeGraph extends SavedData {
         }
     }
 
-    public void setConnection(UUID stakeId, UUID otherStakeId, EntityId roadEntityId) {
+    public void setConnection(UUID stakeId, UUID otherStakeId, EntityId roadEntityId, List<BlockPos> roadCells) {
         StakeRecord record = stakes.get(stakeId);
         if (record == null) {
             return;
         }
         List<Connection> current = new ArrayList<>();
+        // Never lets a call with no real roadCells data (the self-heal backfill path -- see
+        // HighwayStakeEntity#onAddedToLevel's own doc, which has no cells to supply) wipe out
+        // genuinely-known cells an earlier real pave-time call already recorded for this same pair.
+        List<BlockPos> effectiveRoadCells = roadCells;
         for (Connection existing : record.connections()) {
             if (!existing.otherStakeId().equals(otherStakeId)) {
                 current.add(existing);
+            } else if (effectiveRoadCells.isEmpty() && !existing.roadCells().isEmpty()) {
+                effectiveRoadCells = existing.roadCells();
             }
         }
-        current.add(new Connection(otherStakeId, roadEntityId));
+        current.add(new Connection(otherStakeId, roadEntityId, effectiveRoadCells));
         stakes.put(stakeId, record.withConnections(current));
+        instanceRoadCells.computeIfAbsent(record.instanceId(), k -> new HashSet<>()).addAll(effectiveRoadCells);
         setDirty();
     }
 
@@ -304,5 +379,49 @@ public final class HighwayStakeGraph extends SavedData {
 
     public Optional<BlockPos> posOf(UUID stakeId) {
         return Optional.ofNullable(stakes.get(stakeId)).map(StakeRecord::pos);
+    }
+
+    /**
+     * Records (or refreshes) which two settlements a Highway instance connects and its current paved
+     * Tier -- called once at stake creation (where both are already known) and again on self-heal
+     * backfill ({@link HighwayStakeEntity#onAddedToLevel}) for a stake placed before this existed.
+     * Never clobbers an already-known Tier with a stale, older value from a backfill -- see call site.
+     */
+    public void setInstanceMeta(UUID instanceId, Optional<UUID> settlementCoreIdA, Optional<UUID> settlementCoreIdB, int tier) {
+        InstanceMeta updated = new InstanceMeta(settlementCoreIdA, settlementCoreIdB, tier);
+        if (!updated.equals(instanceMeta.get(instanceId))) {
+            instanceMeta.put(instanceId, updated);
+            setDirty();
+        }
+    }
+
+    public Optional<InstanceMeta> instanceMeta(UUID instanceId) {
+        return Optional.ofNullable(instanceMeta.get(instanceId));
+    }
+
+    /** Called by {@link HighwayRetier} once it's actually repainted an instance's road cells to a new Tier. */
+    public void updateInstanceTier(UUID instanceId, int newTier) {
+        InstanceMeta existing = instanceMeta.get(instanceId);
+        if (existing != null && existing.tier() != newTier) {
+            instanceMeta.put(instanceId, new InstanceMeta(existing.settlementCoreIdA(), existing.settlementCoreIdB(), newTier));
+            setDirty();
+        }
+    }
+
+    /** Every Highway instance id with {@code settlementCoreId} on either end -- used by {@link HighwayRetier} to find which roads a settlement's own Tier change could affect. */
+    public List<UUID> instancesForSettlement(UUID settlementCoreId) {
+        List<UUID> result = new ArrayList<>();
+        for (Map.Entry<UUID, InstanceMeta> entry : instanceMeta.entrySet()) {
+            InstanceMeta meta = entry.getValue();
+            if (settlementCoreId.equals(meta.settlementCoreIdA().orElse(null)) || settlementCoreId.equals(meta.settlementCoreIdB().orElse(null))) {
+                result.add(entry.getKey());
+            }
+        }
+        return result;
+    }
+
+    /** Every road cell position ever paved for this instance, deduplicated. Reads from {@link #instanceRoadCells}, a separately-accumulated set, NOT from the live {@code stakes} map -- a completed Highway's own stakes are deliberately discarded once hidden (see HighwayStakeEntity#hideAllForInstance), so {@link #roadCellsForInstance} has to survive that or {@link HighwayRetier} could never repaint an already-completed road at all. */
+    public Set<BlockPos> roadCellsForInstance(UUID instanceId) {
+        return Set.copyOf(instanceRoadCells.getOrDefault(instanceId, Set.of()));
     }
 }

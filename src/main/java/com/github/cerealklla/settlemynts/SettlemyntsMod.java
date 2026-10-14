@@ -1862,6 +1862,13 @@ public class SettlemyntsMod {
         if (isTownHall) {
             com.github.cerealklla.settlemynts.roadway.RoadwayRetier.repaintSettlementRoads(serverLevel, core.getUUID(), newTier);
         }
+        // Highway re-tiering (2026-10-13, explicit user spec) -- unlike Roadway above, a Highway's
+        // Tier is driven by the settlement's own SETTLEMENT TIER (the average of EVERY plot, see
+        // SettlementTierResolver), not just the Town Hall specifically, so this fires on ANY plot
+        // upgrade, not only isTownHall. core.getPlots() already reflects the just-applied upgrade
+        // (updatePlot above), so this is the real, current average, not a stale pre-upgrade value.
+        com.github.cerealklla.settlemynts.roadway.HighwayRetier.retierHighwaysForSettlement(
+                serverLevel, core.getUUID(), com.github.cerealklla.settlemynts.roadway.SettlementTierResolver.averageTier(core.getPlots()));
         grantMayorSkillXpForPlotUpgrade(serverLevel.getServer(), core, newTier);
         // Real live report, 2026-10-12: a Myssions "help upgrade this plot" quest themed around this
         // exact upgrade had no way to find out it happened, and stayed stuck forever even though the

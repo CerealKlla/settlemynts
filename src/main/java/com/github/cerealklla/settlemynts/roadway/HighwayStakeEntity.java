@@ -169,7 +169,7 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         return connectionSnapshots;
     }
 
-    public void setSnapshotFor(UUID otherStakeId, List<HighwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId) {
+    public void setSnapshotFor(UUID otherStakeId, List<HighwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId, List<net.minecraft.core.BlockPos> roadCells) {
         List<ConnectionSnapshot> current = new ArrayList<>();
         for (ConnectionSnapshot entry : connectionSnapshots) {
             if (!entry.otherStakeId().equals(otherStakeId)) {
@@ -179,7 +179,11 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         current.add(new ConnectionSnapshot(otherStakeId, snapshot, roadEntityId));
         connectionSnapshots = current;
         if (level() instanceof ServerLevel serverLevel) {
-            HighwayStakeGraph.get(serverLevel.getServer()).setConnection(getUUID(), otherStakeId, roadEntityId);
+            // roadCells (added 2026-10-13 for HighwayRetier) is deliberately NOT stored on
+            // ConnectionSnapshot itself -- that record only needs enough to revert terrain on
+            // snap/despawn, and the persisted graph (which survives this entity being hidden on
+            // completion) is the one real source of truth a later re-tier needs anyway.
+            HighwayStakeGraph.get(serverLevel.getServer()).setConnection(getUUID(), otherStakeId, roadEntityId, roadCells);
         }
     }
 
@@ -381,9 +385,19 @@ public class HighwayStakeEntity extends Display.BlockDisplay implements StakeNod
         if (!level().isClientSide() && level() instanceof ServerLevel serverLevel && linkedInstanceId != null) {
             HighwayStakeGraph graph = HighwayStakeGraph.get(serverLevel.getServer());
             graph.putStake(getUUID(), linkedInstanceId, blockPosition());
+            // Backfills road cells as List.of() here -- this entity's own in-memory ConnectionSnapshot
+            // never carried that field (only the persisted graph's own Connection does now, see
+            // #setSnapshotFor's own doc), so a stake re-asserting itself has no real value to supply.
+            // Accepted gap for any edge paved before HighwayRetier existed, not a migration -- same
+            // precedent as RoadwayStakeEntity.ConnectionSnapshot#roadCells's own doc.
             for (ConnectionSnapshot snapshot : connectionSnapshots) {
-                graph.setConnection(getUUID(), snapshot.otherStakeId(), snapshot.roadEntityId());
+                graph.setConnection(getUUID(), snapshot.otherStakeId(), snapshot.roadEntityId(), List.of());
             }
+            // HighwayRetier support (2026-10-13) -- records which two settlements this instance
+            // connects and its current paved Tier, so a later Tier recalculation can find this road
+            // again even after its own stakes are hidden on completion. Safe to call on every load,
+            // not just creation -- #setInstanceMeta is itself a no-op once the stored value matches.
+            graph.setInstanceMeta(linkedInstanceId, Optional.ofNullable(settlementCoreIdA), Optional.ofNullable(settlementCoreIdB), highwayTier);
         }
     }
 

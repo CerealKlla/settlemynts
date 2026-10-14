@@ -206,6 +206,7 @@ public final class HighwayPaver {
         int[] profile = slopeLimitedProfile(medianSmooth(naturalY), startY, endY);
 
         List<SnapshotEntry> snapshot = new ArrayList<>();
+        List<BlockPos> roadCells = new ArrayList<>();
         Set<BlockPos> captured = new HashSet<>();
         // See RoadwayPaver#pavedColumns' own doc -- identical fix, same real live report ("for
         // angled roads it seems to be determining that height from the highest point of the road
@@ -257,14 +258,15 @@ public final class HighwayPaver {
                 int targetY = pavedY;
                 int natural = offset == 0 ? naturalY[i] : naturalSurfaceYNear(level, colX, colZ, targetY);
                 paveColumn(level, colX, targetY, colZ, natural, tier, stepState, snapshot, captured);
+                roadCells.add(new BlockPos(colX, targetY, colZ));
             }
         }
 
         var roadEntity = Cartography.createEntity(level, new EntityDefinition(
                 level.dimension(), Classification.CONSTRUCTED, EntityType.ROAD, Layer.ROADWAY_ID,
                 Optional.empty(), new Geometry.Path(centerline, PATH_HALF_WIDTH_BLOCKS), LifecycleState.REALIZED, Optional.empty()));
-        a.setSnapshotFor(b.getUUID(), snapshot, roadEntity.id());
-        b.setSnapshotFor(a.getUUID(), snapshot, roadEntity.id());
+        a.setSnapshotFor(b.getUUID(), snapshot, roadEntity.id(), roadCells);
+        b.setSnapshotFor(a.getUUID(), snapshot, roadEntity.id(), roadCells);
 
         // Highway tunnel protection is deliberately NOT registered here -- real live report,
         // 2026-10-13: "you are making terrain uneditable BEFORE the road is finalized, which is
