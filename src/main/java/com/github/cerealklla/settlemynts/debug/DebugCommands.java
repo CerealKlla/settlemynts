@@ -86,8 +86,60 @@ public final class DebugCommands {
                 .then(Commands.literal("highwaycleanup")
                         .then(Commands.argument("instanceId", StringArgumentType.string())
                                 .executes(ctx -> highwayCleanup(ctx.getSource(), StringArgumentType.getString(ctx, "instanceId")))))
+                .then(Commands.literal("entityinfo")
+                        .then(Commands.argument("placeId", com.mojang.brigadier.arguments.LongArgumentType.longArg())
+                                .executes(ctx -> entityInfo(ctx.getSource(), com.mojang.brigadier.arguments.LongArgumentType.getLong(ctx, "placeId")))))
                 .then(Commands.literal("plot")
                         .then(Commands.literal("bill").then(billPlotId))));
+    }
+
+    /**
+     * DEBUG ONLY -- added 2026-10-13, same road-connection quest investigation: the user directly
+     * disputed a reported "38 blocks from the settlement edge" distance, having stood at the very
+     * first "No Man's Land" tile outside the Town Hall plot specifically when placing the stake --
+     * a real, different, smaller boundary (the Town Hall plot's own buffer, {@code
+     * PLOT_BUFFER_PADDING_BLOCKS}) than the settlement's own overall registered perimeter ({@code
+     * CARTOGRAPHYR_PADDING_BLOCKS}), which is what the Highway anchor check actually measures
+     * against. Reports the real polygon bounds for a given Cartographyr place id, plus (if run by a
+     * player standing in-world) that player's own real distance to its edge, so this can be checked
+     * directly instead of reasoned about from code alone.
+     */
+    private static int entityInfo(CommandSourceStack source, long placeId) {
+        if (!(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run in a real level."));
+            return 0;
+        }
+        Optional<GeographicEntity> entity = Cartography.getEntity(level, new EntityId(placeId));
+        if (entity.isEmpty()) {
+            source.sendFailure(Component.literal("No Cartographyr entity found for place id " + placeId));
+            return 0;
+        }
+        GeographicEntity ge = entity.get();
+        String name = ge.name().orElse("(unnamed)");
+        String typeDesc = ge.type() + " / " + ge.classification();
+        source.sendSuccess(() -> Component.literal("Place " + placeId + ": \"" + name + "\" (" + typeDesc + ")"), false);
+        if (ge.geometry() instanceof Geometry.Polygon polygon) {
+            int minX = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, minZ = Integer.MAX_VALUE, maxZ = Integer.MIN_VALUE;
+            for (Geometry.Polygon.Vertex v : polygon.vertices()) {
+                minX = Math.min(minX, v.x());
+                maxX = Math.max(maxX, v.x());
+                minZ = Math.min(minZ, v.z());
+                maxZ = Math.max(maxZ, v.z());
+            }
+            int finalMinX = minX, finalMaxX = maxX, finalMinZ = minZ, finalMaxZ = maxZ;
+            source.sendSuccess(() -> Component.literal("  bounds: x=[" + finalMinX + ".." + finalMaxX + "] z=[" + finalMinZ + ".." + finalMaxZ
+                    + "], " + polygon.vertices().size() + " vertices"), false);
+            if (source.getEntity() instanceof net.minecraft.world.entity.player.Player player) {
+                BlockPos pos = player.blockPosition();
+                double edge = polygon.distanceToNearestEdge(pos.getX(), pos.getZ());
+                double outside = polygon.distanceOutside(pos.getX(), pos.getZ());
+                source.sendSuccess(() -> Component.literal("  your position " + pos.toShortString()
+                        + " -- distanceToNearestEdge=" + edge + " distanceOutside=" + outside), false);
+            }
+        } else {
+            source.sendSuccess(() -> Component.literal("  geometry is not a Polygon: " + ge.geometry()), false);
+        }
+        return 1;
     }
 
     /**
