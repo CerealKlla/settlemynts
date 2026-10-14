@@ -16,6 +16,7 @@ import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.bridge.YconomicsBillBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
+import com.github.cerealklla.settlemynts.roadway.HighwayConnectionMarkerEntity;
 import com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity;
 import com.github.cerealklla.settlemynts.roadway.HighwayStakeGraph;
 import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
@@ -86,6 +87,9 @@ public final class DebugCommands {
                 .then(Commands.literal("highwaycleanup")
                         .then(Commands.argument("instanceId", StringArgumentType.string())
                                 .executes(ctx -> highwayCleanup(ctx.getSource(), StringArgumentType.getString(ctx, "instanceId")))))
+                .then(Commands.literal("highwayhide")
+                        .then(Commands.argument("instanceId", StringArgumentType.string())
+                                .executes(ctx -> highwayHide(ctx.getSource(), StringArgumentType.getString(ctx, "instanceId")))))
                 .then(Commands.literal("entityinfo")
                         .then(Commands.argument("placeId", com.mojang.brigadier.arguments.LongArgumentType.longArg())
                                 .executes(ctx -> entityInfo(ctx.getSource(), com.mojang.brigadier.arguments.LongArgumentType.getLong(ctx, "placeId")))))
@@ -217,6 +221,41 @@ public final class DebugCommands {
                 ? (" -- " + remaining + " still in unloaded chunks, marked to self-clean on next load.")
                 : " -- all done.")), false);
         return cleaned;
+    }
+
+    /**
+     * DEBUG ONLY -- added 2026-10-13 alongside the real hide-on-completion fix: an already-completed
+     * road quest instance (status flipped to AWAITING_REWARD_PICKUP under the old code) will never
+     * re-run {@code RoadQuestTicker#finalizeConnection}, so the new auto-hide never fires for it
+     * retroactively. Manually triggers the same no-terrain-revert hide path for one instance id.
+     */
+    private static int highwayHide(CommandSourceStack source, String instanceIdRaw) {
+        if (!(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run in a real level."));
+            return 0;
+        }
+        UUID instanceId;
+        try {
+            instanceId = UUID.fromString(instanceIdRaw);
+        } catch (IllegalArgumentException e) {
+            source.sendFailure(Component.literal("Not a valid instance id: " + instanceIdRaw));
+            return 0;
+        }
+        List<HighwayStakeGraph.StakeRecord> before = HighwayStakeGraph.get(level.getServer()).byInstance(instanceId);
+        if (before.isEmpty()) {
+            source.sendFailure(Component.literal("No persisted Highway Stakes found for instance " + instanceId));
+            return 0;
+        }
+        BlockPos hint = before.get(0).pos();
+        HighwayStakeEntity.hideAllForInstance(level, instanceId, hint);
+        HighwayConnectionMarkerEntity.discardAll(level, instanceId, hint);
+        int remaining = HighwayStakeGraph.get(level.getServer()).byInstance(instanceId).size();
+        int hidden = before.size() - remaining;
+        source.sendSuccess(() -> Component.literal("Hid " + hidden + "/" + before.size()
+                + " stake(s) for instance " + instanceId + " (no terrain revert)" + (remaining > 0
+                ? (" -- " + remaining + " still in unloaded chunks, marked to self-clean on next load.")
+                : " -- all done.")), false);
+        return hidden;
     }
 
     /**
