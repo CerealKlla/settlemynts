@@ -77,8 +77,12 @@ public final class HighwayQuestSupport {
         return removed;
     }
 
-    public record HighwayProgress(int stakeCount, boolean connected) {
-        public static final HighwayProgress NONE = new HighwayProgress(0, false);
+    /** {@code anchoredAtA}/{@code anchoredAtB} (added 2026-10-15) surface the same two intermediate
+     *  "is a stake planted just outside this settlement yet" checks {@link #checkProgress} already
+     *  computes on its way to a full connection -- Myssions' "Place Highway Stake directly outside
+     *  X" milestones read these directly, no separate detection built for them. */
+    public record HighwayProgress(int stakeCount, boolean connected, boolean anchoredAtA, boolean anchoredAtB) {
+        public static final HighwayProgress NONE = new HighwayProgress(0, false, false, false);
     }
 
     /**
@@ -127,15 +131,15 @@ public final class HighwayQuestSupport {
         LOGGER.info("[HighwayAnchorDebug] {} stakes total, anchorA={} anchorB={}",
                 stakes.size(), anchorA, anchorB);
         if (anchorA == null || anchorB == null) {
-            return new HighwayProgress(0, false);
+            return new HighwayProgress(0, false, anchorA != null, anchorB != null);
         }
         Optional<List<UUID>> path = graph.findPath(instanceId, anchorA, anchorB);
         LOGGER.info("[HighwayAnchorDebug] path={}", path.map(List::size).orElse(-1));
         if (path.isEmpty()) {
-            return new HighwayProgress(0, false);
+            return new HighwayProgress(0, false, true, true);
         }
         registerTunnelProtectionForPath(level, graph, path.get());
-        return new HighwayProgress(path.get().size(), true);
+        return new HighwayProgress(path.get().size(), true, true, true);
     }
 
     /**
