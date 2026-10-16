@@ -58,6 +58,7 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider, 
     private UUID settlementCoreId;
     private UUID plotId;
     private int preferredFoodValue;
+    private int defenseSpendingAllocation;
 
     /** Only accepts items carrying {@link DataComponents#FOOD} -- see {@link #canPlaceFood(ItemStack)}. */
     private final Container foodContainer = new SimpleContainer(9) {
@@ -101,6 +102,22 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider, 
     /** "Preferred Food" field + Save on {@code client.GuardhouseFoodScreen} -- see {@code SettlemyntsMod#setPreferredFood}, the only caller (already re-checks {@code zone.PlotPermissions#canManage} itself). */
     public void setPreferredFoodValue(int preferredFoodValue) {
         this.preferredFoodValue = Math.max(0, preferredFoodValue);
+        setChanged();
+    }
+
+    public int defenseSpendingAllocation() {
+        return defenseSpendingAllocation;
+    }
+
+    /**
+     * "Defense Spending" (added 2026-10-16, explicit user spec: Town Hall's own screen lets a Town
+     * Planner specify how much gold to top up into each Guardhouse; {@code
+     * guardhouse.DefenseSpendingTransfer} is what actually moves it, at midnight) -- set only via
+     * {@code SettlemyntsMod#setDefenseSpending}, which re-checks {@code zone.PlotPermissions#canManage}
+     * against the Town Hall plot itself (not this Guardhouse's own, which is always NPC-owned).
+     */
+    public void setDefenseSpendingAllocation(int defenseSpendingAllocation) {
+        this.defenseSpendingAllocation = Math.max(0, defenseSpendingAllocation);
         setChanged();
     }
 
@@ -162,6 +179,7 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider, 
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
         ContainerHelper.loadAllItems(input.childOrEmpty("Food"), ((SimpleContainer) foodContainer).getItems());
         preferredFoodValue = input.getIntOr("PreferredFoodValue", 0);
+        defenseSpendingAllocation = input.getIntOr("DefenseSpendingAllocation", 0);
     }
 
     @Override
@@ -171,5 +189,6 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider, 
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
         ContainerHelper.saveAllItems(output.child("Food"), ((SimpleContainer) foodContainer).getItems());
         output.putInt("PreferredFoodValue", preferredFoodValue);
+        output.putInt("DefenseSpendingAllocation", defenseSpendingAllocation);
     }
 }

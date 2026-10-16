@@ -172,6 +172,11 @@ public class SettlemyntsModClient {
                 Minecraft.getInstance().setScreen(new PlotManagementScreen(request));
             }
         });
+        ClientPlotSignRequests.takePendingDefenseSpending().ifPresent(request -> {
+            if (Minecraft.getInstance().screen == null) {
+                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.DefenseSpendingScreen(request));
+            }
+        });
         ClientGuardhouseRequests.takePendingMenu().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
                 Minecraft.getInstance().setScreen(new GuardKitStandScreen(request));

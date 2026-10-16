@@ -61,6 +61,11 @@ public final class ShopMidnightRestockTicker {
         }
         for (GhostTownHallCoreEntity core : cores) {
             if (core.level() instanceof ServerLevel level) {
+                // "Defense Spending" (explicit user spec, 2026-10-16) -- transfers gold from the Town
+                // Hall's own boxes into each Guardhouse's boxes BEFORE the Planned-Inventory settlement
+                // and food auto-buy below run, so gold moved this same tick is already spendable the
+                // same night, not just starting the next one. See DefenseSpendingTransfer's own doc.
+                com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingTransfer.transferForSettlement(level, core);
                 PlannedInventoryClearing.settleGroup(level, core.getPlots());
                 // Explicit third step (2026-10-10 redesign): turn whatever just changed hands above
                 // into finished goods, for this same settlement only -- see that method's own doc.

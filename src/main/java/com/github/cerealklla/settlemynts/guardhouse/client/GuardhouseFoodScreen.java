@@ -32,8 +32,13 @@ public class GuardhouseFoodScreen extends AbstractContainerScreen<GuardhouseFood
     // (see extractBackground below) with a real gap between them -- the food panel's own blit ends
     // at FOOD_PANEL_BOTTOM, and the player-inventory blit doesn't start until PLAYER_PANEL_TOP. Put
     // the "Preferred Food" row in that existing gap instead of appending extra space below the whole
-    // screen (real live feedback, 2026-10-16, after an earlier below-the-hotbar placement still read
-    // as cramped against the inventory) -- centered in the ~35px gap, label first then the row.
+    // screen. All three of these are LOCAL to the panel -- i.e. relative to this.topPos, which is
+    // itself a window-size-dependent offset AbstractContainerScreen computes in its own init(). Real
+    // bug, 2026-10-16: an earlier version of this fix passed these local values straight into the
+    // EditBox/Button/text calls with no `topPos` added, so the row floated at a fixed spot near the
+    // top of the whole game window instead of actually tracking the panel -- it happened to visually
+    // land near the hotbar at one window size and near the title bar at another, which is why two
+    // rounds of "just move the numbers" didn't actually fix anything.
     private static final int FOOD_PANEL_BOTTOM = 18 + 17;
     private static final int PLAYER_PANEL_TOP = PLAYER_INV_Y - 14;
     private static final int PREFERRED_FOOD_LABEL_Y = FOOD_PANEL_BOTTOM + 3;
@@ -49,17 +54,15 @@ public class GuardhouseFoodScreen extends AbstractContainerScreen<GuardhouseFood
     @Override
     protected void init() {
         super.init();
-        int centerX = width / 2;
-        // Panel is only 176px wide -- keep both widgets' combined span well inside it (the old
-        // layout used a 60px-wide button offset +45 from center, which stuck out past the panel's
-        // right edge entirely).
-        preferredFoodBox = addRenderableWidget(new EditBox(font, centerX - 58, PREFERRED_FOOD_ROW_Y, 60, 20, Component.literal("Preferred Food")));
+        int centerX = this.leftPos + this.imageWidth / 2;
+        // Panel is only 176px wide -- keep both widgets' combined span well inside it.
+        preferredFoodBox = addRenderableWidget(new EditBox(font, centerX - 58, this.topPos + PREFERRED_FOOD_ROW_Y, 60, 20, Component.literal("Preferred Food")));
         preferredFoodBox.setMaxLength(9);
         preferredFoodBox.setFilter(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
         preferredFoodBox.setValue(String.valueOf(menu.preferredFoodValue()));
         preferredFoodBox.setEditable(menu.canManage());
         Button setButton = addRenderableWidget(Button.builder(Component.literal("Set"), b -> setPreferredFood())
-                .bounds(centerX + 8, PREFERRED_FOOD_ROW_Y, 50, 20).build());
+                .bounds(centerX + 8, this.topPos + PREFERRED_FOOD_ROW_Y, 50, 20).build());
         setButton.active = menu.canManage();
     }
 
@@ -76,10 +79,8 @@ public class GuardhouseFoodScreen extends AbstractContainerScreen<GuardhouseFood
 
     @Override
     public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        int xo = (this.width - this.imageWidth) / 2;
-        int yo = (this.height - this.imageHeight) / 2;
-        graphics.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, xo, yo, 0.0F, 0.0F, this.imageWidth, 18 + 17, 256, 256);
-        graphics.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, xo, yo + PLAYER_INV_Y - 14, 0.0F, 126.0F, this.imageWidth, 96, 256, 256);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, this.leftPos, this.topPos, 0.0F, 0.0F, this.imageWidth, 18 + 17, 256, 256);
+        graphics.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, this.leftPos, this.topPos + PLAYER_INV_Y - 14, 0.0F, 126.0F, this.imageWidth, 96, 256, 256);
     }
 
     @Override
@@ -89,7 +90,8 @@ public class GuardhouseFoodScreen extends AbstractContainerScreen<GuardhouseFood
         // (outside both vanilla chest-texture blits), over the plain blurred world background, not
         // the light panel -- light text, not dark.
         String label = "Preferred Food:";
-        graphics.text(font, label, width / 2 - font.width(label) / 2, PREFERRED_FOOD_LABEL_Y, 0xFFFFFFFF);
+        int centerX = this.leftPos + this.imageWidth / 2;
+        graphics.text(font, label, centerX - font.width(label) / 2, this.topPos + PREFERRED_FOOD_LABEL_Y, 0xFFFFFFFF);
     }
 
     @Override

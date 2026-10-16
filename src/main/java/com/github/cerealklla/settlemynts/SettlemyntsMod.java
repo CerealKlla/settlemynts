@@ -621,6 +621,19 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestPlotManagement(payload));
 
+        // "Defense Spending" (explicit user spec, 2026-10-16) -- Town Hall plot's own sign.
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestDefenseSpendingPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestDefenseSpendingPayload.STREAM_CODEC,
+                (payload, context) -> requestDefenseSpending(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenDefenseSpendingMenuPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenDefenseSpendingMenuPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestDefenseSpending(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetDefenseSpendingPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SetDefenseSpendingPayload.STREAM_CODEC,
+                (payload, context) -> setDefenseSpending(payload, context));
+
         // Guard Kit Stand overhaul (design doc Section 14a, reworked 2026-10-16) -- "Get Guard Kit
         // Stands" on the Plot Config Sign.
         registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.RequestGuardKitStandsPayload.TYPE,
@@ -697,8 +710,9 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("This plot has no garrison."));
             return;
         }
-        int boxTier = plot.boxPos().isPresent() && ModList.get().isLoaded("blueprynts")
-                ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(serverLevel, plot.boxPos().get()).orElse(0)
+        // Resolved live via constructionBoxId, not the stale plot.boxPos() snapshot (2026-10-16 fix).
+        int boxTier = ModList.get().isLoaded("blueprynts")
+                ? com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveTier(serverLevel, plot)
                 : 0;
         int available = com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.capacityForTier(boxTier) - plot.guardKitStandsIssued();
         if (available <= 0) {
@@ -1172,17 +1186,14 @@ public class SettlemyntsMod {
         com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
         com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plotId);
         // Ledger entry (2026-10-12) -- recorded from the shop's own side, since the ledger lives on
-        // this plot's Building Supply Box.
-        if (resolvedBuy.get().plot().boxPos().isPresent() && ModList.get().isLoaded("blueprynts")) {
+        // this plot's Building Supply Box. Resolved live via constructionBoxId (2026-10-16 fix,
+        // real standing bug: the old plot.boxPos() snapshot goes stale the moment a box is ever
+        // relocated -- see BlueprintsConstructionBridge#resolveLivePos's own doc) instead of the
+        // temporary diagnostic this used to fall back to.
+        if (ModList.get().isLoaded("blueprynts")) {
             com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
-                    serverLevel, resolvedBuy.get().plot().boxPos().get(),
+                    serverLevel, resolvedBuy.get().plot(),
                     "Sold " + filled + "x to " + player.getGameProfile().name() + " for " + result.nuggetsCharged() + " nuggets");
-        } else {
-            // Temporary diagnostic (2026-10-12, real report: "I'm not seeing anything added to these
-            // [ledgers] when making purchases at shops") -- confirms whether the silent-skip gate
-            // above is the actual cause before assuming it. Remove once confirmed live.
-            LOGGER.info("[ShopLedgerDebug] buyFromShop plot={} -- skipped ledger entry: boxPosPresent={} blueprintsLoaded={}",
-                    plotId, resolvedBuy.get().plot().boxPos().isPresent(), ModList.get().isLoaded("blueprynts"));
         }
     }
 
@@ -1298,15 +1309,11 @@ public class SettlemyntsMod {
         // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
         com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
         com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plotId);
-        // Ledger entry (2026-10-12) -- see buyFromShop's own identical hook.
-        if (resolvedSell.get().plot().boxPos().isPresent() && ModList.get().isLoaded("blueprynts")) {
+        // Ledger entry (2026-10-12) -- see buyFromShop's own identical hook/fix.
+        if (ModList.get().isLoaded("blueprynts")) {
             com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
-                    serverLevel, resolvedSell.get().plot().boxPos().get(),
+                    serverLevel, resolvedSell.get().plot(),
                     "Bought " + result.itemsSold() + "x from " + player.getGameProfile().name() + " for " + nuggetsOwed + " nuggets");
-        } else {
-            // Temporary diagnostic -- see buyFromShop's own identical hook. Remove once confirmed live.
-            LOGGER.info("[ShopLedgerDebug] sellToShop plot={} -- skipped ledger entry: boxPosPresent={} blueprintsLoaded={}",
-                    plotId, resolvedSell.get().plot().boxPos().isPresent(), ModList.get().isLoaded("blueprynts"));
         }
     }
 
@@ -2096,6 +2103,79 @@ public class SettlemyntsMod {
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload(entries));
     }
 
+    /** "Defense Spending" button click -- Town Hall plot only, same resolve/validate shape as {@link #requestPlotManagement}. */
+    private static void requestDefenseSpending(com.github.cerealklla.settlemynts.plotsign.RequestDefenseSpendingPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        if (!plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)) {
+            player.sendSystemMessage(Component.literal("Defense Spending is only available on the Town Hall plot."));
+            return;
+        }
+        List<com.github.cerealklla.settlemynts.plotsign.DefenseSpendingEntry> entries = new ArrayList<>();
+        for (PlotRecord p : core.getPlots()) {
+            if (!p.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
+                continue;
+            }
+            int allocation = com.github.cerealklla.settlemynts.guardhouse.GuardhouseIndex.get(serverLevel.getServer()).get(p.plotId())
+                    .flatMap(pos -> {
+                        ServerLevel guardhouseLevel = serverLevel.getServer().getLevel(pos.dimension());
+                        if (guardhouseLevel != null && guardhouseLevel.getBlockEntity(pos.pos())
+                                instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse) {
+                            return java.util.Optional.of(guardhouse.defenseSpendingAllocation());
+                        }
+                        return java.util.Optional.<Integer>empty();
+                    }).orElse(0);
+            entries.add(new com.github.cerealklla.settlemynts.plotsign.DefenseSpendingEntry(p.plotId(), p.name(), allocation));
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenDefenseSpendingMenuPayload(payload.signPos(), entries));
+    }
+
+    /** "Set" button click on {@code client.DefenseSpendingScreen} -- re-validates canManage against the Town Hall plot, then matches {@code guardhousePlotId} against this SAME settlement's own plot list before applying. */
+    private static void setDefenseSpending(com.github.cerealklla.settlemynts.plotsign.SetDefenseSpendingPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord townHall = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (townHall == null || !PlotPermissions.canManage(townHall, core, player.getUUID())
+                || !townHall.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        PlotRecord guardhousePlot = core.getPlots().stream().filter(p -> p.plotId().equals(payload.guardhousePlotId())
+                && p.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID))
+                .findFirst().orElse(null);
+        if (guardhousePlot == null) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve that Guardhouse anymore."));
+            return;
+        }
+        com.github.cerealklla.settlemynts.guardhouse.GuardhouseIndex.get(serverLevel.getServer()).get(guardhousePlot.plotId())
+                .ifPresent(pos -> {
+                    ServerLevel guardhouseLevel = serverLevel.getServer().getLevel(pos.dimension());
+                    if (guardhouseLevel != null && guardhouseLevel.getBlockEntity(pos.pos())
+                            instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse) {
+                        guardhouse.setDefenseSpendingAllocation(payload.allocation());
+                    }
+                });
+    }
+
     /**
      * "Upgrade Plot" button click -- computes a live cost/affordability preview (see {@code
      * construction.PlotTierUpgradeFunding#preview}) and sends it back so {@code
@@ -2360,7 +2440,7 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("Couldn't resolve this settlement anymore."));
             return;
         }
-        if (plot.boxPos().isEmpty()) {
+        if (plot.constructionBoxId().isEmpty()) {
             player.sendSystemMessage(Component.literal("This plot has no Construction Box to draw gold from."));
             return;
         }
@@ -2379,8 +2459,9 @@ public class SettlemyntsMod {
         }
         drainGoldNuggets(boxes, ESTABLISH_HIGHWAY_COST_GOLD);
         if (net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
+            // Resolved live via constructionBoxId, not the stale plot.boxPos() snapshot (2026-10-16 fix).
             com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
-                    serverLevel, plot.boxPos().get(), "Highway Quest Creation -" + ESTABLISH_HIGHWAY_COST_GOLD);
+                    serverLevel, plot, "Highway Quest Creation -" + ESTABLISH_HIGHWAY_COST_GOLD);
         }
         player.sendSystemMessage(Component.literal("Highway quest posted! It'll appear at the Town Hall under Mayor's Special Assignments."));
     }

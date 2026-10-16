@@ -99,6 +99,12 @@ public final class PlotConfigSignMenuScreen extends Screen {
             addRenderableWidget(Button.builder(Component.literal("Establish Highway"), b -> establishHighway())
                     .bounds(centerX - 100, y, 200, 20).build());
             y += 30;
+
+            // "Defense Spending" (explicit user spec, 2026-10-16) -- same visible-but-re-validated
+            // discipline as every other button here.
+            addRenderableWidget(Button.builder(Component.literal("Defense Spending"), b -> defenseSpending())
+                    .bounds(centerX - 100, y, 200, 20).build());
+            y += 30;
         }
 
         y += 10;
@@ -143,6 +149,11 @@ public final class PlotConfigSignMenuScreen extends Screen {
 
     private void establishHighway() {
         send(new com.github.cerealklla.settlemynts.plotsign.RequestEstablishHighwayMapPayload(data.signPos()));
+        onClose();
+    }
+
+    private void defenseSpending() {
+        send(new com.github.cerealklla.settlemynts.plotsign.RequestDefenseSpendingPayload(data.signPos()));
         onClose();
     }
 

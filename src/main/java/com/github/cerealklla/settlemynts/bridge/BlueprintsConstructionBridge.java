@@ -7,6 +7,7 @@ import com.github.cerealklla.blueprynts.api.BuildableArea;
 import com.github.cerealklla.blueprynts.api.Blueprynts;
 import com.github.cerealklla.blueprynts.api.PlotArea;
 import com.github.cerealklla.cartographyr.geo.PlotValidity;
+import com.github.cerealklla.settlemynts.zone.PlotRecord;
 import com.github.cerealklla.settlemynts.zone.PlotSitePlacement;
 
 import net.minecraft.core.BlockPos;
@@ -78,17 +79,47 @@ public final class BlueprintsConstructionBridge {
      * user report: "the lumberjack seems to be getting infinite money" -- a standing record of
      * every purchase/sale beats re-adding temporary debug logging each time something looks off).
      * Thin pass-through to {@link Blueprynts#appendLedgerEntry} -- callers must still guard with
-     * {@code ModList.get().isLoaded("blueprynts")} and a present {@code plot.boxPos()} themselves,
-     * same as every other method on this class.
+     * {@code ModList.get().isLoaded("blueprynts")} themselves, same as every other method on this
+     * class. Prefer the {@link #appendLedgerEntry(ServerLevel, PlotRecord, String)} overload below
+     * when a {@link PlotRecord} is already in hand -- this raw-{@code BlockPos} form is only still
+     * correct for a caller holding its own independently-tracked live box position (see {@code
+     * zone.RentLedgerListener}, which resolves its own source/destination boxes separately).
      */
     public static void appendLedgerEntry(ServerLevel level, BlockPos boxPos, String line) {
         Blueprynts.appendLedgerEntry(level, boxPos, line);
+    }
+
+    /**
+     * Live-resolves a plot's Building Supply Box position via its own {@code constructionBoxId} --
+     * added 2026-10-16, real standing bug: every ledger write in this mod used to read {@code
+     * PlotRecord#boxPos} directly, which is only a one-time snapshot captured at Finalize. The box
+     * can be physically relocated afterward ("Reposition Supply Box"), but nothing ever updates
+     * {@code boxPos} to match -- every ledger append since a box's first move was silently resolving
+     * against its old, now-empty position and no-op'ing forever, with no error. {@code
+     * constructionBoxId} (the box's real persistent identity, resolved fresh via {@link
+     * Blueprynts#getConstructionBoxPos}) is what every other live-position read in this class
+     * already correctly uses ({@link #resolveStatus}/{@link #resolveTier(ServerLevel, UUID)}/{@link
+     * #setAllowedTier}) -- this is the one missing piece, now reused by the overloads below instead
+     * of every call site inlining its own stale {@code plot.boxPos()} read.
+     */
+    public static Optional<BlockPos> resolveLivePos(ServerLevel level, PlotRecord plot) {
+        return plot.constructionBoxId().flatMap(id -> Blueprynts.getConstructionBoxPos(level, id));
+    }
+
+    /** {@link #appendLedgerEntry(ServerLevel, BlockPos, String)}, resolving the box's live position from the plot itself -- see {@link #resolveLivePos}'s own doc. No-op if this plot has no Construction Box at all. */
+    public static void appendLedgerEntry(ServerLevel level, PlotRecord plot, String line) {
+        resolveLivePos(level, plot).ifPresent(pos -> Blueprynts.appendLedgerEntry(level, pos, line));
     }
 
     /** A plot's current Construction Box Tier -- added 2026-10-05 for {@code zone.ShopSeeding}, which needs to know how far up a Zone Type's seed catalog it's allowed to reach. */
     public static Optional<Integer> resolveTier(ServerLevel level, UUID constructionBoxId) {
         return Blueprynts.getConstructionBoxPos(level, constructionBoxId)
                 .flatMap(pos -> Blueprynts.getConstructionBoxTier(level, pos));
+    }
+
+    /** {@link #resolveTier(ServerLevel, UUID)}, taking the plot directly -- 0 if it has no Construction Box, same fallback every existing call site already used. */
+    public static int resolveTier(ServerLevel level, PlotRecord plot) {
+        return plot.constructionBoxId().flatMap(id -> resolveTier(level, id)).orElse(0);
     }
 
     /**

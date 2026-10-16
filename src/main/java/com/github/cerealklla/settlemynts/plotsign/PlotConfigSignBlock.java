@@ -89,8 +89,9 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
                 maxPlotTier = isTownHall ? 5 : core.townHallPlot().map(PlotRecord::tier).orElse(5);
                 canHireNpc = canManage && plot.owner().isPresent() && !hasGarrison && !isTownHall;
                 if (hasGarrison) {
-                    int boxTier = plot.boxPos().isPresent() && net.neoforged.fml.ModList.get().isLoaded("blueprynts")
-                            ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(serverLevel, plot.boxPos().get()).orElse(0)
+                    // Resolved live via constructionBoxId, not the stale plot.boxPos() snapshot (2026-10-16 fix).
+                    int boxTier = net.neoforged.fml.ModList.get().isLoaded("blueprynts")
+                            ? com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveTier(serverLevel, plot)
                             : 0;
                     guardKitStandsAvailable = Math.max(0,
                             com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.capacityForTier(boxTier) - plot.guardKitStandsIssued());

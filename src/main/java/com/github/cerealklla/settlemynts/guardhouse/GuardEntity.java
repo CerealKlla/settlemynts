@@ -147,6 +147,11 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         return settlementCoreId;
     }
 
+    /** This guard's own assigned plot -- used by {@code GuardPickUpItemsGoal}/{@code GuardLootDeposit} to find where to store picked-up loot. */
+    public UUID plotId() {
+        return plotId;
+    }
+
     /**
      * This guard's own plot's "Town Proper" buffer polygon (the same real, already-registered
      * Cartographyr entity {@code zone.PlotGeometry#paddedBuffer} produces at Finalize time and Lyfe's
@@ -195,6 +200,9 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         // Fence gates have no vanilla equivalent at all -- see GuardGateOpenGoal's own doc for why
         // this is a separate, custom goal rather than reusing OpenDoorGoal.
         this.goalSelector.addGoal(3, new GuardGateOpenGoal(this));
+        // "Guards should be able to pick up loose items off the ground and immediately store them in
+        // the storage boxes on the plot they are assigned to" (explicit user spec, 2026-10-16).
+        this.goalSelector.addGoal(3, new GuardPickUpItemsGoal(this));
         this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
 
@@ -303,8 +311,9 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         if (plot == null) {
             return GuardRespawnFunding.NO_FOOD_RESPAWN_TICKS;
         }
-        int tier = plot.boxPos().isPresent() && net.neoforged.fml.ModList.get().isLoaded("blueprynts")
-                ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(serverLevel, plot.boxPos().get()).orElse(0)
+        // Resolved live via constructionBoxId, not the stale plot.boxPos() snapshot (2026-10-16 fix).
+        int tier = net.neoforged.fml.ModList.get().isLoaded("blueprynts")
+                ? com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveTier(serverLevel, plot)
                 : 0;
         boolean funded = GuardhouseIndex.get(serverLevel.getServer()).get(plotId)
                 .filter(pos -> serverLevel.getServer().getLevel(pos.dimension()) != null

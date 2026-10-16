@@ -62,10 +62,10 @@ public final class PlannedInventoryClearing {
 
     private static final ShopResource GOLD_NUGGETS = ShopResource.ofItem(BuiltInRegistries.ITEM.getKey(Items.GOLD_NUGGET));
 
-    /** Ledger entry for a midnight inter-plot trade (2026-10-12) -- same hook as the real player buy/sell handlers in SettlemyntsMod, see BlueprintsConstructionBridge's own doc. No-op if the plot has no box or Blueprynts isn't loaded. */
+    /** Ledger entry for a midnight inter-plot trade (2026-10-12) -- same hook as the real player buy/sell handlers in SettlemyntsMod, see BlueprintsConstructionBridge's own doc. Resolved live via constructionBoxId, not the stale plot.boxPos() snapshot (2026-10-16 fix). No-op if the plot has no box or Blueprynts isn't loaded. */
     private static void appendLedger(ServerLevel level, PlotRecord plot, String line) {
-        if (plot.boxPos().isPresent() && ModList.get().isLoaded("blueprynts")) {
-            BlueprintsConstructionBridge.appendLedgerEntry(level, plot.boxPos().get(), line);
+        if (ModList.get().isLoaded("blueprynts")) {
+            BlueprintsConstructionBridge.appendLedgerEntry(level, plot, line);
         }
     }
     private static final int MAX_CRAFTS_PER_PLOT_PER_TARGET = 64;
