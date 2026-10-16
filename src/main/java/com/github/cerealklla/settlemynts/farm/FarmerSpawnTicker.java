@@ -61,7 +61,7 @@ public final class FarmerSpawnTicker {
             return;
         }
         PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
-        if (plot == null || plot.owner().isPresent() || !plot.zoneTypeId().equals(FARM_ZONE_TYPE_ID)) {
+        if (plot == null || (plot.owner().isPresent() && !plot.npcHired()) || !plot.zoneTypeId().equals(FARM_ZONE_TYPE_ID)) {
             return;
         }
         // Real, confirmed-live duplicate-worker bug fixed 2026-10-12 (see

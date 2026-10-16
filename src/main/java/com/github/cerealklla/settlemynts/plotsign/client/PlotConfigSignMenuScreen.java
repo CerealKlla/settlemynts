@@ -76,6 +76,12 @@ public final class PlotConfigSignMenuScreen extends Screen {
             y += 30;
         }
 
+        if (data.canHireNpc()) {
+            addRenderableWidget(Button.builder(Component.literal("Hire NPC"), b -> hireNpc())
+                    .bounds(centerX - 100, y, 200, 20).build());
+            y += 30;
+        }
+
         addRenderableWidget(Button.builder(Component.literal("Plot Details"), b -> plotDetails())
                 .bounds(centerX - 100, y, 200, 20).build());
         y += 30;
@@ -125,6 +131,11 @@ public final class PlotConfigSignMenuScreen extends Screen {
 
     private void upgradePlot() {
         send(new com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPreviewPayload(data.signPos()));
+        onClose();
+    }
+
+    private void hireNpc() {
+        send(new com.github.cerealklla.settlemynts.plotsign.RequestHireNpcPayload(data.signPos()));
         onClose();
     }
 

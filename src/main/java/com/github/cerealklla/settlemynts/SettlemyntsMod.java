@@ -195,6 +195,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.farm.FarmerSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.mineshaft.MineshaftSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotNpcDeathListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NpcMaintenanceTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.TownHallCoreLocatorTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.founding.LocatorCancelListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotStakeTossGuard());
@@ -570,6 +571,10 @@ public class SettlemyntsMod {
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.UpgradePlotPreviewPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestUpgradePlotPreview(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestHireNpcPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestHireNpcPayload.STREAM_CODEC,
+                (payload, context) -> requestHireNpc(payload, context));
 
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestEstablishHighwayMapPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.RequestEstablishHighwayMapPayload.STREAM_CODEC,
@@ -1880,6 +1885,53 @@ public class SettlemyntsMod {
         player.sendSystemMessage(Component.literal("Plot upgraded to Tier " + newTier + "! Use the Construction Box to build at the new Tier."));
     }
 
+    /**
+     * "Hire NPC" (design doc Section 14a, explicit user request, 2026-10-15) -- pays {@code
+     * zone.NpcHireMaintenance#costFor} right now, out of the plot's own boxes, and (on success) sets
+     * {@code PlotRecord#npcHired} so the existing resident/worker spawn tickers pick it up within
+     * their own next ~5-second scan -- no separate spawn call needed here. Also the real recovery
+     * path from a funds-driven despawn ({@code zone.NpcMaintenanceTicker}): {@code npcHired} stays
+     * {@code true} through a despawn, so this just needs to pay again to bring the worker back.
+     */
+    private static void requestHireNpc(com.github.cerealklla.settlemynts.plotsign.RequestHireNpcPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        if (plot.owner().isEmpty()) {
+            player.sendSystemMessage(Component.literal("This plot already has a free NPC -- no need to hire one."));
+            return;
+        }
+        if (plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)
+                || plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)) {
+            player.sendSystemMessage(Component.literal("This plot type can't hire an NPC."));
+            return;
+        }
+        long currentDay = com.github.cerealklla.settlemynts.zone.NpcHireMaintenance.currentDay(serverLevel.getServer());
+        if (plot.npcHired() && plot.npcLastChargedDay() == currentDay) {
+            player.sendSystemMessage(Component.literal("This plot's hired NPC is already paid up for today."));
+            return;
+        }
+        int cost = com.github.cerealklla.settlemynts.zone.NpcHireMaintenance.costFor(plot);
+        if (!com.github.cerealklla.settlemynts.zone.NpcHireMaintenance.tryCharge(serverLevel, plot.plotId(), cost)) {
+            player.sendSystemMessage(Component.literal("Not enough Gold Nuggets in this plot's storage -- need " + cost + "."));
+            return;
+        }
+        core.updatePlot(plot.withNpcHired(true).withNpcLastChargedDay(currentDay));
+        player.sendSystemMessage(Component.literal("Hired! Paid " + cost + " Gold Nuggets -- an NPC will arrive shortly, and costs "
+                + cost + " more every midnight to keep."));
+    }
+
     // 2 real miles (1 block ~= 1 meter, 1 mile ~= 1609 blocks, same convention as every other
     // distance constant in this suite) -- matches the user's own explicit spec for the Establish
     // Highway map picker's candidate search radius.
@@ -2427,7 +2479,7 @@ public class SettlemyntsMod {
                     Map.of(Identifier.withDefaultNamespace("gold_nugget"), 1), 1L));
         }
 
-        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1, java.util.List.of(), 0);
+        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1, java.util.List.of(), 0, false, -1L);
         core.addPlot(plotRecord);
 
         // Plot Config Sign (design doc Section 14a) -- spawned unconditionally, next to the same

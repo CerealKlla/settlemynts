@@ -80,12 +80,29 @@ import net.minecraft.resources.Identifier;
  * Blueprynts good). Lets that pass stay idempotent (only reacts once per real Tier increase, not on
  * every "Enter Shop") without needing a separate tier-change event anywhere. Defaults to 0 (including
  * every pre-existing saved plot), so a Tier 1 plot still seeds once on its very first check.
+ *
+ * <p>{@code npcHired}/{@code npcLastChargedDay} (added 2026-10-15, explicit user request: "Hire NPC"
+ * on the Plot Config Sign) -- lets a player-owned plot pay for the same kind of worker NPC an
+ * NPC-owned plot gets for free. {@code npcHired} is the standing intent ("this plot should have a
+ * hired NPC"), widening {@code resident.ResidentSpawnTicker}/{@code farm.FarmerSpawnTicker}/{@code
+ * lumberyard.LumberjackSpawnTicker}/{@code mineshaft.MineshaftSpawnTicker}'s own {@code
+ * owner().isEmpty()} eligibility check to also accept a player-owned plot with this flag set -- no
+ * new spawn mechanism needed, just a widened gate on the existing one. It stays {@code true} through
+ * a funds-driven despawn (see {@code zone.NpcMaintenanceTicker}), so a later midnight automatically
+ * retries and restores the worker once the plot is funded again, with no need to re-click "Hire NPC."
+ * {@code npcLastChargedDay} (the real-day index, {@code Math.floorDiv(overworldClockTime, 24000)}, of
+ * the last successful maintenance charge) exists purely so a manual "Hire NPC" click that pays
+ * immediately doesn't ALSO get charged again by that same night's midnight tick -- see {@code
+ * NpcMaintenanceTicker}'s own doc for the full "Rent is pulled first, then NPC pay" ordering this
+ * mechanism needs to respect. Both default to {@code false}/{@code -1} (including every pre-existing
+ * saved plot, which has never had a hired NPC).
  */
 public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long cartographyrPlotEntityId,
                           long cartographyrBufferEntityId, Optional<BlockPos> boxPos, Optional<UUID> constructionBoxId,
                           Optional<UUID> owner, Optional<UUID> billId, Optional<UUID> shopId,
                           List<SuppressedShopResource> suppressedShopResources, int tier,
-                          List<PlannedInventoryTarget> plannedInventory, int tieredDefaultsAppliedTier) {
+                          List<PlannedInventoryTarget> plannedInventory, int tieredDefaultsAppliedTier,
+                          boolean npcHired, long npcLastChargedDay) {
 
     public static final Codec<PlotRecord> CODEC = RecordCodecBuilder.create(i -> i.group(
             UUIDUtil.CODEC.fieldOf("plot_id").forGetter(PlotRecord::plotId),
@@ -101,36 +118,53 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
             SuppressedShopResource.CODEC.listOf().optionalFieldOf("suppressed_shop_resources", List.of()).forGetter(PlotRecord::suppressedShopResources),
             Codec.INT.optionalFieldOf("tier", 1).forGetter(PlotRecord::tier),
             PlannedInventoryTarget.CODEC.listOf().optionalFieldOf("planned_inventory", List.of()).forGetter(PlotRecord::plannedInventory),
-            Codec.INT.optionalFieldOf("tiered_defaults_applied_tier", 0).forGetter(PlotRecord::tieredDefaultsAppliedTier)
+            Codec.INT.optionalFieldOf("tiered_defaults_applied_tier", 0).forGetter(PlotRecord::tieredDefaultsAppliedTier),
+            Codec.BOOL.optionalFieldOf("npc_hired", false).forGetter(PlotRecord::npcHired),
+            Codec.LONG.optionalFieldOf("npc_last_charged_day", -1L).forGetter(PlotRecord::npcLastChargedDay)
     ).apply(i, PlotRecord::new));
 
     /** Stamps in a freshly-registered Shop id -- see this record's own class doc on when this happens. */
     public PlotRecord withShopId(UUID shopId) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier);
+                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, npcHired, npcLastChargedDay);
     }
 
     /** Overwrites the full Shop Config suppression set -- see {@code SettlemyntsMod#setShopListings}, the only caller. */
     public PlotRecord withSuppressedShopResources(List<SuppressedShopResource> suppressedShopResources) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier, plannedInventory, tieredDefaultsAppliedTier);
+                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier, plannedInventory, tieredDefaultsAppliedTier, npcHired, npcLastChargedDay);
     }
 
     /** Raises (or sets) this plot's own unlocked construction-Tier cap -- see this record's own class doc. */
     public PlotRecord withTier(int tier) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, npcHired, npcLastChargedDay);
     }
 
     /** Overwrites the full Planned Inventory target set -- see {@code SettlemyntsMod#setPlannedInventory}, the only caller. */
     public PlotRecord withPlannedInventory(List<PlannedInventoryTarget> plannedInventory) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, List.copyOf(plannedInventory), tieredDefaultsAppliedTier);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, List.copyOf(plannedInventory), tieredDefaultsAppliedTier, npcHired, npcLastChargedDay);
     }
 
     /** Marks {@code tier} as the highest Tier {@code zone.ShopSeeding#applyTieredDefaults} has seeded for -- see this record's own class doc. */
     public PlotRecord withTieredDefaultsAppliedTier(int tieredDefaultsAppliedTier) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, npcHired, npcLastChargedDay);
+    }
+
+    /** Sets whether this plot currently has (or should have, through a funds-driven despawn) a hired
+     *  NPC -- see this record's own class doc. */
+    public PlotRecord withNpcHired(boolean npcHired) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, npcHired, npcLastChargedDay);
+    }
+
+    /** Records the real-day index of this plot's last successful NPC maintenance charge -- see this
+     *  record's own class doc for why this exists (avoiding a same-day double-charge between a
+     *  manual "Hire NPC" click and that night's midnight tick). */
+    public PlotRecord withNpcLastChargedDay(long npcLastChargedDay) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, npcHired, npcLastChargedDay);
     }
 }

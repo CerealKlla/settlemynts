@@ -56,7 +56,7 @@ public final class LumberjackSpawnTicker {
             return;
         }
         PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
-        if (plot == null || plot.owner().isPresent() || !plot.zoneTypeId().equals(LUMBERYARD_ZONE_TYPE_ID)) {
+        if (plot == null || (plot.owner().isPresent() && !plot.npcHired()) || !plot.zoneTypeId().equals(LUMBERYARD_ZONE_TYPE_ID)) {
             return;
         }
 

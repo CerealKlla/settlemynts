@@ -30,7 +30,9 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * separate timer needed.
  *
  * <p>Every finalized plot with {@code PlotRecord#owner().isEmpty()} (NPC-owned, the default -- see
- * {@code construction.NpcAutoFundingTicker}'s identical check) is eligible, regardless of zone
+ * {@code construction.NpcAutoFundingTicker}'s identical check), or a player-owned plot with {@code
+ * PlotRecord#npcHired()} set (added 2026-10-15, see that field's own doc and {@code
+ * zone.NpcMaintenanceTicker}), is eligible, regardless of zone
  * type -- except a Guardhouse (real report, 2026-10-05: "do not spawn an NPC at the guardhouse,
  * they already spawn actual guards" -- this is exactly the "worth revisiting" case this doc used
  * to flag as open; it's now resolved, a Guardhouse plot never gets a resident), and, same day,
@@ -68,8 +70,8 @@ public final class ResidentSpawnTicker {
             return; // Chunk not loaded, or the sign/core couldn't be resolved -- skip this scan.
         }
         PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
-        if (plot == null || plot.owner().isPresent()) {
-            return; // Player-owned -- no resident.
+        if (plot == null || (plot.owner().isPresent() && !plot.npcHired())) {
+            return; // Player-owned, and no hired NPC paid for -- no resident.
         }
         if (plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
             return; // Guardhouse already has its own guards -- no resident villager too.

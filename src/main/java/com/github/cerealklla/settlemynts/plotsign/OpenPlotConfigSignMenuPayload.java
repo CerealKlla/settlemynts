@@ -27,9 +27,15 @@ import net.minecraft.resources.Identifier;
  * the Town Hall Plot Tier to be the limit for individual Plot Tiers") is 5 for the Town Hall plot
  * itself, or the settlement's Town Hall plot's own current {@code tier} for every other plot -- gates
  * whether "Upgrade Plot" is even shown.
+ *
+ * <p>{@code canHireNpc} (added 2026-10-15) gates the new "Hire NPC" button -- {@code true} only for
+ * a plot the player can manage, that's player-owned (an NPC-owned plot already gets a free NPC),
+ * and isn't a Guardhouse or Town Hall (neither ever spawns the kind of worker this button hires --
+ * see {@code resident.ResidentSpawnTicker}'s own Guardhouse/zone-type exclusions). See {@code
+ * zone.NpcHireMaintenance}/{@code zone.NpcMaintenanceTicker} for the full feature.
  */
 public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage, boolean hasGarrison, boolean isTownHall,
-                                             boolean hasConstructionBox, int tier, int maxPlotTier) implements CustomPacketPayload {
+                                             boolean hasConstructionBox, int tier, int maxPlotTier, boolean canHireNpc) implements CustomPacketPayload {
 
     public static final Type<OpenPlotConfigSignMenuPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_plot_config_sign_menu"));
@@ -42,6 +48,7 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::hasConstructionBox,
             ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::tier,
             ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::maxPlotTier,
+            ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::canHireNpc,
             OpenPlotConfigSignMenuPayload::new);
 
     @Override
