@@ -18,8 +18,9 @@ import net.minecraft.world.entity.player.Inventory;
  * The Guardhouse's food Container screen -- a plain one-row inventory, same vanilla `generic_54`
  * background Blueprynts' own `ConstructionBoxScreen` uses.
  *
- * <p>"Preferred Food" (added 2026-10-16, explicit user spec) -- a numeric field + "Set" button below
- * the player-inventory panel, editable only for a player who can manage this plot ({@link
+ * <p>"Preferred Food" (added 2026-10-16, explicit user spec) -- a numeric field + "Set" button in the
+ * gap between the food panel and the player-inventory panel, editable only for a player who can manage
+ * this plot ({@link
  * GuardhouseFoodMenu#canManage()}, resolved server-side and shipped down with the menu -- see that
  * class's own doc). {@code GuardhouseFoodAutoBuy} is what actually spends it, at midnight.
  */
@@ -27,19 +28,21 @@ public class GuardhouseFoodScreen extends AbstractContainerScreen<GuardhouseFood
 
     private static final Identifier BACKGROUND = Identifier.withDefaultNamespace("textures/gui/container/generic_54.png");
     private static final int PLAYER_INV_Y = 84;
-    // The vanilla generic_54 player-inventory blit (see extractBackground below) is one fixed 96px
-    // image that already closes out with its own bottom border right at PANEL_BOTTOM -- there is no
-    // blank space inside it to draw into. The new row has to start well below that real edge, not
-    // just below the hotbar's own slot coordinates, or it lands on top of the hotbar artwork (real
-    // live report, 2026-10-16, screenshot showed the label and button overlapping the hotbar items).
-    private static final int PANEL_BOTTOM = (PLAYER_INV_Y - 14) + 96;
-    private static final int PREFERRED_FOOD_LABEL_Y = PANEL_BOTTOM + 8;
+    // The food-container panel and the player-inventory panel are two SEPARATE background blits
+    // (see extractBackground below) with a real gap between them -- the food panel's own blit ends
+    // at FOOD_PANEL_BOTTOM, and the player-inventory blit doesn't start until PLAYER_PANEL_TOP. Put
+    // the "Preferred Food" row in that existing gap instead of appending extra space below the whole
+    // screen (real live feedback, 2026-10-16, after an earlier below-the-hotbar placement still read
+    // as cramped against the inventory) -- centered in the ~35px gap, label first then the row.
+    private static final int FOOD_PANEL_BOTTOM = 18 + 17;
+    private static final int PLAYER_PANEL_TOP = PLAYER_INV_Y - 14;
+    private static final int PREFERRED_FOOD_LABEL_Y = FOOD_PANEL_BOTTOM + 3;
     private static final int PREFERRED_FOOD_ROW_Y = PREFERRED_FOOD_LABEL_Y + 10;
 
     private EditBox preferredFoodBox;
 
     public GuardhouseFoodScreen(GuardhouseFoodMenu menu, Inventory inventory, Component title) {
-        super(menu, inventory, title, 176, PREFERRED_FOOD_ROW_Y + 30);
+        super(menu, inventory, title, 176, PLAYER_PANEL_TOP + 96 + 6);
         this.inventoryLabelY = PLAYER_INV_Y - 10;
     }
 
@@ -82,8 +85,9 @@ public class GuardhouseFoodScreen extends AbstractContainerScreen<GuardhouseFood
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        // This row sits below both background blits (outside the vanilla chest-texture area), over
-        // the plain blurred world background, not the light panel -- light text, not dark.
+        // This row sits in the real gap between the food panel and the player-inventory panel
+        // (outside both vanilla chest-texture blits), over the plain blurred world background, not
+        // the light panel -- light text, not dark.
         String label = "Preferred Food:";
         graphics.text(font, label, width / 2 - font.width(label) / 2, PREFERRED_FOOD_LABEL_Y, 0xFFFFFFFF);
     }
