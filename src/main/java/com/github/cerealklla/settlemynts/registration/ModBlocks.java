@@ -83,10 +83,25 @@ public final class ModBlocks {
     // block entity, no interaction behavior. Indestructible via the same bedrock-like properties as
     // PLOT_CONFIG_SIGN/GUARDHOUSE above (this alone satisfies "nothing can damage a Roadway block,"
     // no Protectyons work needed). No default BlockItem -- only RoadwayPaver ever places one.
+    //
+    // mapColor was a single flat MapColor.STONE for every tier until 2026-10-16 -- real live report:
+    // a Tier 5 (quartz bricks) road showed grey on Lyfe's minimap instead of the pale color the
+    // Smooth Quartz Stairs on its own slopes correctly showed (those are real unmodified vanilla, so
+    // they already reported their own genuine MapColor.QUARTZ). A fixed MapColor is per-Block, not
+    // per-state, by default -- widened to the per-state Function overload, matching each tier's real
+    // texture to the same map color the equivalent real vanilla block uses (confirmed against the
+    // decompiled source, not guessed): Tier 1 dirt path -> MapColor.DIRT, Tier 4 bricks ->
+    // MapColor.COLOR_RED, Tier 5 quartz bricks -> MapColor.QUARTZ. Tiers 2/3 (cobblestone/stone
+    // bricks) were already correct by coincidence -- both are genuinely MapColor.STONE in vanilla too.
     public static final DeferredBlock<TieredRoadwayBlock> ROADWAY = BLOCKS.register(
             "roadway",
             id -> new TieredRoadwayBlock(BlockBehaviour.Properties.of()
-                    .mapColor(MapColor.STONE)
+                    .mapColor(state -> switch (state.getValue(TieredRoadwayBlock.TIER)) {
+                        case 1 -> MapColor.DIRT;
+                        case 4 -> MapColor.COLOR_RED;
+                        case 5 -> MapColor.QUARTZ;
+                        default -> MapColor.STONE;
+                    })
                     .strength(-1.0F, 3600000.0F)
                     .sound(SoundType.STONE)
                     .setId(ResourceKey.create(Registries.BLOCK, id))));
