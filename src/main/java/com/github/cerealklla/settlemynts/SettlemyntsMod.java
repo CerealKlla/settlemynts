@@ -239,6 +239,14 @@ public class SettlemyntsMod {
         event.put(ModEntities.LUMBERJACK_WORKER.get(), com.github.cerealklla.settlemynts.lumberyard.LumberjackWorkerEntity.createAttributes().build());
         event.put(ModEntities.FARMER_WORKER.get(), com.github.cerealklla.settlemynts.farm.FarmerWorkerEntity.createAttributes().build());
         event.put(ModEntities.MINER_WORKER.get(), com.github.cerealklla.settlemynts.mineshaft.MinerWorkerEntity.createAttributes().build());
+        // Guard Kit Stand overhaul (2026-10-16) -- GuardKitStandEntity extends vanilla's own
+        // ArmorStand directly with no custom attribute needs, so it reuses vanilla's own
+        // ArmorStand#createAttributes() builder rather than inventing a duplicate. Missing this
+        // entirely (a real live bug, caught via a crash report) throws a NullPointerException the
+        // instant one is constructed -- EVERY LivingEntity subclass needs a registered
+        // AttributeSupplier for its own EntityType, confirmed against the decompiled source; ghost
+        // marker entities never needed this because none of them are LivingEntity.
+        event.put(ModEntities.GUARD_KIT_STAND.get(), net.minecraft.world.entity.decoration.ArmorStand.createAttributes().build());
     }
 
     /** Payload registrations for the staking mechanic (design doc Section 6) -- see founding.* payload classes' own docs. */
@@ -654,7 +662,9 @@ public class SettlemyntsMod {
     /**
      * "Get Guard Kit Stands" button -- re-checks {@code zone.PlotPermissions#canManage} and re-reads
      * the plot's own live {@code zone.PlotRecord#guardKitStandsIssued} count (never trusts the
-     * button's earlier label) before granting exactly one stand item and incrementing that count, all
+     * button's earlier label) before granting every currently-available stand item in one go (real
+     * live report, 2026-10-16: granting just one per click read as broken/confusing against a button
+     * labeled with the full available count) and incrementing that count by the same amount, all
      * synchronously within this one handler call -- see {@link
      * com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload}'s own doc for why
      * that's sufficient to prevent two concurrent clicks from over-granting past the Tier cap.
@@ -686,14 +696,16 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("No more Guard Kit Stands are available for this plot's current Tier."));
             return;
         }
-        core.updatePlot(plot.withGuardKitStandsIssued(plot.guardKitStandsIssued() + 1));
-        net.minecraft.world.item.ItemStack item = new net.minecraft.world.item.ItemStack(
-                com.github.cerealklla.settlemynts.registration.ModItems.GUARD_KIT_STAND.get());
-        item.set(com.github.cerealklla.settlemynts.registration.ModItems.GUARD_KIT_STAND_DATA.get(),
-                new com.github.cerealklla.settlemynts.guardhouse.GuardKitStandData(
-                        UUID.randomUUID(), sign.settlementCoreId(), plot.plotId(), Optional.empty(), Optional.empty(), 0L));
-        if (!player.getInventory().add(item)) {
-            player.drop(item, false);
+        core.updatePlot(plot.withGuardKitStandsIssued(plot.guardKitStandsIssued() + available));
+        for (int i = 0; i < available; i++) {
+            net.minecraft.world.item.ItemStack item = new net.minecraft.world.item.ItemStack(
+                    com.github.cerealklla.settlemynts.registration.ModItems.GUARD_KIT_STAND.get());
+            item.set(com.github.cerealklla.settlemynts.registration.ModItems.GUARD_KIT_STAND_DATA.get(),
+                    new com.github.cerealklla.settlemynts.guardhouse.GuardKitStandData(
+                            UUID.randomUUID(), sign.settlementCoreId(), plot.plotId(), Optional.empty(), Optional.empty(), 0L));
+            if (!player.getInventory().add(item)) {
+                player.drop(item, false);
+            }
         }
     }
 

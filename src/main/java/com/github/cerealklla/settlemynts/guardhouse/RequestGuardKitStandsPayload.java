@@ -15,8 +15,8 @@ import net.minecraft.resources.Identifier;
  * {@code signPos} resolves back to the plot the same way every other Plot Config Sign button does;
  * the server re-checks {@code zone.PlotPermissions#canManage} and re-reads the plot's own live {@code
  * zone.PlotRecord#guardKitStandsIssued} count (never trusts the button's earlier label) before
- * granting exactly one Guard Kit Stand item and incrementing that count -- see {@code
- * SettlemyntsMod#requestGuardKitStands}.
+ * granting every currently-available Guard Kit Stand item and incrementing that count by the same
+ * amount -- see {@code SettlemyntsMod#requestGuardKitStands}.
  */
 public record RequestGuardKitStandsPayload(BlockPos signPos) implements CustomPacketPayload {
 
