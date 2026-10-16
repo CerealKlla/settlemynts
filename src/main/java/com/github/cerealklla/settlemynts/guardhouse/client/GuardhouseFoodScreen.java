@@ -27,12 +27,19 @@ public class GuardhouseFoodScreen extends AbstractContainerScreen<GuardhouseFood
 
     private static final Identifier BACKGROUND = Identifier.withDefaultNamespace("textures/gui/container/generic_54.png");
     private static final int PLAYER_INV_Y = 84;
-    private static final int PREFERRED_FOOD_ROW_Y = PLAYER_INV_Y + 76 + 10;
+    // The vanilla generic_54 player-inventory blit (see extractBackground below) is one fixed 96px
+    // image that already closes out with its own bottom border right at PANEL_BOTTOM -- there is no
+    // blank space inside it to draw into. The new row has to start well below that real edge, not
+    // just below the hotbar's own slot coordinates, or it lands on top of the hotbar artwork (real
+    // live report, 2026-10-16, screenshot showed the label and button overlapping the hotbar items).
+    private static final int PANEL_BOTTOM = (PLAYER_INV_Y - 14) + 96;
+    private static final int PREFERRED_FOOD_LABEL_Y = PANEL_BOTTOM + 8;
+    private static final int PREFERRED_FOOD_ROW_Y = PREFERRED_FOOD_LABEL_Y + 10;
 
     private EditBox preferredFoodBox;
 
     public GuardhouseFoodScreen(GuardhouseFoodMenu menu, Inventory inventory, Component title) {
-        super(menu, inventory, title, 176, PREFERRED_FOOD_ROW_Y + 24);
+        super(menu, inventory, title, 176, PREFERRED_FOOD_ROW_Y + 30);
         this.inventoryLabelY = PLAYER_INV_Y - 10;
     }
 
@@ -40,13 +47,16 @@ public class GuardhouseFoodScreen extends AbstractContainerScreen<GuardhouseFood
     protected void init() {
         super.init();
         int centerX = width / 2;
-        preferredFoodBox = addRenderableWidget(new EditBox(font, centerX - 40, PREFERRED_FOOD_ROW_Y, 80, 20, Component.literal("Preferred Food")));
+        // Panel is only 176px wide -- keep both widgets' combined span well inside it (the old
+        // layout used a 60px-wide button offset +45 from center, which stuck out past the panel's
+        // right edge entirely).
+        preferredFoodBox = addRenderableWidget(new EditBox(font, centerX - 58, PREFERRED_FOOD_ROW_Y, 60, 20, Component.literal("Preferred Food")));
         preferredFoodBox.setMaxLength(9);
         preferredFoodBox.setFilter(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
         preferredFoodBox.setValue(String.valueOf(menu.preferredFoodValue()));
         preferredFoodBox.setEditable(menu.canManage());
         Button setButton = addRenderableWidget(Button.builder(Component.literal("Set"), b -> setPreferredFood())
-                .bounds(centerX + 45, PREFERRED_FOOD_ROW_Y, 60, 20).build());
+                .bounds(centerX + 8, PREFERRED_FOOD_ROW_Y, 50, 20).build());
         setButton.active = menu.canManage();
     }
 
@@ -75,7 +85,7 @@ public class GuardhouseFoodScreen extends AbstractContainerScreen<GuardhouseFood
         // This row sits below both background blits (outside the vanilla chest-texture area), over
         // the plain blurred world background, not the light panel -- light text, not dark.
         String label = "Preferred Food:";
-        graphics.text(font, label, width / 2 - font.width(label) / 2, PREFERRED_FOOD_ROW_Y - 10, 0xFFFFFFFF);
+        graphics.text(font, label, width / 2 - font.width(label) / 2, PREFERRED_FOOD_LABEL_Y, 0xFFFFFFFF);
     }
 
     @Override
