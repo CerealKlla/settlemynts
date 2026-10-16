@@ -386,16 +386,19 @@ public final class RoadwayPaver {
      * The direction a stair at this tier should climb, or {@code null} for a tier with no real
      * vanilla stairs match -- Tier 3 (stone bricks) -&gt; {@code STONE_BRICK_STAIRS} and Tier 4
      * (bricks) -&gt; {@code BRICK_STAIRS} are exact texture matches for {@link TieredRoadwayBlock}'s
-     * own per-tier look; Tier 5 (quartz bricks) has no vanilla stairs variant at all (confirmed
-     * against the real block registry -- `quartz_bricks` never got one, unlike every other brick-
-     * family block), so it's deliberately left paving flat steps exactly as before rather than
-     * shipping a visually-mismatched substitute texture. Tiers 1-2 were never asked for and are
-     * left untouched too (Tier 1's own path/dirt look has no stair concept either).
+     * own per-tier look. Tier 5 (quartz bricks) has no vanilla stairs variant of its own at all
+     * (confirmed against the real block registry -- `quartz_bricks` never got one, unlike every
+     * other brick-family block) -- explicit user request, 2026-10-15: use {@code
+     * SMOOTH_QUARTZ_STAIRS} instead, a deliberate near-match rather than the exact same quartz
+     * texture (overriding the earlier "leave it flat" call this same gap used to document). Tiers
+     * 1-2 were never asked for and are left untouched too (Tier 1's own path/dirt look has no stair
+     * concept either).
      */
     static BlockState stairStateFor(int tier, Direction facing) {
         net.minecraft.world.level.block.Block stairBlock = switch (tier) {
             case 3 -> Blocks.STONE_BRICK_STAIRS;
             case 4 -> Blocks.BRICK_STAIRS;
+            case 5 -> Blocks.SMOOTH_QUARTZ_STAIRS;
             default -> null;
         };
         if (stairBlock == null) {
