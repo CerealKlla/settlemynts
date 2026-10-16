@@ -106,9 +106,22 @@ public final class GuardKitStandScreen extends Screen {
         String kytLine = "Kyt: " + data.boundKytName().orElse("(none)");
         graphics.text(font, kytLine, width / 2 - font.width(kytLine) / 2, 36, 0xFFAAAAAA);
 
-        String statusLine = data.guardAlive()
-                ? "Guard active"
-                : data.secondsUntilRespawn() <= 0 ? "Ready to spawn" : "Respawning in " + data.secondsUntilRespawn() + "s";
+        // Real live report, 2026-10-16: this used to say "Ready to spawn" even with no Kyt bound at
+        // all (the timer check alone can't tell "ready" apart from "nothing to spawn"), which read
+        // as a guard-spawning bug -- the real issue was just that no Kyt had been selected yet.
+        // Wording also corrected per the same report: "Alive" instead of "Guard active," and a
+        // respawn countdown in minutes instead of seconds.
+        String statusLine;
+        if (data.boundKytName().isEmpty()) {
+            statusLine = "No Kyt bound";
+        } else if (data.guardAlive()) {
+            statusLine = "Alive";
+        } else if (data.secondsUntilRespawn() <= 0) {
+            statusLine = "Ready to spawn";
+        } else {
+            long minutes = (data.secondsUntilRespawn() + 59) / 60;
+            statusLine = "Respawning (" + minutes + (minutes == 1 ? " minute)" : " minutes)");
+        }
         graphics.text(font, statusLine, width / 2 - font.width(statusLine) / 2, 46, 0xFF55FF55);
     }
 
