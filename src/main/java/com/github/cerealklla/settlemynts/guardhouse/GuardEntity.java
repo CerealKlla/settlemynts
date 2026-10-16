@@ -118,6 +118,12 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
     public GuardEntity(EntityType<? extends GuardEntity> type, Level level) {
         super(type, level);
         this.reassessWeaponGoal();
+        // Required alongside OpenDoorGoal (see registerGoals) -- confirmed against the decompiled
+        // source (NodeEvaluator#canOpenDoors defaults false even though canPassDoors defaults true),
+        // same call Villager/Vindicator/AbstractPiglin all make in their own constructors. Without
+        // this, pathfinding never even considers a closed wooden door passable, regardless of
+        // whether OpenDoorGoal exists.
+        this.getNavigation().setCanOpenDoors(true);
     }
 
     /** Called once by {@link GuardSpawnTicker} right after construction -- which plot's "Town Proper" buffer this guard patrols (see {@link #resolvePatrolArea}). */
@@ -180,6 +186,15 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         this.goalSelector.addGoal(1, new FloatGoal(this));
         // Priority 2 (melee vs. bow) is deliberately NOT added here -- see reassessWeaponGoal().
         this.goalSelector.addGoal(3, new GuardPatrolAreaGoal(this, 0.8));
+        // Real wooden doors (explicit live report, 2026-10-16: "not opening/closing doors/gates when
+        // they get stuck") -- same priority/shape vanilla's own Vindicator uses for the identical
+        // goal. `setCanOpenDoors(true)` on the navigation is the other required half (see the
+        // constructor) -- without it, pathfinding itself never plans through a closed door at all,
+        // regardless of this goal existing.
+        this.goalSelector.addGoal(3, new net.minecraft.world.entity.ai.goal.OpenDoorGoal(this, true));
+        // Fence gates have no vanilla equivalent at all -- see GuardGateOpenGoal's own doc for why
+        // this is a separate, custom goal rather than reusing OpenDoorGoal.
+        this.goalSelector.addGoal(3, new GuardGateOpenGoal(this));
         this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
 
