@@ -218,7 +218,7 @@ public final class RoadwayPaver {
 
     /** Widened 2026-10-09 to pave at the settlement's current Town Hall Tier look (see {@link RoadwayTierResolver}) instead of a single fixed appearance. */
     public static void paveEdge(ServerLevel level, GhostTownHallCoreEntity core, RoadwayStakeEntity a, RoadwayStakeEntity b) {
-        int tier = RoadwayTierResolver.currentTier(level, core);
+        int tier = RoadwayTierResolver.currentTier(core);
         int x1 = Mth.floor(a.getX());
         int z1 = Mth.floor(a.getZ());
         int x2 = Mth.floor(b.getX());

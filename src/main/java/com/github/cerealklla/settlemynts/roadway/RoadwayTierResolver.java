@@ -1,36 +1,41 @@
 package com.github.cerealklla.settlemynts.roadway;
 
-import com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
-
-import net.minecraft.server.level.ServerLevel;
-import net.neoforged.fml.ModList;
 
 /**
  * Resolves "what Tier should this settlement's roads currently look like" (added 2026-10-09,
  * explicit request: "a visual progression which is directly tied to a settlement's town hall
  * tier... no town hall/T1 Town Hall should use a dirt road... when the Town Hall is upgraded all
- * the roads will upgrade with it"). Mirrors every other "read a plot's Construction Box Tier"
- * call site in this mod (e.g. Guardhouse garrison caps) -- the bound Blueprint's own Tier, via
- * {@link BlueprintsConstructionBridge#resolveTier}, not whether construction has actually
- * *completed* (same reasoning/precedent as those other call sites: once a higher Tier is bound,
- * the plot is treated as that Tier already). Defaults to Tier 1 (dirt) whenever there's no Town
- * Hall plot yet, no Construction Box, or no Blueprint bound -- same "no Town Hall" case the user
- * explicitly called out.
+ * the roads will upgrade with it"). Reads the Town Hall plot's own unlocked Tier cap ({@link
+ * PlotRecord#tier}) directly -- the same value "Upgrade Plot" raises and {@link RoadwayRetier}
+ * already uses to instantly repaint every existing road the moment that upgrade succeeds (see
+ * {@code SettlemyntsMod}'s own "Upgrade Plot" handler, which calls both off the exact same {@code
+ * newTier}). Defaults to Tier 1 (dirt) whenever there's no Town Hall plot yet, same "no Town Hall"
+ * case the user explicitly called out.
+ *
+ * <p><b>Fixed 2026-10-16</b> -- real live report: a Tier 5 settlement's roads still paved at Tier
+ * 3 when manually rebuilt (new stakes placed/reconnected). Root cause: this method used to re-derive
+ * the tier from the Town Hall's Construction Box's own *bound Blueprint* Tier instead ({@code
+ * PlotRecord#tier} and a Construction Box's bound Blueprint Tier are two genuinely independent
+ * values by design -- see {@code PlotRecord#tier}'s own class doc, "you can upgrade the tier to
+ * tier 2 and still have a tier 1 building"). That made this method disagree with {@link
+ * RoadwayRetier}, which already (and correctly) uses the plot's own Tier directly -- existing roads
+ * got auto-repainted to the new Tier the instant "Upgrade Plot" succeeded, but any road paved fresh
+ * afterward fell back to whatever (lower) Blueprint Tier happened to still be physically built/bound
+ * on the box. Switched to read {@code PlotRecord#tier} directly, matching {@link RoadwayRetier} so
+ * the two paths can no longer disagree.
  */
 public final class RoadwayTierResolver {
 
     private RoadwayTierResolver() {
     }
 
-    public static int currentTier(ServerLevel level, GhostTownHallCoreEntity core) {
-        PlotRecord townHall = core.getPlots().stream()
+    public static int currentTier(GhostTownHallCoreEntity core) {
+        return core.getPlots().stream()
                 .filter(p -> GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID.equals(p.zoneTypeId()))
-                .findFirst().orElse(null);
-        if (townHall == null || !ModList.get().isLoaded("blueprynts") || townHall.constructionBoxId().isEmpty()) {
-            return 1;
-        }
-        return BlueprintsConstructionBridge.resolveTier(level, townHall.constructionBoxId().get()).orElse(1);
+                .findFirst()
+                .map(PlotRecord::tier)
+                .orElse(1);
     }
 }
