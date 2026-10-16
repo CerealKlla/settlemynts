@@ -110,7 +110,23 @@ public final class HighwayPaver {
 
     private static boolean isWalkableSurface(ServerLevel level, int x, int y, int z) {
         BlockPos pos = new BlockPos(x, y, z);
-        return !level.getBlockState(pos).isAir() && level.getBlockState(pos.above()).isAir();
+        return isSolid(level, pos) && !isSolid(level, pos.above());
+    }
+
+    /**
+     * True if {@code pos} holds a block with real collision -- explicit user request, 2026-10-16:
+     * "they should completely ignore any non-solid blocks." Leaf litter (and similarly tall grass,
+     * flowers, saplings, etc.) is a real, non-air {@link BlockState} but has no collision at all
+     * ({@code noCollision()} in its own vanilla registration) -- a plain {@code isAir()} check was
+     * wrongly treating it as solid ground in {@link #isWalkableSurface} (producing a non-flat road
+     * surface wherever it happened to carpet the real ground underneath) and as a real obstruction
+     * needing clearing in {@code paveColumn}'s cut/clearance loops (needless extra work for every
+     * decorative block in the clearance band, none of which actually blocks anything). See the
+     * identical fix in {@code RoadwayPaver}'s own doc.
+     */
+    private static boolean isSolid(ServerLevel level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        return !state.isAir() && !state.getCollisionShape(level, pos).isEmpty();
     }
 
     private static int[] medianSmooth(int[] values) {
@@ -336,7 +352,7 @@ public final class HighwayPaver {
             int cutTop = Math.min(naturalY, targetY + CLEARANCE_BLOCKS);
             for (int y = targetY + 1; y <= cutTop; y++) {
                 BlockPos pos = new BlockPos(x, y, z);
-                if (!level.getBlockState(pos).isAir()) {
+                if (isSolid(level, pos)) {
                     captureOriginal(level, pos, snapshot, captured);
                     level.removeBlock(pos, false);
                 }
@@ -346,7 +362,7 @@ public final class HighwayPaver {
         int clearanceStart = Math.max(targetY + 1, naturalY + 1);
         for (int y = clearanceStart; y <= targetY + CLEARANCE_BLOCKS; y++) {
             BlockPos pos = new BlockPos(x, y, z);
-            if (!level.getBlockState(pos).isAir()) {
+            if (isSolid(level, pos)) {
                 captureOriginal(level, pos, snapshot, captured);
                 level.removeBlock(pos, false);
             }
