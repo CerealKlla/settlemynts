@@ -85,7 +85,9 @@ public class GuardKitStandItem extends Item {
         data.boundKytName().ifPresent(stand::setBoundKytName);
         data.assignedGuardId().ifPresent(stand::setAssignedGuardId);
         stand.setRespawnReadyAtGameTime(data.respawnReadyAtGameTime());
+        stand.setSparesOnHand(data.sparesOnHand());
         serverLevel.addFreshEntity(stand);
+        GuardKitStandPreferredInventory.recalculate(serverLevel, data.settlementCoreId(), data.plotId());
 
         held.shrink(1);
         return InteractionResult.SUCCESS_SERVER;

@@ -1,5 +1,7 @@
 package com.github.cerealklla.settlemynts.guardhouse;
 
+import java.util.UUID;
+
 import com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge;
 import com.github.cerealklla.settlemynts.registration.ModItems;
 
@@ -28,21 +30,31 @@ public final class GuardKitStandInteraction {
                 ? 0
                 : Math.max(0, (stand.respawnReadyAtGameTime() - serverLevel.getGameTime()) / 20);
         PacketDistributor.sendToPlayer(player, new OpenGuardKitStandMenuPayload(
-                stand.getUUID(), stand.boundKytName(), guardAlive, secondsUntilRespawn, KytGuardhouseBridge.isLoaded()));
+                stand.getUUID(), stand.boundKytName(), guardAlive, secondsUntilRespawn, KytGuardhouseBridge.isLoaded(), stand.sparesOnHand()));
     }
 
     /**
      * "Pick Up" -- discards the entity, inserts (or drops as an overflow fallback) a held item
      * carrying a {@link GuardKitStandData} snapshot of everything needed to resume this exact stand
      * later. Does **not** touch {@code zone.PlotRecord#guardKitStandsIssued} -- picking up and later
-     * re-placing is not "destroying" a stand, see that field's own doc.
+     * re-placing is not "destroying" a stand, see that field's own doc. Removes the stand from {@link
+     * GuardKitStandIndex} and recomputes the plot's derived Planned Inventory immediately -- {@code
+     * Entity#discard()} only flags the entity for removal, {@link GuardKitStandEntity#onRemovedFromLevel}
+     * doesn't fire synchronously with it, so both are done explicitly here rather than relied on.
      */
     public static void pickUp(ServerPlayer player, GuardKitStandEntity stand) {
         GuardKitStandData data = new GuardKitStandData(stand.getUUID(), stand.settlementCoreId(), stand.plotId(),
-                stand.boundKytName(), stand.assignedGuardId(), stand.respawnReadyAtGameTime());
+                stand.boundKytName(), stand.assignedGuardId(), stand.respawnReadyAtGameTime(), stand.sparesOnHand());
         ItemStack item = new ItemStack(ModItems.GUARD_KIT_STAND.get());
         item.set(ModItems.GUARD_KIT_STAND_DATA.get(), data);
+        UUID settlementCoreId = stand.settlementCoreId();
+        UUID plotId = stand.plotId();
+        ServerLevel level = stand.level() instanceof ServerLevel serverLevel ? serverLevel : null;
         stand.discard();
+        if (level != null) {
+            GuardKitStandIndex.get(level.getServer()).remove(stand.getUUID());
+            GuardKitStandPreferredInventory.recalculate(level, settlementCoreId, plotId);
+        }
         if (!player.getInventory().add(item)) {
             player.drop(item, false);
         }

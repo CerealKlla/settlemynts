@@ -19,5 +19,6 @@ public final class ModMenus {
 
     public static final DeferredHolder<MenuType<?>, MenuType<GuardhouseFoodMenu>> GUARDHOUSE_FOOD = MENU_TYPES.register(
             "guardhouse_food",
-            () -> IMenuTypeExtension.create((windowId, inventory, extraData) -> new GuardhouseFoodMenu(null, windowId, inventory)));
+            () -> IMenuTypeExtension.create((windowId, inventory, extraData) ->
+                    new GuardhouseFoodMenu(null, windowId, inventory, extraData.readVarInt(), extraData.readBoolean(), extraData.readBlockPos())));
 }

@@ -71,7 +71,8 @@ public final class SelectKytScreen extends Screen {
 
         Optional<String> boundKytName = name.isBlank() ? Optional.empty() : Optional.of(name);
         OpenGuardKitStandMenuPayload updatedData = new OpenGuardKitStandMenuPayload(
-                data.standId(), boundKytName, parent.data().guardAlive(), parent.data().secondsUntilRespawn(), parent.data().kytAvailable());
+                data.standId(), boundKytName, parent.data().guardAlive(), parent.data().secondsUntilRespawn(),
+                parent.data().kytAvailable(), parent.data().sparesOnHand());
         Minecraft.getInstance().setScreen(new GuardKitStandScreen(updatedData));
     }
 

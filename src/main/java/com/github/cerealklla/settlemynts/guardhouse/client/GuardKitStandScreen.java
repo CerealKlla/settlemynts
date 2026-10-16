@@ -5,6 +5,7 @@ import com.github.cerealklla.settlemynts.guardhouse.PickUpGuardKitStandPayload;
 import com.github.cerealklla.settlemynts.guardhouse.RequestCreateKytForStandPayload;
 import com.github.cerealklla.settlemynts.guardhouse.RequestEditKytForStandPayload;
 import com.github.cerealklla.settlemynts.guardhouse.RequestGuardKitStandKytNamesPayload;
+import com.github.cerealklla.settlemynts.guardhouse.SetStandSparesOnHandPayload;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -29,6 +30,8 @@ public final class GuardKitStandScreen extends Screen {
     private final OpenGuardKitStandMenuPayload data;
     private boolean creating;
     private EditBox nameBox;
+    private EditBox sparesBox;
+    private int sparesRowY;
 
     public GuardKitStandScreen(OpenGuardKitStandMenuPayload data) {
         super(Component.literal("Guard Kit Stand"));
@@ -72,6 +75,19 @@ public final class GuardKitStandScreen extends Screen {
             y += 30;
         }
 
+        // "Keep Spares On Hand" (explicit user spec, 2026-10-16) -- how many spare sets of this
+        // stand's own gear the plot should keep stocked in its boxes; see
+        // guardhouse.GuardKitStandPreferredInventory. Digit-only filter mirrors the existing
+        // numeric-entry pattern on plotsign.client.PlannedInventoryScreen.
+        sparesRowY = y;
+        sparesBox = addRenderableWidget(new EditBox(font, centerX - 40, y, 80, 20, Component.literal("Keep Spares On Hand")));
+        sparesBox.setMaxLength(6);
+        sparesBox.setFilter(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
+        sparesBox.setValue(String.valueOf(data.sparesOnHand()));
+        addRenderableWidget(Button.builder(Component.literal("Set Spares"), b -> setSparesOnHand())
+                .bounds(centerX + 45, y, 90, 20).build());
+        y += 30;
+
         addRenderableWidget(Button.builder(Component.literal("Pick Up"), b -> pickUp())
                 .bounds(centerX - 100, y, 200, 20).build());
         y += 40;
@@ -91,6 +107,16 @@ public final class GuardKitStandScreen extends Screen {
     private void pickUp() {
         send(new PickUpGuardKitStandPayload(data.standId()));
         onClose();
+    }
+
+    private void setSparesOnHand() {
+        int value;
+        try {
+            value = Integer.parseInt(sparesBox.getValue().trim());
+        } catch (NumberFormatException e) {
+            value = 0;
+        }
+        send(new SetStandSparesOnHandPayload(data.standId(), Math.max(0, value)));
     }
 
     private void send(CustomPacketPayload payload) {
@@ -123,6 +149,11 @@ public final class GuardKitStandScreen extends Screen {
             statusLine = "Respawning (" + minutes + (minutes == 1 ? " minute)" : " minutes)");
         }
         graphics.text(font, statusLine, width / 2 - font.width(statusLine) / 2, 46, 0xFF55FF55);
+
+        if (!creating) {
+            String sparesLabel = "Keep Spares On Hand:";
+            graphics.text(font, sparesLabel, width / 2 - font.width(sparesLabel) / 2, sparesRowY - 10, 0xFFAAAAAA);
+        }
     }
 
     @Override

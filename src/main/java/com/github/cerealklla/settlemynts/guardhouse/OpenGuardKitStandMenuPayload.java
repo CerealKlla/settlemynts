@@ -21,10 +21,11 @@ import net.minecraft.resources.Identifier;
  * secondsUntilRespawn} drive the plain-text respawn-timer readout -- {@code secondsUntilRespawn} is
  * only meaningful when {@code !guardAlive}. {@code kytAvailable} (mirrors {@code
  * OpenConfigureGarrisonPayload}'s own field) gates whether Create/Edit/Select Kyt even appear -- a
- * Kyt-less server never shows them.
+ * Kyt-less server never shows them. {@code sparesOnHand} (added 2026-10-16, "Keep Spares On Hand")
+ * pre-fills the Kit Menu's own numeric field -- see {@code GuardKitStandPreferredInventory}.
  */
 public record OpenGuardKitStandMenuPayload(UUID standId, Optional<String> boundKytName, boolean guardAlive,
-                                            long secondsUntilRespawn, boolean kytAvailable) implements CustomPacketPayload {
+                                            long secondsUntilRespawn, boolean kytAvailable, int sparesOnHand) implements CustomPacketPayload {
 
     public static final Type<OpenGuardKitStandMenuPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_guard_kit_stand_menu"));
@@ -35,6 +36,7 @@ public record OpenGuardKitStandMenuPayload(UUID standId, Optional<String> boundK
             ByteBufCodecs.BOOL, OpenGuardKitStandMenuPayload::guardAlive,
             ByteBufCodecs.VAR_LONG, OpenGuardKitStandMenuPayload::secondsUntilRespawn,
             ByteBufCodecs.BOOL, OpenGuardKitStandMenuPayload::kytAvailable,
+            ByteBufCodecs.VAR_INT, OpenGuardKitStandMenuPayload::sparesOnHand,
             OpenGuardKitStandMenuPayload::new);
 
     @Override

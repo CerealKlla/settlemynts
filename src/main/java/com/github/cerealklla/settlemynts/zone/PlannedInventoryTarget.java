@@ -18,12 +18,27 @@ import net.minecraft.resources.Identifier;
  * <p>Persisted on {@link PlotRecord#plannedInventory()}. Mirrors {@link SuppressedShopResource}'s
  * shape exactly (same {@code resourceKey}/{@code isTag} resource identity convention used throughout
  * this package).
+ *
+ * <p>{@code derivedFromGuardKitStand} (added 2026-10-16, explicit user spec: "Each stand has its own
+ * list # of preferred kits to keep on hand... these will reside within boxes inside the plot like
+ * all other plots") marks an entry as owned by {@code guardhouse.GuardKitStandPreferredInventory}'s
+ * own recompute pass rather than a player's manual edit on {@code client.PlannedInventoryScreen}.
+ * That screen never shows or lets a player edit a {@code true} entry; its own "Save Changes" handler
+ * (`SettlemyntsMod#setPlannedInventory`) preserves every existing {@code true} entry verbatim instead
+ * of replacing the whole list, since a manual save only ever submits the entries it showed in the
+ * first place. Defaults to {@code false} (including every pre-existing saved plot).
  */
-public record PlannedInventoryTarget(Identifier resourceKey, boolean isTag, int targetCount) {
+public record PlannedInventoryTarget(Identifier resourceKey, boolean isTag, int targetCount, boolean derivedFromGuardKitStand) {
 
     public static final Codec<PlannedInventoryTarget> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(PlannedInventoryTarget::resourceKey),
             Codec.BOOL.fieldOf("is_tag").forGetter(PlannedInventoryTarget::isTag),
-            Codec.INT.fieldOf("target_count").forGetter(PlannedInventoryTarget::targetCount)
+            Codec.INT.fieldOf("target_count").forGetter(PlannedInventoryTarget::targetCount),
+            Codec.BOOL.optionalFieldOf("derived_from_guard_kit_stand", false).forGetter(PlannedInventoryTarget::derivedFromGuardKitStand)
     ).apply(i, PlannedInventoryTarget::new));
+
+    /** Convenience for the common manual-entry case (every existing call site before this field existed). */
+    public PlannedInventoryTarget(Identifier resourceKey, boolean isTag, int targetCount) {
+        this(resourceKey, isTag, targetCount, false);
+    }
 }

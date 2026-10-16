@@ -2,13 +2,18 @@ package com.github.cerealklla.settlemynts.guardhouse;
 
 import java.util.UUID;
 
+import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModBlockEntities;
 import com.github.cerealklla.settlemynts.registration.ModMenus;
+import com.github.cerealklla.settlemynts.zone.PlotPermissions;
+import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.MenuProvider;
@@ -22,6 +27,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+import net.neoforged.neoforge.common.extensions.IMenuProviderExtension;
 
 /**
  * A finalized Guardhouse plot's own structure (design doc Section 14a) -- its live identity
@@ -37,11 +43,21 @@ import net.minecraft.world.level.storage.ValueOutput;
  * timer -- see that class's own doc). This block now exists purely as the plot's food store:
  * {@link #totalFoodValue()} funds a dead guard's fast-respawn window (see {@code
  * GuardRespawnFunding}), consumed directly from {@link #foodContainer} at the moment a guard dies.
+ *
+ * <p>{@code preferredFoodValue} (added 2026-10-16, explicit user spec: "the Owner or Mayor/Town
+ * Planners should be able to set the 'Preferred Food' count... used at midnight to buy enough food
+ * to meet that threshold if enough room exists in the Food Store box") is set via a numeric field on
+ * {@code client.GuardhouseFoodScreen} -- editable only for a player who can manage this plot, which
+ * this block resolves itself in {@link #createMenu} and ships down via {@link IMenuProviderExtension}
+ * (same pattern Kyt's own {@code loadout.KytEditorMenuProvider} uses), since a plain vanilla
+ * menu-open packet has no room for extra data otherwise. See {@link GuardhouseFoodAutoBuy} for the
+ * midnight purchase logic this threshold drives.
  */
-public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider {
+public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider, IMenuProviderExtension {
 
     private UUID settlementCoreId;
     private UUID plotId;
+    private int preferredFoodValue;
 
     /** Only accepts items carrying {@link DataComponents#FOOD} -- see {@link #canPlaceFood(ItemStack)}. */
     private final Container foodContainer = new SimpleContainer(9) {
@@ -78,6 +94,16 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider {
         return foodContainer;
     }
 
+    public int preferredFoodValue() {
+        return preferredFoodValue;
+    }
+
+    /** "Preferred Food" field + Save on {@code client.GuardhouseFoodScreen} -- see {@code SettlemyntsMod#setPreferredFood}, the only caller (already re-checks {@code zone.PlotPermissions#canManage} itself). */
+    public void setPreferredFoodValue(int preferredFoodValue) {
+        this.preferredFoodValue = Math.max(0, preferredFoodValue);
+        setChanged();
+    }
+
     /**
      * Design doc: "a high volume of low-value food... or a small amount of high-value food... can
      * both satisfy the same requirement" -- "value," not item count. Rather than hand-author a value
@@ -107,7 +133,26 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider {
 
     @Override
     public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
-        return new GuardhouseFoodMenu(ModMenus.GUARDHOUSE_FOOD.get(), containerId, inventory, foodContainer);
+        boolean canManage = canManage(player);
+        return new GuardhouseFoodMenu(ModMenus.GUARDHOUSE_FOOD.get(), containerId, inventory, foodContainer, preferredFoodValue, canManage, getBlockPos());
+    }
+
+    @Override
+    public void writeClientSideData(AbstractContainerMenu menu, RegistryFriendlyByteBuf buf) {
+        GuardhouseFoodMenu foodMenu = (GuardhouseFoodMenu) menu;
+        buf.writeVarInt(foodMenu.preferredFoodValue());
+        buf.writeBoolean(foodMenu.canManage());
+        buf.writeBlockPos(foodMenu.guardhousePos());
+    }
+
+    /** Shared by {@link #createMenu} and {@code SettlemyntsMod#setPreferredFood}'s own re-validation. */
+    public boolean canManage(Player player) {
+        if (settlementCoreId == null || !(level instanceof ServerLevel serverLevel)
+                || !(serverLevel.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
+            return false;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
+        return plot != null && PlotPermissions.canManage(plot, core, player.getUUID());
     }
 
     @Override
@@ -116,6 +161,7 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider {
         settlementCoreId = input.read("SettlementCoreId", UUIDUtil.CODEC).orElse(null);
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
         ContainerHelper.loadAllItems(input.childOrEmpty("Food"), ((SimpleContainer) foodContainer).getItems());
+        preferredFoodValue = input.getIntOr("PreferredFoodValue", 0);
     }
 
     @Override
@@ -124,5 +170,6 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider {
         output.storeNullable("SettlementCoreId", UUIDUtil.CODEC, settlementCoreId);
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
         ContainerHelper.saveAllItems(output.child("Food"), ((SimpleContainer) foodContainer).getItems());
+        output.putInt("PreferredFoodValue", preferredFoodValue);
     }
 }

@@ -65,6 +65,10 @@ public final class ShopMidnightRestockTicker {
                 // Explicit third step (2026-10-10 redesign): turn whatever just changed hands above
                 // into finished goods, for this same settlement only -- see that method's own doc.
                 PlannedInventoryClearing.craftFromOwnStockForGroup(level, core.getPlots());
+                // "Preferred Food" (explicit user spec, 2026-10-16) -- buys any Guardhouse-typed
+                // plot's food store up toward its own threshold, same day-boundary as everything
+                // above. See GuardhouseFoodAutoBuy's own doc for the full mechanism.
+                com.github.cerealklla.settlemynts.guardhouse.GuardhouseFoodAutoBuy.buyForSettlement(level, core);
                 // Fourth step, same day (explicit follow-up: "that way npc villages could
                 // automatically list food separated by value") -- auto-list whatever crafted-food
                 // quality variants just got produced above, for every NPC-owned (no player owner)

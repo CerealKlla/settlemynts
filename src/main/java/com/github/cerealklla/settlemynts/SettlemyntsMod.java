@@ -657,6 +657,15 @@ public class SettlemyntsMod {
         registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.SetStandKytPayload.TYPE,
                 com.github.cerealklla.settlemynts.guardhouse.SetStandKytPayload.STREAM_CODEC,
                 (payload, context) -> setStandKyt(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.SetStandSparesOnHandPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.SetStandSparesOnHandPayload.STREAM_CODEC,
+                (payload, context) -> setStandSparesOnHand(payload, context));
+
+        // "Preferred Food" on the Guardhouse's own Food Stores screen.
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.SetPreferredFoodPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.SetPreferredFoodPayload.STREAM_CODEC,
+                (payload, context) -> setPreferredFood(payload, context));
     }
 
     /**
@@ -702,7 +711,7 @@ public class SettlemyntsMod {
                     com.github.cerealklla.settlemynts.registration.ModItems.GUARD_KIT_STAND.get());
             item.set(com.github.cerealklla.settlemynts.registration.ModItems.GUARD_KIT_STAND_DATA.get(),
                     new com.github.cerealklla.settlemynts.guardhouse.GuardKitStandData(
-                            UUID.randomUUID(), sign.settlementCoreId(), plot.plotId(), Optional.empty(), Optional.empty(), 0L));
+                            UUID.randomUUID(), sign.settlementCoreId(), plot.plotId(), Optional.empty(), Optional.empty(), 0L, 0));
             if (!player.getInventory().add(item)) {
                 player.drop(item, false);
             }
@@ -728,6 +737,8 @@ public class SettlemyntsMod {
         }
         resolveManageableStand(serverLevel, player, payload.standId()).ifPresent(stand -> {
             stand.setBoundKytName(payload.name());
+            com.github.cerealklla.settlemynts.guardhouse.GuardKitStandPreferredInventory.recalculate(
+                    serverLevel, stand.settlementCoreId(), stand.plotId());
             com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.openCreateScreen(player, payload.name());
         });
     }
@@ -764,7 +775,35 @@ public class SettlemyntsMod {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        resolveManageableStand(serverLevel, player, payload.standId()).ifPresent(stand -> stand.setBoundKytName(payload.kytName()));
+        resolveManageableStand(serverLevel, player, payload.standId()).ifPresent(stand -> {
+            stand.setBoundKytName(payload.kytName());
+            com.github.cerealklla.settlemynts.guardhouse.GuardKitStandPreferredInventory.recalculate(
+                    serverLevel, stand.settlementCoreId(), stand.plotId());
+        });
+    }
+
+    /** "Keep Spares On Hand" + Save on {@code client.GuardKitStandScreen} -- re-checks permission the same way, never trusts the client's own value. */
+    private static void setStandSparesOnHand(com.github.cerealklla.settlemynts.guardhouse.SetStandSparesOnHandPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        resolveManageableStand(serverLevel, player, payload.standId()).ifPresent(stand -> {
+            stand.setSparesOnHand(payload.sparesOnHand());
+            com.github.cerealklla.settlemynts.guardhouse.GuardKitStandPreferredInventory.recalculate(
+                    serverLevel, stand.settlementCoreId(), stand.plotId());
+        });
+    }
+
+    /** "Preferred Food" + Save on {@code client.GuardhouseFoodScreen} -- re-checks {@code guardhouse.GuardhouseBlockEntity#canManage} directly, never trusts the client's earlier flag. */
+    private static void setPreferredFood(com.github.cerealklla.settlemynts.guardhouse.SetPreferredFoodPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.guardhousePos()) instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse)
+                || !guardhouse.canManage(player)) {
+            return;
+        }
+        guardhouse.setPreferredFoodValue(payload.preferredFoodValue());
     }
 
     /** Shared permission + live-entity re-check for every Kit Menu action -- resolves the stand by UUID (via {@link com.github.cerealklla.settlemynts.guardhouse.GuardKitStandIndex}) and re-checks {@code zone.PlotPermissions#canManage} against its own plot, never trusting the client's earlier flag. */
@@ -1631,6 +1670,12 @@ public class SettlemyntsMod {
         java.util.Map<net.minecraft.resources.Identifier, com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget> targetsByItem = new java.util.LinkedHashMap<>();
         java.util.List<com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget> tagTargets = new java.util.ArrayList<>();
         for (com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget target : plot.plannedInventory()) {
+            // Guard Kit Stand overhaul (2026-10-16) -- a derived entry is fully automatic (recomputed
+            // from the plot's own stands, see GuardKitStandPreferredInventory), never shown/editable
+            // on this screen.
+            if (target.derivedFromGuardKitStand()) {
+                continue;
+            }
             if (target.isTag()) {
                 tagTargets.add(target);
             } else {
@@ -1683,6 +1728,14 @@ public class SettlemyntsMod {
             if (update.managed()) {
                 targets.add(new com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget(
                         update.resourceKey(), update.isTag(), Math.max(0, update.targetCount())));
+            }
+        }
+        // Guard Kit Stand overhaul (2026-10-16) -- this screen never shows a
+        // derivedFromGuardKitStand entry, so a manual save only ever submits the non-derived
+        // portion; preserve every existing derived entry verbatim rather than silently dropping it.
+        for (com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget existing : resolved.get().plot().plannedInventory()) {
+            if (existing.derivedFromGuardKitStand()) {
+                targets.add(existing);
             }
         }
         resolved.get().core().updatePlot(resolved.get().plot().withPlannedInventory(targets));

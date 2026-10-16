@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.guardhouse;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Inventory;
@@ -25,17 +26,36 @@ public class GuardhouseFoodMenu extends AbstractContainerMenu {
     private static final int PLAYER_INV_Y = 84;
 
     private final Container foodContainer;
+    private final int preferredFoodValue;
+    private final boolean canManage;
+    private final BlockPos guardhousePos;
 
-    /** Server-side: a real Guardhouse backs this menu. */
-    public GuardhouseFoodMenu(MenuType<?> type, int containerId, Inventory inventory, Container foodContainer) {
+    /** Server-side: a real Guardhouse backs this menu. {@code preferredFoodValue}/{@code canManage}/{@code guardhousePos} are resolved by {@code GuardhouseBlockEntity#createMenu} and shipped down to the client via {@code IMenuProviderExtension#writeClientSideData}. */
+    public GuardhouseFoodMenu(MenuType<?> type, int containerId, Inventory inventory, Container foodContainer,
+                              int preferredFoodValue, boolean canManage, BlockPos guardhousePos) {
         super(type, containerId);
         this.foodContainer = foodContainer;
+        this.preferredFoodValue = preferredFoodValue;
+        this.canManage = canManage;
+        this.guardhousePos = guardhousePos;
         layoutSlots(inventory);
     }
 
-    /** Client-side reconstruction (see {@code registration.ModMenus}) -- no real Guardhouse to read from. */
-    public GuardhouseFoodMenu(MenuType<?> type, int containerId, Inventory inventory) {
-        this(type, containerId, inventory, new SimpleContainer(FOOD_SLOT_COUNT));
+    /** Client-side reconstruction (see {@code registration.ModMenus}) -- no real Guardhouse to read from; the extra fields arrive via the extra-data channel instead. */
+    public GuardhouseFoodMenu(MenuType<?> type, int containerId, Inventory inventory, int preferredFoodValue, boolean canManage, BlockPos guardhousePos) {
+        this(type, containerId, inventory, new SimpleContainer(FOOD_SLOT_COUNT), preferredFoodValue, canManage, guardhousePos);
+    }
+
+    public int preferredFoodValue() {
+        return preferredFoodValue;
+    }
+
+    public boolean canManage() {
+        return canManage;
+    }
+
+    public BlockPos guardhousePos() {
+        return guardhousePos;
     }
 
     private void layoutSlots(Inventory inventory) {

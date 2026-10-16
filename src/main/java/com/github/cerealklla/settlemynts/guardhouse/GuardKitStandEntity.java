@@ -48,6 +48,7 @@ public class GuardKitStandEntity extends ArmorStand {
     private Optional<String> boundKytName = Optional.empty();
     private Optional<UUID> assignedGuardId = Optional.empty();
     private long respawnReadyAtGameTime;
+    private int sparesOnHand;
 
     public GuardKitStandEntity(EntityType<? extends GuardKitStandEntity> type, Level level) {
         super(type, level);
@@ -100,6 +101,15 @@ public class GuardKitStandEntity extends ArmorStand {
         respawnReadyAtGameTime = gameTime;
     }
 
+    /** "Keep Spares On Hand" (explicit user spec, 2026-10-16) -- how many spare sets of this stand's own bound Kyt's gear the plot should keep stocked in its boxes; see {@link GuardKitStandPreferredInventory}. */
+    public int sparesOnHand() {
+        return sparesOnHand;
+    }
+
+    public void setSparesOnHand(int sparesOnHand) {
+        this.sparesOnHand = Math.max(0, sparesOnHand);
+    }
+
     /** 4 armor slots + offhand, matching {@code LoadoutEditorScreen}'s own mannequin preview -- no mainhand/weapon shown on the stand itself. */
     public void refreshVisualEquipment() {
         LoadoutRecord record = boundKytName.flatMap(KytGuardhouseBridge::getKyt).orElse(null);
@@ -135,6 +145,7 @@ public class GuardKitStandEntity extends ArmorStand {
         output.storeNullable("BoundKytName", com.mojang.serialization.Codec.STRING, boundKytName.orElse(null));
         output.storeNullable("AssignedGuardId", UUIDUtil.CODEC, assignedGuardId.orElse(null));
         output.putLong("RespawnReadyAtGameTime", respawnReadyAtGameTime);
+        output.putInt("SparesOnHand", sparesOnHand);
     }
 
     @Override
@@ -145,6 +156,7 @@ public class GuardKitStandEntity extends ArmorStand {
         boundKytName = input.read("BoundKytName", com.mojang.serialization.Codec.STRING);
         assignedGuardId = input.read("AssignedGuardId", UUIDUtil.CODEC);
         respawnReadyAtGameTime = input.getLongOr("RespawnReadyAtGameTime", 0L);
+        sparesOnHand = input.getIntOr("SparesOnHand", 0);
     }
 
     @Override

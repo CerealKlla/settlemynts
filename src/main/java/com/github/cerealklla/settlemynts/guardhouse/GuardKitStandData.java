@@ -18,10 +18,11 @@ import net.minecraft.network.codec.StreamCodec;
  * entity, safe since the original was fully discarded on pickup). {@code settlementCoreId}/{@code
  * plotId} are also what the leaving-the-plot auto-removal check ({@code
  * SettlemyntsMod#removeStaleGuardKitStandsOutsidePlot}) resolves the owning plot from, directly off
- * the held item -- no reverse lookup needed.
+ * the held item -- no reverse lookup needed. {@code sparesOnHand} (added 2026-10-16, "Keep Spares On
+ * Hand") must also survive a pickup/replace cycle -- see {@link GuardKitStandPreferredInventory}.
  */
 public record GuardKitStandData(UUID standId, UUID settlementCoreId, UUID plotId, Optional<String> boundKytName,
-                                 Optional<UUID> assignedGuardId, long respawnReadyAtGameTime) {
+                                 Optional<UUID> assignedGuardId, long respawnReadyAtGameTime, int sparesOnHand) {
 
     public static final Codec<GuardKitStandData> CODEC = RecordCodecBuilder.create(i -> i.group(
             UUIDUtil.CODEC.fieldOf("stand_id").forGetter(GuardKitStandData::standId),
@@ -29,7 +30,8 @@ public record GuardKitStandData(UUID standId, UUID settlementCoreId, UUID plotId
             UUIDUtil.CODEC.fieldOf("plot_id").forGetter(GuardKitStandData::plotId),
             Codec.STRING.optionalFieldOf("bound_kyt_name").forGetter(GuardKitStandData::boundKytName),
             UUIDUtil.CODEC.optionalFieldOf("assigned_guard_id").forGetter(GuardKitStandData::assignedGuardId),
-            Codec.LONG.fieldOf("respawn_ready_at_game_time").forGetter(GuardKitStandData::respawnReadyAtGameTime)
+            Codec.LONG.fieldOf("respawn_ready_at_game_time").forGetter(GuardKitStandData::respawnReadyAtGameTime),
+            Codec.INT.optionalFieldOf("spares_on_hand", 0).forGetter(GuardKitStandData::sparesOnHand)
     ).apply(i, GuardKitStandData::new));
 
     public static final StreamCodec<RegistryFriendlyByteBuf, GuardKitStandData> STREAM_CODEC = StreamCodec.composite(
@@ -39,5 +41,6 @@ public record GuardKitStandData(UUID standId, UUID settlementCoreId, UUID plotId
             ByteBufCodecs.optional(ByteBufCodecs.STRING_UTF8), GuardKitStandData::boundKytName,
             ByteBufCodecs.optional(UUIDUtil.STREAM_CODEC), GuardKitStandData::assignedGuardId,
             ByteBufCodecs.VAR_LONG, GuardKitStandData::respawnReadyAtGameTime,
+            ByteBufCodecs.VAR_INT, GuardKitStandData::sparesOnHand,
             GuardKitStandData::new);
 }
