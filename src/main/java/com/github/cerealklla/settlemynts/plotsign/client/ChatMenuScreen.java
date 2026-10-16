@@ -16,12 +16,23 @@ import net.minecraft.network.chat.Component;
  *   deficit (see {@code zone.ShopWishlist}'s own doc); opens {@link WishlistScreen} with the data
  *   already fetched for this screen, no extra round trip.</li>
  *   <li>"I've got a job that needs doing" -- present whenever Myssions has at least one active
- *   quest or a board offer for this NPC's pool (see {@code bridge.MyssionsQuestBridge}'s own doc);
- *   opens {@link QuestListScreen} (same no-extra-round-trip shape), which lets the player pick a
- *   specific active quest by name to complete, or accept the board's offer.</li>
+ *   quest or a board offer for this NPC's pool (see {@code bridge.MyssionsQuestBridge}'s own doc),
+ *   OR this is a Town Hall NPC with at least one posted Establish Highway offer ({@code
+ *   plotsign.QuestMenuInfo#roadQuestOffers}); opens {@link QuestListScreen} (same no-extra-round-trip
+ *   shape), which lets the player pick a specific active quest by name to complete, accept the
+ *   board's offer, or accept a Highway offer.</li>
  * </ul>
- * The floating "!" nameplate ({@code plotsign.PlotShopProximityTicker#updateWishlistNameplate})
- * shows whenever either is present.
+ * The floating "!" nameplate ({@code plotsign.PlotShopProximityTicker#updateWishlistNameplate}) is
+ * driven by a separate, wishlist/board-offer-only check and does NOT reflect Highway offers at all
+ * (a nameplate is shared by every viewer, and {@code SettlemyntsMod#anchorHasWishlist}'s own doc
+ * explains why it deliberately can't represent any one player's personal business) -- don't read
+ * the nameplate's presence/absence as a signal either way for whether a Highway offer exists.
+ *
+ * <p><b>Fixed 2026-10-16</b> -- real live report: a Mayor had 2 posted Highway offers at their own
+ * Town Hall NPC, but "Press H" said "Nothing to talk about right now." {@code roadQuestOffers} was
+ * added to the server-side payload 2026-10-13 but this screen's own {@code hasQuest}/empty-state
+ * checks were never updated to look at it -- {@link QuestListScreen} (what the button opens) already
+ * handled it correctly the whole time, so only this screen's gating was ever actually broken.
  */
 public final class ChatMenuScreen extends Screen {
 
@@ -50,7 +61,8 @@ public final class ChatMenuScreen extends Screen {
         int y = centerY - 30;
 
         boolean hasWishlist = !data.entries().isEmpty();
-        boolean hasQuest = !data.questMenu().activeQuests().isEmpty() || !data.questMenu().newOffers().isEmpty();
+        boolean hasQuest = !data.questMenu().activeQuests().isEmpty() || !data.questMenu().newOffers().isEmpty()
+                || !data.questMenu().roadQuestOffers().isEmpty();
 
         if (hasWishlist) {
             addRenderableWidget(Button.builder(Component.literal("I need a few things"), b -> onNeedThings())
@@ -88,7 +100,8 @@ public final class ChatMenuScreen extends Screen {
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        if (data.entries().isEmpty() && data.questMenu().activeQuests().isEmpty() && data.questMenu().newOffers().isEmpty()) {
+        if (data.entries().isEmpty() && data.questMenu().activeQuests().isEmpty() && data.questMenu().newOffers().isEmpty()
+                && data.questMenu().roadQuestOffers().isEmpty()) {
             String message = "Nothing to talk about right now.";
             graphics.text(font, message, width / 2 - font.width(message) / 2, height / 2 - 40, 0xFFAAAAAA);
         }
