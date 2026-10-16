@@ -268,4 +268,29 @@ since the eligibility checks themselves depend on server-only state (Myssions qu
 Planned Inventory deficits) that has no client-side equivalent to check against. `./gradlew build`
 green, whole-suite (8 mods) rebuild + boot-smoke-test clean. **Not yet live-tested.**
 
+**"Hire NPC" added to the Plot Config Sign, 2026-10-15** (explicit user spec) — a player-owned plot
+can now pay `10 * Tier` Gold Nuggets (drained from the plot's own boxes) for the same worker NPC an
+NPC-owned plot already gets for free, via a new button that re-charges on click. New
+`zone.NpcHireMaintenance`/`zone.NpcMaintenanceTicker` charge every hired plot once per real day
+(same day-boundary shape as `zone.ShopMidnightRestockTicker`), registered at `EventPriority.LOWEST`
+so it reliably runs after Yconomics' own rent-bill processing within the same tick, per the user's
+explicit "Plot Rent will be pulled first, and then NPC pay." `PlotRecord` gained
+`npcHired`/`npcLastChargedDay`; the existing Resident/Farmer/Lumberjack/Miner spawn tickers just
+widened their existing NPC-owned-plot gate to also accept a player-owned plot with `npcHired` set —
+no new spawn mechanism. On a failed daily charge the current worker is discarded directly (not via
+`zone.PlotNpcDeathListener`, which is for real combat deaths) but `npcHired` itself stays `true`, so
+a later funded day — the next midnight, or an early manual re-hire — restores it automatically.
+`./gradlew build` green, whole-suite (10 mods) boot-smoke-tested clean. **Not yet live-tested.**
+
+**Tier 5 roads now pave slope-steps as Smooth Quartz Stairs, same day** — explicit user request,
+closing a gap `roadway.RoadwayPaver#stairStateFor`'s own doc used to explain away (quartz bricks,
+Tier 5's own road material, has no real vanilla stairs variant at all). `./gradlew build` green.
+
+**Establish Highway quest milestones: Highway progress now exposes per-settlement anchor state,
+same day** — `roadway.HighwayQuestSupport#checkProgress` already computed "is a stake planted just
+outside settlement A/B" on its way to checking a full connection; widened `HighwayProgress` to
+report both booleans instead of discarding them, so Myssions' new step-by-step milestones ("Place
+Highway Stake directly outside X") needed no new detection logic — see Myssions' own CLAUDE.md for
+the quest-side half. `./gradlew build` green, whole-suite (10 mods) boot-smoke-tested clean.
+
 See [context/classes/](context/classes/) for per-class reference.
