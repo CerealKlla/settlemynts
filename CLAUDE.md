@@ -332,5 +332,29 @@ as a real obstruction needing clearing in the headroom band above the road (need
 Both pavers now check real collision (`state.getCollisionShape(level, pos).isEmpty()`) instead of
 plain air -- a new identical `isSolid` helper added to each file (matching this pair's existing
 "copy and tweak" duplication, not shared into a new utility class). `./gradlew build` green,
-whole-suite (11 mods) boot-smoke-tested clean via `runServer` from Cartographyr. **Not yet
-live-tested or deployed.**
+whole-suite (11 mods) boot-smoke-tested clean via `runServer` from Cartographyr.
+
+**Guardhouse/Guard system overhaul: Guard Kit Stands replace garrison slots, 2026-10-16** (see
+[context/decisions.md](context/decisions.md), [context/classes/GuardKitStand.md](context/classes/GuardKitStand.md))
+-- full explicit four-part user spec. A new real, placeable `guardhouse.GuardKitStandEntity` (a
+literal `ArmorStand` subclass, genuinely identical visuals, zero new render code) replaces the old
+abstract `GarrisonSlot`/`client.ConfigureGarrisonScreen` permission table one-for-one -- each stand
+is tied to one spawned `GuardEntity` via UUID, shows a live respawn timer, and its own Kit Menu
+(right-click) lets a plot manager Create/Edit/Select a Kyt or Pick Up the stand (resuming its exact
+identity if re-placed). Needed one new Kyt-side capability (`api.Kyt#openCreateScreen`/
+`#openEditScreen`, see Kyt's own CLAUDE.md -- no path existed before to open Kyt's real editor
+screen from outside its own Main Menu flow). `GuardSpawnTicker` now equips a freshly-spawned guard
+from the plot's own boxes, best-effort per slot (`GuardEntity#equipFromLoadoutUsingBoxes`), not an
+unconditional full-Kyt equip. A guard's death now costs real food to recover quickly from --
+`GuardRespawnFunding` drains `10 * tier` nutrition value from the Guardhouse's existing food store
+(Tier 1-5 -> 10/20/30/40/50), cutting the 5-real-minute no-food respawn baseline to 30 seconds on
+success. A new "Get Guard Kit Stands" Plot Config Sign button grants stands against a live per-plot
+issued count (`zone.PlotRecord#guardKitStandsIssued`, its own last remaining codec field slot under
+Mojang's 16-field ceiling) -- re-validated synchronously inside the single grant handler, so no
+UUID-set/locking bookkeeping is needed to prevent two players over-granting past the Tier cap.
+Leaving the plot/dying/teleporting away/logging out while holding a stand item deletes it outright
+(mirrors the existing Plot Stakes "carrying it outside removes it" precedent, scoped to the specific
+plot rather than the whole settlement). `./gradlew build`/`test` green in both repos, whole-suite
+(11 mods) `sync-mods.sh` rebuild green, `runServer` AND `runClient` boot-smoke-tested clean (the
+client test specifically exercises the new `ArmorStandRenderer` registration). **Not yet
+live-tested.**

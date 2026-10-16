@@ -10,12 +10,17 @@ import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.kyt.loadout.LoadoutRecord;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
+import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
+import com.github.cerealklla.settlemynts.zone.ShopResource;
 
 import net.minecraft.core.UUIDUtil;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.Mth;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
@@ -92,6 +97,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
 
     private UUID settlementCoreId;
     private UUID plotId;
+    private UUID assignedStandId;
 
     public GuardEntity(EntityType<? extends GuardEntity> type, Level level) {
         super(type, level);
@@ -102,6 +108,11 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
     public void setPlotIdentity(UUID settlementCoreId, UUID plotId) {
         this.settlementCoreId = settlementCoreId;
         this.plotId = plotId;
+    }
+
+    /** Called once by {@link GuardSpawnTicker} right after construction -- which {@link GuardKitStandEntity} spawned this guard, so {@link #die} knows which stand to notify. */
+    public void setAssignedStandId(UUID assignedStandId) {
+        this.assignedStandId = assignedStandId;
     }
 
     /** This guard's owning settlement -- used by {@code GuardPatrolAreaGoal} to find the WHOLE settlement's road network, not just this guard's own plot. */
@@ -223,23 +234,49 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
      * GuardPatrolAreaGoal}).
      */
     /**
-     * Notifies this guard's own Guardhouse to clear its slot -- see {@code
-     * GuardhouseBlockEntity#clearGuardIdIfMatches}'s own doc for why this replaced {@link
-     * GuardSpawnTicker}'s old "can't resolve this guard, assume dead" poll (a real, 2026-10-13 live
-     * bug: that poll false-positived on nothing more than a patrolling guard being out of render
-     * range, spawning a redundant replacement into the same slot).
+     * Notifies this guard's own Guard Kit Stand it's dead (clearing {@code assignedGuardId}, so
+     * {@link GuardSpawnTicker} knows the slot is open again) and attempts fast-respawn food funding
+     * from the plot's Guardhouse -- Guard Kit Stand overhaul, 2026-10-16, replacing the old push-based
+     * {@code GuardhouseBlockEntity#clearGuardIdIfMatches} call (see that method's own now-removed doc
+     * for why a push-based clear, not a poll, is the right shape here: an entity can only actually
+     * die while its own chunk is loaded and ticking, so this always fires at the real moment of
+     * death, never mistaking "out of render range" for "dead").
      */
     @Override
     public void die(net.minecraft.world.damagesource.DamageSource damageSource) {
         super.die(damageSource);
-        if (plotId != null && level() instanceof ServerLevel serverLevel) {
-            GuardhouseIndex.get(serverLevel.getServer()).get(plotId).ifPresent(pos -> {
-                ServerLevel guardhouseLevel = serverLevel.getServer().getLevel(pos.dimension());
-                if (guardhouseLevel != null && guardhouseLevel.getBlockEntity(pos.pos()) instanceof GuardhouseBlockEntity guardhouse) {
-                    guardhouse.clearGuardIdIfMatches(getUUID());
-                }
-            });
+        if (plotId == null || assignedStandId == null || !(level() instanceof ServerLevel serverLevel)) {
+            return;
         }
+        GuardKitStandIndex.get(serverLevel.getServer()).get(assignedStandId).ifPresent(standPos -> {
+            ServerLevel standLevel = serverLevel.getServer().getLevel(standPos.dimension());
+            if (standLevel == null || !(standLevel.getEntity(assignedStandId) instanceof GuardKitStandEntity stand)) {
+                return;
+            }
+            stand.clearAssignedGuardId();
+            stand.setRespawnReadyAtGameTime(serverLevel.getGameTime() + fundFastRespawn(serverLevel));
+        });
+    }
+
+    /** Resolves the plot's Tier and its Guardhouse's food store, attempts {@link GuardRespawnFunding#tryFundFastRespawn}, and returns how many ticks until the stand should be allowed to spawn a replacement. */
+    private long fundFastRespawn(ServerLevel serverLevel) {
+        if (!(serverLevel.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
+            return GuardRespawnFunding.NO_FOOD_RESPAWN_TICKS;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
+        if (plot == null) {
+            return GuardRespawnFunding.NO_FOOD_RESPAWN_TICKS;
+        }
+        int tier = plot.boxPos().isPresent() && net.neoforged.fml.ModList.get().isLoaded("blueprynts")
+                ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(serverLevel, plot.boxPos().get()).orElse(0)
+                : 0;
+        boolean funded = GuardhouseIndex.get(serverLevel.getServer()).get(plotId)
+                .filter(pos -> serverLevel.getServer().getLevel(pos.dimension()) != null
+                        && serverLevel.getServer().getLevel(pos.dimension()).getBlockEntity(pos.pos()) instanceof GuardhouseBlockEntity)
+                .map(pos -> (GuardhouseBlockEntity) serverLevel.getServer().getLevel(pos.dimension()).getBlockEntity(pos.pos()))
+                .map(guardhouse -> GuardRespawnFunding.tryFundFastRespawn(guardhouse, tier))
+                .orElse(false);
+        return funded ? GuardRespawnFunding.FUNDED_RESPAWN_TICKS : GuardRespawnFunding.NO_FOOD_RESPAWN_TICKS;
     }
 
     @Override
@@ -259,6 +296,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         super.addAdditionalSaveData(output);
         output.storeNullable("SettlementCoreId", UUIDUtil.CODEC, settlementCoreId);
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
+        output.storeNullable("AssignedStandId", UUIDUtil.CODEC, assignedStandId);
     }
 
     @Override
@@ -266,6 +304,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         super.readAdditionalSaveData(input);
         settlementCoreId = input.read("SettlementCoreId", UUIDUtil.CODEC).orElse(null);
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
+        assignedStandId = input.read("AssignedStandId", UUIDUtil.CODEC).orElse(null);
         // Real bug found live, 2026-10-08: a guard that existed before the ranged-attack fix shot
         // nothing on Production even after redeploying, while a freshly-spawned guard worked fine on
         // the Dev Server. Root cause: LivingEntity#readAdditionalSaveData (just called via super,
@@ -306,5 +345,48 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         }
         setPersistenceRequired();
         setCanPickUpLoot(false);
+    }
+
+    /**
+     * Guard Kit Stand overhaul (explicit user spec, 2026-10-16): "Every time a guard is spawned it
+     * will deduct the gear on it's assigned Guard Kit Stand from boxes within the plot. If there is
+     * no gear on-hand, that guard will spawn with anything that was available." Each of the 6
+     * potential loadout slots (helmet/chest/legs/boots/offhand/mainhand) is checked independently via
+     * {@link ContainerWithdraw#drain} (best-effort, matched by plain item id -- {@link
+     * ShopResource#ofItem} ignores durability/enchantments, since no real gear-Tier item catalog
+     * exists anywhere in this suite to match more precisely against) -- a slot with no matching item
+     * in the boxes simply spawns unequipped, not a hard "needs the full kit" gate. Mainhand is the
+     * first non-empty hotbar stack in {@code record}, same heuristic {@link #equipFromLoadout} uses,
+     * just resolved against box stock instead of equipped unconditionally.
+     */
+    public void equipFromLoadoutUsingBoxes(LoadoutRecord record, List<Container> plotBoxes) {
+        withdrawAndEquip(plotBoxes, record.helmet(), EquipmentSlot.HEAD);
+        withdrawAndEquip(plotBoxes, record.chestplate(), EquipmentSlot.CHEST);
+        withdrawAndEquip(plotBoxes, record.leggings(), EquipmentSlot.LEGS);
+        withdrawAndEquip(plotBoxes, record.boots(), EquipmentSlot.FEET);
+        withdrawAndEquip(plotBoxes, record.offhand(), EquipmentSlot.OFFHAND);
+        for (ItemStack stack : record.hotbar()) {
+            if (!stack.isEmpty()) {
+                withdrawAndEquip(plotBoxes, stack, EquipmentSlot.MAINHAND);
+                break;
+            }
+        }
+        for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
+                EquipmentSlot.FEET, EquipmentSlot.OFFHAND, EquipmentSlot.MAINHAND)) {
+            setDropChance(slot, 0.0F);
+        }
+        setPersistenceRequired();
+        setCanPickUpLoot(false);
+    }
+
+    private void withdrawAndEquip(List<Container> plotBoxes, ItemStack template, EquipmentSlot slot) {
+        if (template.isEmpty()) {
+            return;
+        }
+        Identifier itemId = BuiltInRegistries.ITEM.getKey(template.getItem());
+        List<ItemStack> taken = ContainerWithdraw.drain(plotBoxes, ShopResource.ofItem(itemId), 1);
+        if (!taken.isEmpty()) {
+            setItemSlot(slot, taken.get(0));
+        }
     }
 }

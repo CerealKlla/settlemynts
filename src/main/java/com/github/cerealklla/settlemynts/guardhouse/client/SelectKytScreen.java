@@ -1,12 +1,10 @@
 package com.github.cerealklla.settlemynts.guardhouse.client;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Optional;
 
-import com.github.cerealklla.settlemynts.guardhouse.GarrisonSlot;
-import com.github.cerealklla.settlemynts.guardhouse.OpenConfigureGarrisonPayload;
-import com.github.cerealklla.settlemynts.guardhouse.OpenGarrisonKytPickerPayload;
-import com.github.cerealklla.settlemynts.guardhouse.SetGarrisonKytPayload;
+import com.github.cerealklla.settlemynts.guardhouse.OpenGuardKitStandKytPickerPayload;
+import com.github.cerealklla.settlemynts.guardhouse.OpenGuardKitStandMenuPayload;
+import com.github.cerealklla.settlemynts.guardhouse.SetStandKytPayload;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -17,22 +15,22 @@ import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
 /**
- * "Select Kyt" for one garrison slot -- a paged Prev/Next cycle through saved Kyt names, same style
- * as {@code structure.client.KytPickerScreen}/Blueprynts' own {@code BlueprintPickerScreen} (no
- * scrollable list widget exists anywhere in this suite). Keeps the parent {@link
- * ConfigureGarrisonScreen}'s own payload data so picking a name (or Clear) can return straight to a
- * freshly-updated Configure Garrison screen client-side -- same "client-local-then-commit" shape
- * {@code cycleGearTier}/{@code toggleNeighbor} already use there -- instead of a second server round
- * trip just to redraw.
+ * "Select Kyt" for one Guard Kit Stand -- a paged Prev/Next cycle through saved Kyt names, same
+ * style as {@code structure.client.KytPickerScreen}/Blueprynts' own {@code BlueprintPickerScreen}
+ * (no scrollable list widget exists anywhere in this suite). Keeps the parent {@link
+ * GuardKitStandScreen}'s own payload data so picking a name (or Clear) can return straight to a
+ * freshly-updated Kit Menu client-side -- same "client-local-then-commit" shape
+ * {@code ConfigureGarrisonScreen}'s old row editing used to -- instead of a second server round trip
+ * just to redraw.
  */
 public final class SelectKytScreen extends Screen {
 
-    private final OpenGarrisonKytPickerPayload data;
-    private final ConfigureGarrisonScreen parent;
+    private final OpenGuardKitStandKytPickerPayload data;
+    private final GuardKitStandScreen parent;
     private int index;
     private Button selectButton;
 
-    public SelectKytScreen(OpenGarrisonKytPickerPayload data, ConfigureGarrisonScreen parent) {
+    public SelectKytScreen(OpenGuardKitStandKytPickerPayload data, GuardKitStandScreen parent) {
         super(Component.literal("Select Kyt"));
         this.data = data;
         this.parent = parent;
@@ -69,16 +67,12 @@ public final class SelectKytScreen extends Screen {
     }
 
     private void choose(String name) {
-        send(new SetGarrisonKytPayload(data.guardhousePos(), data.slotIndex(), name));
+        send(new SetStandKytPayload(data.standId(), name));
 
-        List<GarrisonSlot> updatedSlots = new ArrayList<>(parent.data().slots());
-        GarrisonSlot current = updatedSlots.get(data.slotIndex());
-        java.util.Optional<String> kytLoadoutName = name.isBlank() ? java.util.Optional.empty() : java.util.Optional.of(name);
-        updatedSlots.set(data.slotIndex(), new GarrisonSlot(current.maxGearTier(), current.allowNeighborPurchase(), kytLoadoutName));
-
-        OpenConfigureGarrisonPayload updatedData = new OpenConfigureGarrisonPayload(
-                parent.data().guardhousePos(), parent.data().tier(), parent.data().capacity(), updatedSlots, parent.data().kytAvailable());
-        Minecraft.getInstance().setScreen(new ConfigureGarrisonScreen(updatedData));
+        Optional<String> boundKytName = name.isBlank() ? Optional.empty() : Optional.of(name);
+        OpenGuardKitStandMenuPayload updatedData = new OpenGuardKitStandMenuPayload(
+                data.standId(), boundKytName, parent.data().guardAlive(), parent.data().secondsUntilRespawn(), parent.data().kytAvailable());
+        Minecraft.getInstance().setScreen(new GuardKitStandScreen(updatedData));
     }
 
     private void send(CustomPacketPayload payload) {

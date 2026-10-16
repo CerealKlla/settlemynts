@@ -184,6 +184,7 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.zone.RentLedgerListener.register();
         }
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardSpawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardKitStandRemovalListener());
         // PlotShopProximityTicker is no longer a tick-event subscriber as of 2026-10-12 -- it's
         // purely static now, driven by ProximityScanPayload instead of PlayerTickEvent (see its own
         // doc). No registration needed here any more.
@@ -612,74 +613,162 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestPlotManagement(payload));
 
-        // Guardhouse Plot Type (design doc Section 14a) -- "Configure Garrison."
-        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.RequestConfigureGarrisonPayload.TYPE,
-                com.github.cerealklla.settlemynts.guardhouse.RequestConfigureGarrisonPayload.STREAM_CODEC,
-                (payload, context) -> requestConfigureGarrison(payload, context));
+        // Guard Kit Stand overhaul (design doc Section 14a, reworked 2026-10-16) -- "Get Guard Kit
+        // Stands" on the Plot Config Sign.
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.RequestGuardKitStandsPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.RequestGuardKitStandsPayload.STREAM_CODEC,
+                (payload, context) -> requestGuardKitStands(payload, context));
 
-        registrar.playToClient(com.github.cerealklla.settlemynts.guardhouse.OpenConfigureGarrisonPayload.TYPE,
-                com.github.cerealklla.settlemynts.guardhouse.OpenConfigureGarrisonPayload.STREAM_CODEC,
+        // The Kit Menu itself -- opened directly from GuardKitStandEntity#interact (a right-click is
+        // already a server-side event, no request payload needed for the initial open).
+        registrar.playToClient(com.github.cerealklla.settlemynts.guardhouse.OpenGuardKitStandMenuPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.OpenGuardKitStandMenuPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.guardhouse.ClientGuardhouseRequests.requestMenu(payload));
 
-        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.SetGarrisonSlotPayload.TYPE,
-                com.github.cerealklla.settlemynts.guardhouse.SetGarrisonSlotPayload.STREAM_CODEC,
-                (payload, context) -> setGarrisonSlot(payload, context));
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.PickUpGuardKitStandPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.PickUpGuardKitStandPayload.STREAM_CODEC,
+                (payload, context) -> pickUpGuardKitStand(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.RequestCreateKytForStandPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.RequestCreateKytForStandPayload.STREAM_CODEC,
+                (payload, context) -> requestCreateKytForStand(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.RequestEditKytForStandPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.RequestEditKytForStandPayload.STREAM_CODEC,
+                (payload, context) -> requestEditKytForStand(payload, context));
 
         // "Select Kyt" (optional Kyt soft dependency -- see bridge.KytGuardhouseBridge).
-        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.RequestGarrisonKytNamesPayload.TYPE,
-                com.github.cerealklla.settlemynts.guardhouse.RequestGarrisonKytNamesPayload.STREAM_CODEC,
-                (payload, context) -> requestGarrisonKytNames(payload, context));
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.RequestGuardKitStandKytNamesPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.RequestGuardKitStandKytNamesPayload.STREAM_CODEC,
+                (payload, context) -> requestGuardKitStandKytNames(payload, context));
 
-        registrar.playToClient(com.github.cerealklla.settlemynts.guardhouse.OpenGarrisonKytPickerPayload.TYPE,
-                com.github.cerealklla.settlemynts.guardhouse.OpenGarrisonKytPickerPayload.STREAM_CODEC,
+        registrar.playToClient(com.github.cerealklla.settlemynts.guardhouse.OpenGuardKitStandKytPickerPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.OpenGuardKitStandKytPickerPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.guardhouse.ClientGuardhouseRequests.requestKytPicker(payload));
 
-        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.SetGarrisonKytPayload.TYPE,
-                com.github.cerealklla.settlemynts.guardhouse.SetGarrisonKytPayload.STREAM_CODEC,
-                (payload, context) -> setGarrisonKyt(payload, context));
+        registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.SetStandKytPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.SetStandKytPayload.STREAM_CODEC,
+                (payload, context) -> setStandKyt(payload, context));
     }
 
-    /** "Select Kyt" button on {@code client.ConfigureGarrisonScreen} -- re-checks {@code zone.PlotPermissions#canManage} the same way {@link #setGarrisonSlot} does, then replies with the server's real Kyt name list (see {@code bridge.KytGuardhouseBridge}). A Kyt-less server never reaches this handler at all in practice (the screen's own "Select Kyt" row is hidden client-side via {@code OpenConfigureGarrisonPayload#kytAvailable}), but this still guards {@link com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge#isLoaded} itself before touching the bridge, same isolation convention as every other optional dependency here. */
-    private static void requestGarrisonKytNames(com.github.cerealklla.settlemynts.guardhouse.RequestGarrisonKytNamesPayload payload, IPayloadContext context) {
+    /**
+     * "Get Guard Kit Stands" button -- re-checks {@code zone.PlotPermissions#canManage} and re-reads
+     * the plot's own live {@code zone.PlotRecord#guardKitStandsIssued} count (never trusts the
+     * button's earlier label) before granting exactly one stand item and incrementing that count, all
+     * synchronously within this one handler call -- see {@link
+     * com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload}'s own doc for why
+     * that's sufficient to prevent two concurrent clicks from over-granting past the Tier cap.
+     */
+    private static void requestGuardKitStands(com.github.cerealklla.settlemynts.guardhouse.RequestGuardKitStandsPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        if (!canManageGuardhouseSlot(serverLevel, player, payload.guardhousePos(), payload.slotIndex())) {
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        if (!plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
+            player.sendSystemMessage(Component.literal("This plot has no garrison."));
+            return;
+        }
+        int boxTier = plot.boxPos().isPresent() && ModList.get().isLoaded("blueprynts")
+                ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(serverLevel, plot.boxPos().get()).orElse(0)
+                : 0;
+        int available = com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.capacityForTier(boxTier) - plot.guardKitStandsIssued();
+        if (available <= 0) {
+            player.sendSystemMessage(Component.literal("No more Guard Kit Stands are available for this plot's current Tier."));
+            return;
+        }
+        core.updatePlot(plot.withGuardKitStandsIssued(plot.guardKitStandsIssued() + 1));
+        net.minecraft.world.item.ItemStack item = new net.minecraft.world.item.ItemStack(
+                com.github.cerealklla.settlemynts.registration.ModItems.GUARD_KIT_STAND.get());
+        item.set(com.github.cerealklla.settlemynts.registration.ModItems.GUARD_KIT_STAND_DATA.get(),
+                new com.github.cerealklla.settlemynts.guardhouse.GuardKitStandData(
+                        UUID.randomUUID(), sign.settlementCoreId(), plot.plotId(), Optional.empty(), Optional.empty(), 0L));
+        if (!player.getInventory().add(item)) {
+            player.drop(item, false);
+        }
+    }
+
+    /** "Pick Up" on {@code client.GuardKitStandScreen} -- re-checks permission directly against the live entity, never trusts the client. */
+    private static void pickUpGuardKitStand(com.github.cerealklla.settlemynts.guardhouse.PickUpGuardKitStandPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        resolveManageableStand(serverLevel, player, payload.standId()).ifPresent(stand ->
+                com.github.cerealklla.settlemynts.guardhouse.GuardKitStandInteraction.pickUp(player, stand));
+    }
+
+    /** "Create Kyt" on {@code client.GuardKitStandScreen} -- binds {@code name} to the stand immediately, then opens Kyt's real Create screen for it. */
+    private static void requestCreateKytForStand(com.github.cerealklla.settlemynts.guardhouse.RequestCreateKytForStandPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
         if (!com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.isLoaded()) {
             return;
         }
-        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.guardhouse.OpenGarrisonKytPickerPayload(
-                payload.guardhousePos(), payload.slotIndex(), com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.listKytNames()));
+        resolveManageableStand(serverLevel, player, payload.standId()).ifPresent(stand -> {
+            stand.setBoundKytName(payload.name());
+            com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.openCreateScreen(player, payload.name());
+        });
     }
 
-    /** "Select"/"Clear" on {@code client.SelectKytScreen} -- re-checks permission the same way, never trusts the client's own name. */
-    private static void setGarrisonKyt(com.github.cerealklla.settlemynts.guardhouse.SetGarrisonKytPayload payload, IPayloadContext context) {
+    /** "Edit Kyt" on {@code client.GuardKitStandScreen} -- opens Kyt's real Edit screen for the stand's already-bound name. */
+    private static void requestEditKytForStand(com.github.cerealklla.settlemynts.guardhouse.RequestEditKytForStandPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        if (!canManageGuardhouseSlot(serverLevel, player, payload.guardhousePos(), payload.slotIndex())) {
+        if (!com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.isLoaded()) {
             return;
         }
-        if (!(serverLevel.getBlockEntity(payload.guardhousePos()) instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse)) {
-            return;
-        }
-        guardhouse.setGarrisonKyt(payload.slotIndex(), payload.kytName());
+        resolveManageableStand(serverLevel, player, payload.standId()).ifPresent(stand ->
+                stand.boundKytName().ifPresent(name -> com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.openEditScreen(player, name)));
     }
 
-    /** Shared permission + slot-index re-check for the "Select Kyt" flow, same shape as {@link #setGarrisonSlot}'s own inline checks. */
-    private static boolean canManageGuardhouseSlot(ServerLevel serverLevel, ServerPlayer player, net.minecraft.core.BlockPos guardhousePos, int slotIndex) {
-        if (!(serverLevel.getBlockEntity(guardhousePos) instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse)
-                || guardhouse.settlementCoreId() == null
-                || !(serverLevel.getEntity(guardhouse.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
-            return false;
+    /** "Select Kyt" button on {@code client.GuardKitStandScreen} -- replies with the server's real Kyt name list (see {@code bridge.KytGuardhouseBridge}). A Kyt-less server never reaches this handler at all in practice (the screen's own "Select Kyt" row is hidden client-side via {@code OpenGuardKitStandMenuPayload#kytAvailable}), but this still guards {@link com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge#isLoaded} itself before touching the bridge, same isolation convention as every other optional dependency here. */
+    private static void requestGuardKitStandKytNames(com.github.cerealklla.settlemynts.guardhouse.RequestGuardKitStandKytNamesPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
         }
-        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(guardhouse.plotId())).findFirst().orElse(null);
+        if (resolveManageableStand(serverLevel, player, payload.standId()).isEmpty()) {
+            return;
+        }
+        if (!com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.isLoaded()) {
+            return;
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.guardhouse.OpenGuardKitStandKytPickerPayload(
+                payload.standId(), com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.listKytNames()));
+    }
+
+    /** "Select"/"Clear" on {@code client.SelectKytScreen} -- re-checks permission the same way, never trusts the client's own name. */
+    private static void setStandKyt(com.github.cerealklla.settlemynts.guardhouse.SetStandKytPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        resolveManageableStand(serverLevel, player, payload.standId()).ifPresent(stand -> stand.setBoundKytName(payload.kytName()));
+    }
+
+    /** Shared permission + live-entity re-check for every Kit Menu action -- resolves the stand by UUID (via {@link com.github.cerealklla.settlemynts.guardhouse.GuardKitStandIndex}) and re-checks {@code zone.PlotPermissions#canManage} against its own plot, never trusting the client's earlier flag. */
+    private static Optional<com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity> resolveManageableStand(
+            ServerLevel serverLevel, ServerPlayer player, UUID standId) {
+        if (!(serverLevel.getEntity(standId) instanceof com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity stand)) {
+            return Optional.empty();
+        }
+        if (stand.settlementCoreId() == null || !(serverLevel.getEntity(stand.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            return Optional.empty();
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(stand.plotId())).findFirst().orElse(null);
         if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
-            return false;
+            return Optional.empty();
         }
-        return slotIndex >= 0 && slotIndex < com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.MAX_GARRISON_SIZE;
+        return Optional.of(stand);
     }
 
     /** "Plot Details" button click -- any plot's own sign, read-only, no permission check needed. */
@@ -2284,66 +2373,6 @@ public class SettlemyntsMod {
         }
     }
 
-    /** "Configure Garrison" button click -- re-resolves the plot/Guardhouse and re-checks {@code zone.PlotPermissions#canManage} server-side rather than trusting the client's earlier flag, same precedent as {@code relocatePlotSign}. */
-    private static void requestConfigureGarrison(com.github.cerealklla.settlemynts.guardhouse.RequestConfigureGarrisonPayload payload, IPayloadContext context) {
-        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
-            return;
-        }
-        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
-                || sign.settlementCoreId() == null
-                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
-            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
-            return;
-        }
-        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
-        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
-            player.sendSystemMessage(Component.literal("You can't manage this plot."));
-            return;
-        }
-        if (!plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
-            player.sendSystemMessage(Component.literal("This plot has no garrison."));
-            return;
-        }
-        var guardhousePos = com.github.cerealklla.settlemynts.guardhouse.GuardhouseIndex.get(serverLevel.getServer()).get(plot.plotId());
-        if (guardhousePos.isEmpty() || !(serverLevel.getBlockEntity(guardhousePos.get().pos()) instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse)) {
-            player.sendSystemMessage(Component.literal("This plot's Guardhouse isn't loaded right now."));
-            return;
-        }
-        int tier = plot.boxPos().isPresent() && ModList.get().isLoaded("blueprynts")
-                ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(serverLevel, plot.boxPos().get()).orElse(0)
-                : 0;
-        int capacity = com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.capacityForTier(tier);
-        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.guardhouse.OpenConfigureGarrisonPayload(
-                guardhousePos.get().pos(), tier, capacity, guardhouse.garrisonSlots(),
-                com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge.isLoaded()));
-    }
-
-    /** One garrison slot row changed on {@code client.ConfigureGarrisonScreen} -- re-checks permission the same way, and re-derives the current Tier server-side so the clamp in {@code GuardhouseBlockEntity#setGarrisonSlot} is never trusting a stale client-held Tier. */
-    private static void setGarrisonSlot(com.github.cerealklla.settlemynts.guardhouse.SetGarrisonSlotPayload payload, IPayloadContext context) {
-        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
-            return;
-        }
-        if (!(serverLevel.getBlockEntity(payload.guardhousePos()) instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse)
-                || guardhouse.settlementCoreId() == null
-                || !(serverLevel.getEntity(guardhouse.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
-            return;
-        }
-        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(guardhouse.plotId())).findFirst().orElse(null);
-        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
-            return;
-        }
-        if (payload.slotIndex() < 0 || payload.slotIndex() >= com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.MAX_GARRISON_SIZE) {
-            return;
-        }
-        int tier = plot.boxPos().isPresent() && ModList.get().isLoaded("blueprynts")
-                ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(serverLevel, plot.boxPos().get()).orElse(0)
-                : 0;
-        guardhouse.setGarrisonSlot(payload.slotIndex(),
-                new com.github.cerealklla.settlemynts.guardhouse.GarrisonSlot(payload.maxGearTier(), payload.allowNeighborPurchase(),
-                        guardhouse.garrisonSlot(payload.slotIndex()).kytLoadoutName()),
-                tier);
-    }
-
     /**
      * "Relocate Plot Sign" (design doc Section 14a) -- mirrors {@code BluepryntsMod}'s own
      * "Reposition Supply Box" handler shape. Re-checks {@link
@@ -2654,7 +2683,7 @@ public class SettlemyntsMod {
                     Map.of(Identifier.withDefaultNamespace("gold_nugget"), 1), 1L));
         }
 
-        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1, java.util.List.of(), 0, PlotRecord.HiredNpcState.NONE);
+        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1, java.util.List.of(), 0, PlotRecord.HiredNpcState.NONE, 0);
         core.addPlot(plotRecord);
 
         // Plot Config Sign (design doc Section 14a) -- spawned unconditionally, next to the same
@@ -3315,6 +3344,7 @@ public class SettlemyntsMod {
             // feel as responsive as the physical rope. Road Access Flag gets the same rule, same day.
             if (player.tickCount % 20 == 0) {
                 removeStalePlotItemsOutsideSettlement(player, serverLevel);
+                removeStaleGuardKitStandsOutsidePlot(player, serverLevel);
             }
         }
     }
@@ -3357,6 +3387,47 @@ public class SettlemyntsMod {
         if (removedAny) {
             RopeFenceLeash.clearGhostAnchor(player.getUUID());
             player.sendSystemMessage(Component.literal("You left the settlement -- your Plot Stakes/Road Access Flag have been removed."));
+        }
+    }
+
+    /**
+     * Sweeps every Guard Kit Stand item in {@code player}'s inventory (any slot, same "carrying it
+     * while outside, not holding it" rule as {@link #removeStalePlotItemsOutsideSettlement}) and
+     * deletes any whose owning *plot* (not the whole settlement -- a Guard Kit Stand belongs to one
+     * specific Guardhouse plot) no longer contains the player's position. Also called directly from
+     * {@link com.github.cerealklla.settlemynts.guardhouse.GuardKitStandRemovalListener} on death/
+     * logout for instant handling, per the explicit spec ("dying/teleporting away/logging out") --
+     * the periodic tick check alone already covers "teleporting away," since that just changes the
+     * player's position by the next scan.
+     */
+    public static void removeStaleGuardKitStandsOutsidePlot(ServerPlayer player, ServerLevel serverLevel) {
+        var inventory = player.getInventory();
+        BlockPos pos = player.blockPosition();
+        boolean removedAny = false;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.is(com.github.cerealklla.settlemynts.registration.ModItems.GUARD_KIT_STAND.get())) {
+                continue;
+            }
+            com.github.cerealklla.settlemynts.guardhouse.GuardKitStandData data =
+                    stack.get(com.github.cerealklla.settlemynts.registration.ModItems.GUARD_KIT_STAND_DATA.get());
+            if (data == null || !(serverLevel.getEntity(data.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+                continue;
+            }
+            Optional<PlotRecord> containing = com.github.cerealklla.settlemynts.zone.PlotGeometry.findContainingPlot(
+                    serverLevel, core, pos.getX(), pos.getZ());
+            if (containing.isPresent() && containing.get().plotId().equals(data.plotId())) {
+                continue; // Still inside its own plot -- nothing to do.
+            }
+            inventory.setItem(slot, ItemStack.EMPTY);
+            removedAny = true;
+            PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(data.plotId())).findFirst().orElse(null);
+            if (plot != null) {
+                core.updatePlot(plot.withGuardKitStandsIssued(Math.max(0, plot.guardKitStandsIssued() - 1)));
+            }
+        }
+        if (removedAny) {
+            player.sendSystemMessage(Component.literal("You left the plot -- your Guard Kit Stand has been removed."));
         }
     }
 

@@ -1,6 +1,6 @@
 package com.github.cerealklla.settlemynts.plotsign.client;
 
-import com.github.cerealklla.settlemynts.guardhouse.RequestConfigureGarrisonPayload;
+import com.github.cerealklla.settlemynts.guardhouse.RequestGuardKitStandsPayload;
 import com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestPlotDetailsPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestPlotManagementPayload;
@@ -23,9 +23,11 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
  * Shop buttons" -- a Guardhouse is NPC-owned infrastructure, not a shop-bearing plot) and, same
  * reasoning, for a Town Hall plot (real report, 2026-10-05 -- civic infrastructure, not a
  * shop-bearing plot; see {@code PlotConfigSignBlock#hasShop}, the matching server-side gate).
- * "Configure
- * Garrison" (added 2026-09-30, Guardhouse Plot Type) shows only when {@code hasGarrison} is true,
- * same {@code canManage}-only visibility as "Configure Plot"/"Manage Shop".
+ * "Get Guard Kit Stands" (added 2026-09-30, Guardhouse Plot Type; reworked 2026-10-16 from the old
+ * "Configure Garrison" into granting real, placeable Guard Kit Stand items -- see {@code
+ * guardhouse.GuardKitStandEntity}) shows only when {@code hasGarrison} is true and at least one more
+ * stand is available ({@code guardKitStandsAvailable > 0}), same {@code canManage}-only visibility as
+ * "Configure Plot"/"Manage Shop".
  */
 public final class PlotConfigSignMenuScreen extends Screen {
 
@@ -64,8 +66,8 @@ public final class PlotConfigSignMenuScreen extends Screen {
             }
         }
 
-        if (data.canManage() && data.hasGarrison()) {
-            addRenderableWidget(Button.builder(Component.literal("Configure Garrison"), b -> configureGarrison())
+        if (data.canManage() && data.hasGarrison() && data.guardKitStandsAvailable() > 0) {
+            addRenderableWidget(Button.builder(Component.literal("Get Guard Kit Stands (" + data.guardKitStandsAvailable() + ")"), b -> getGuardKitStands())
                     .bounds(centerX - 100, y, 200, 20).build());
             y += 30;
         }
@@ -114,8 +116,8 @@ public final class PlotConfigSignMenuScreen extends Screen {
         onClose();
     }
 
-    private void configureGarrison() {
-        send(new RequestConfigureGarrisonPayload(data.signPos()));
+    private void getGuardKitStands() {
+        send(new RequestGuardKitStandsPayload(data.signPos()));
         onClose();
     }
 

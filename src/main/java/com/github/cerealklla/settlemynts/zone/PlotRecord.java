@@ -92,13 +92,24 @@ import net.minecraft.resources.Identifier;
  * #withJob} are all hand-written pass-throughs onto {@code hiredNpc} with their original pre-nesting
  * signatures, so every call site written before this nesting (spawn tickers, {@code
  * NpcMaintenanceTicker}, {@code SettlemyntsMod}) kept compiling completely unchanged.
+ *
+ * <p>{@code guardKitStandsIssued} (added 2026-10-16, Guard Kit Stand overhaul) -- how many Guard Kit
+ * Stand items this plot has ever been granted via "Get Guard Kit Stands" on the Plot Config Sign,
+ * minus however many have since been permanently destroyed (a held stand item deleted outright for
+ * being carried outside this plot -- see {@code SettlemyntsMod#removeStaleGuardKitStandsOutsidePlot}).
+ * Picking a stand up and re-placing it anywhere inside the plot never changes this count -- it's
+ * still "issued," just not currently placed. This is the live denominator against {@code
+ * guardhouse.GuardhouseConstants#capacityForTier} the sign's button grants against; fills this
+ * record's own last remaining slot under Mojang's real 16-field {@code RecordCodecBuilder} arity
+ * ceiling (see the note above on {@code hiredNpc}) -- a single {@code int} doesn't need a nested
+ * sub-record workaround the way three fields did.
  */
 public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long cartographyrPlotEntityId,
                           long cartographyrBufferEntityId, Optional<BlockPos> boxPos, Optional<UUID> constructionBoxId,
                           Optional<UUID> owner, Optional<UUID> billId, Optional<UUID> shopId,
                           List<SuppressedShopResource> suppressedShopResources, int tier,
                           List<PlannedInventoryTarget> plannedInventory, int tieredDefaultsAppliedTier,
-                          HiredNpcState hiredNpc) {
+                          HiredNpcState hiredNpc, int guardKitStandsIssued) {
 
     public static final Codec<PlotRecord> CODEC = RecordCodecBuilder.create(i -> i.group(
             UUIDUtil.CODEC.fieldOf("plot_id").forGetter(PlotRecord::plotId),
@@ -115,7 +126,8 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
             Codec.INT.optionalFieldOf("tier", 1).forGetter(PlotRecord::tier),
             PlannedInventoryTarget.CODEC.listOf().optionalFieldOf("planned_inventory", List.of()).forGetter(PlotRecord::plannedInventory),
             Codec.INT.optionalFieldOf("tiered_defaults_applied_tier", 0).forGetter(PlotRecord::tieredDefaultsAppliedTier),
-            HiredNpcState.CODEC.optionalFieldOf("hired_npc", HiredNpcState.NONE).forGetter(PlotRecord::hiredNpc)
+            HiredNpcState.CODEC.optionalFieldOf("hired_npc", HiredNpcState.NONE).forGetter(PlotRecord::hiredNpc),
+            Codec.INT.optionalFieldOf("guard_kit_stands_issued", 0).forGetter(PlotRecord::guardKitStandsIssued)
     ).apply(i, PlotRecord::new));
 
     /**
@@ -179,38 +191,38 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
     /** Stamps in a freshly-registered Shop id -- see this record's own class doc on when this happens. */
     public PlotRecord withShopId(UUID shopId) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc);
+                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
     }
 
     /** Overwrites the full Shop Config suppression set -- see {@code SettlemyntsMod#setShopListings}, the only caller. */
     public PlotRecord withSuppressedShopResources(List<SuppressedShopResource> suppressedShopResources) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc);
+                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
     }
 
     /** Raises (or sets) this plot's own unlocked construction-Tier cap -- see this record's own class doc. */
     public PlotRecord withTier(int tier) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
     }
 
     /** Overwrites the full Planned Inventory target set -- see {@code SettlemyntsMod#setPlannedInventory}, the only caller. */
     public PlotRecord withPlannedInventory(List<PlannedInventoryTarget> plannedInventory) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, List.copyOf(plannedInventory), tieredDefaultsAppliedTier, hiredNpc);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, List.copyOf(plannedInventory), tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
     }
 
     /** Marks {@code tier} as the highest Tier {@code zone.ShopSeeding#applyTieredDefaults} has seeded for -- see this record's own class doc. */
     public PlotRecord withTieredDefaultsAppliedTier(int tieredDefaultsAppliedTier) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
     }
 
     /** Sets whether this plot currently has (or should have, through a funds-driven despawn) a hired
      *  NPC -- see this record's own class doc. */
     public PlotRecord withNpcHired(boolean npcHired) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc.withHired(npcHired));
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc.withHired(npcHired), guardKitStandsIssued);
     }
 
     /** Records the real-day index of this plot's last successful NPC maintenance charge -- see this
@@ -218,13 +230,21 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
      *  manual "Hire NPC" click and that night's midnight tick). */
     public PlotRecord withNpcLastChargedDay(long npcLastChargedDay) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc.withLastChargedDay(npcLastChargedDay));
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc.withLastChargedDay(npcLastChargedDay), guardKitStandsIssued);
     }
 
     /** "Change Job" -- overrides which worker kind this plot's hired NPC should be, independent of
      *  {@code zoneTypeId}. See this record's own class doc and {@link PlotWorkerKind}. */
     public PlotRecord withJob(PlotJob job) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc.withJob(job));
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc.withJob(job), guardKitStandsIssued);
+    }
+
+    /** Adjusts how many Guard Kit Stands this plot has ever been issued -- see this record's own class
+     *  doc. {@code SettlemyntsMod}'s "Get Guard Kit Stands" handler passes {@code +1} per grant; the
+     *  outside-plot removal check passes {@code -1} per stand permanently destroyed. */
+    public PlotRecord withGuardKitStandsIssued(int guardKitStandsIssued) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
     }
 }

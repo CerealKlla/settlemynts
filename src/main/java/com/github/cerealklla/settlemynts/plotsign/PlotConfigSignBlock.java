@@ -77,6 +77,7 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
         int tier = 1;
         int maxPlotTier = 5;
         boolean canHireNpc = false;
+        int guardKitStandsAvailable = 0;
         if (sign.settlementCoreId() != null && serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core) {
             PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
             if (plot != null) {
@@ -87,9 +88,16 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
                 tier = plot.tier();
                 maxPlotTier = isTownHall ? 5 : core.townHallPlot().map(PlotRecord::tier).orElse(5);
                 canHireNpc = canManage && plot.owner().isPresent() && !hasGarrison && !isTownHall;
+                if (hasGarrison) {
+                    int boxTier = plot.boxPos().isPresent() && net.neoforged.fml.ModList.get().isLoaded("blueprynts")
+                            ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(serverLevel, plot.boxPos().get()).orElse(0)
+                            : 0;
+                    guardKitStandsAvailable = Math.max(0,
+                            com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.capacityForTier(boxTier) - plot.guardKitStandsIssued());
+                }
             }
         }
-        PacketDistributor.sendToPlayer(serverPlayer, new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc));
+        PacketDistributor.sendToPlayer(serverPlayer, new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc, guardKitStandsAvailable));
         return InteractionResult.SUCCESS_SERVER;
     }
 

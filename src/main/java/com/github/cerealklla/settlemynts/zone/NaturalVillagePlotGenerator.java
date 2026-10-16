@@ -234,7 +234,7 @@ public final class NaturalVillagePlotGenerator {
         UUID plotId = UUID.randomUUID();
         PlotRecord plotRecord = new PlotRecord(plotId, zoneType.get().label(), zoneTypeId,
                 plotEntity.id().value(), bufferEntity.id().value(),
-                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), List.of(), 1, List.of(), 0, PlotRecord.HiredNpcState.NONE);
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), List.of(), 1, List.of(), 0, PlotRecord.HiredNpcState.NONE, 0);
         owner.addPlot(plotRecord);
 
         BlockPos anchor = box.getCenter();
@@ -324,7 +324,7 @@ public final class NaturalVillagePlotGenerator {
                 // A zone-type reprofile (e.g. a natural village worker's profession changed) resets
                 // the tiered-defaults marker -- the new type's own catalog, if any, has never been
                 // seeded at all yet, regardless of what the old type's catalog had reached.
-                0, plot.hiredNpc());
+                0, plot.hiredNpc(), plot.guardKitStandsIssued());
         owner.updatePlot(upgraded);
         Cartography.setDesignation(level, new EntityId(plot.cartographyrPlotEntityId()), newZoneType.get().label());
         if (ShopSeeding.hasCatalog(byProfession.get())) {

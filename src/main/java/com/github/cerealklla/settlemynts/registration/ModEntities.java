@@ -191,4 +191,13 @@ public final class ModEntities {
             MinerWorkerEntity::new,
             MobCategory.MISC,
             builder -> builder.sized(0.6f, 1.95f).clientTrackingRange(10));
+
+    // Guard Kit Stand overhaul (added 2026-10-16) -- a real net.minecraft.world.entity.decoration.
+    // ArmorStand subclass (see GuardKitStandEntity's own doc for why: "identical visuals" is
+    // literally true this way, zero new render code). Same hitbox vanilla's own armor stand uses.
+    public static final DeferredHolder<EntityType<?>, EntityType<com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity>> GUARD_KIT_STAND = ENTITIES.registerEntityType(
+            "guard_kit_stand",
+            com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(0.5f, 1.975f).clientTrackingRange(10));
 }

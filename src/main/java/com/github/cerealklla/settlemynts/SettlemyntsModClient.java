@@ -9,7 +9,7 @@ import com.github.cerealklla.settlemynts.founding.client.GhostTownHallCoreRender
 import com.github.cerealklla.settlemynts.founding.client.StakeDistanceOverlay;
 import com.github.cerealklla.settlemynts.founding.client.StakeScreen;
 import com.github.cerealklla.settlemynts.guardhouse.ClientGuardhouseRequests;
-import com.github.cerealklla.settlemynts.guardhouse.client.ConfigureGarrisonScreen;
+import com.github.cerealklla.settlemynts.guardhouse.client.GuardKitStandScreen;
 import com.github.cerealklla.settlemynts.guardhouse.client.GuardRenderer;
 import com.github.cerealklla.settlemynts.guardhouse.client.GuardhouseFoodScreen;
 import com.github.cerealklla.settlemynts.guardhouse.client.SelectKytScreen;
@@ -113,6 +113,11 @@ public class SettlemyntsModClient {
         event.registerEntityRenderer(ModEntities.LUMBERJACK_WORKER.get(), net.minecraft.client.renderer.entity.VillagerRenderer::new);
         event.registerEntityRenderer(ModEntities.FARMER_WORKER.get(), net.minecraft.client.renderer.entity.VillagerRenderer::new);
         event.registerEntityRenderer(ModEntities.MINER_WORKER.get(), net.minecraft.client.renderer.entity.VillagerRenderer::new);
+        // Guard Kit Stand overhaul (added 2026-10-16) -- GuardKitStandEntity extends vanilla's own
+        // ArmorStand directly (see its own doc), so reusing vanilla's own ArmorStandRenderer gives
+        // genuinely identical visuals with zero new render code, same reasoning as the Villager
+        // subclasses above.
+        event.registerEntityRenderer(ModEntities.GUARD_KIT_STAND.get(), net.minecraft.client.renderer.entity.ArmorStandRenderer::new);
     }
 
     @SubscribeEvent
@@ -169,13 +174,13 @@ public class SettlemyntsModClient {
         });
         ClientGuardhouseRequests.takePendingMenu().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(new ConfigureGarrisonScreen(request));
+                Minecraft.getInstance().setScreen(new GuardKitStandScreen(request));
             }
         });
-        // "Select Kyt" button clicked on ConfigureGarrisonScreen -- that same screen is still open
+        // "Select Kyt" button clicked on GuardKitStandScreen -- that same screen is still open
         // (waiting on this server round trip), so it's the parent SelectKytScreen returns to.
         ClientGuardhouseRequests.takePendingKytPicker().ifPresent(request -> {
-            if (Minecraft.getInstance().screen instanceof ConfigureGarrisonScreen current) {
+            if (Minecraft.getInstance().screen instanceof GuardKitStandScreen current) {
                 Minecraft.getInstance().setScreen(new SelectKytScreen(request, current));
             }
         });

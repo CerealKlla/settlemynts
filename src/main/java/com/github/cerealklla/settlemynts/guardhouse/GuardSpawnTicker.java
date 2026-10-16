@@ -1,40 +1,43 @@
 package com.github.cerealklla.settlemynts.guardhouse;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 import com.github.cerealklla.kyt.loadout.LoadoutRecord;
+import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge;
-import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
-import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
- * Fills any Guardhouse garrison slot that has a Kyt bound but no living guard (design doc Section
- * 14a, guard-spawning pass) -- shape mirrors {@code construction.NpcAutoFundingTicker} closely: a
- * cheap periodic scan, no per-slot persisted "last spawned" state needed.
+ * Fills any placed {@link GuardKitStandEntity} that has a Kyt bound but no living guard -- Guard
+ * Kit Stand overhaul, 2026-10-16, rewritten from the old "iterate a Guardhouse's 8 garrison slots"
+ * shape to "iterate every known stand via {@link GuardKitStandIndex}" (each stand is independently
+ * placed/picked-up, not a fixed-size array owned by one Guardhouse block anymore). Same cheap
+ * periodic-scan shape as {@code construction.NpcAutoFundingTicker} otherwise -- no per-stand
+ * persisted "last spawned" state needed beyond the stand's own {@code respawnReadyAtGameTime}.
  *
- * <p><b>Trigger model, and its one real side effect</b>: this is an "is this slot filled with a
- * living guard?" scan, not a one-shot spawn-on-bind. That means a dead guard's slot is naturally
- * refilled on the next scan -- a genuine, intentional side effect of this trigger choice, not a
- * separate "respawn" feature (see the guard-spawning plan's own scope notes).
+ * <p>Spawns only if: a Kyt is bound, no {@code assignedGuardId} is currently alive/tracked, and
+ * {@code level.getGameTime() >= respawnReadyAtGameTime} (set by {@link GuardEntity#die} via {@link
+ * GuardRespawnFunding} -- 30 seconds if food was funded, 5 minutes otherwise). Equips the spawned
+ * guard from the plot's own boxes (best-effort per slot, see {@link
+ * GuardEntity#equipFromLoadoutUsingBoxes}) instead of the old unconditional full-Kyt equip.
  *
  * <p><b>Known scaling simplification</b>, same as every other full-world-scanning ticker in this
- * mod: a Guardhouse whose chunk isn't currently loaded is silently skipped for that scan, same
+ * mod: a stand whose chunk isn't currently loaded is silently skipped for that scan, same
  * limitation {@code NpcAutoFundingTicker}'s own box-delivery pacing already has.
  */
 public final class GuardSpawnTicker {
 
-    // Cheap enough at 5 seconds to keep garrison slots filled promptly without scanning every tick.
+    // Cheap enough at 5 seconds to keep stands filled promptly without scanning every tick.
     private static final int SCAN_INTERVAL_TICKS = 100;
     // Staggered 2026-10-12 against the other seven 100-tick full-world scan tickers across this
     // suite -- see FarmerSpawnTicker's own doc for the full "thundering herd" root cause.
@@ -49,63 +52,46 @@ public final class GuardSpawnTicker {
         if ((server.getTickCount() + TICK_OFFSET) % SCAN_INTERVAL_TICKS != 0) {
             return;
         }
-        for (Map.Entry<UUID, GlobalPos> entry : GuardhouseIndex.get(server).all().entrySet()) {
+        for (Map.Entry<UUID, GlobalPos> entry : GuardKitStandIndex.get(server).all().entrySet()) {
             GlobalPos pos = entry.getValue();
             ServerLevel level = server.getLevel(pos.dimension());
             if (level == null) {
                 continue;
             }
-            fillGarrison(level, entry.getKey(), pos.pos());
+            fillStand(level, entry.getKey());
         }
     }
 
-    private void fillGarrison(ServerLevel level, UUID plotId, BlockPos guardhousePos) {
-        if (!(level.getBlockEntity(guardhousePos) instanceof GuardhouseBlockEntity guardhouse)
-                || guardhouse.settlementCoreId() == null
-                || !(level.getEntity(guardhouse.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
-            return; // Chunk not loaded, or the Guardhouse/core couldn't be resolved -- skip this scan.
+    private void fillStand(ServerLevel level, UUID standId) {
+        if (!(level.getEntity(standId) instanceof GuardKitStandEntity stand)
+                || stand.settlementCoreId() == null
+                || !(level.getEntity(stand.settlementCoreId()) instanceof com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity core)) {
+            return; // Chunk not loaded, or the stand/core couldn't be resolved -- skip this scan.
         }
-        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
+        if (stand.boundKytName().isEmpty() || stand.assignedGuardId().isPresent()) {
+            return;
+        }
+        if (level.getGameTime() < stand.respawnReadyAtGameTime()) {
+            return;
+        }
+        Optional<LoadoutRecord> record = KytGuardhouseBridge.getKyt(stand.boundKytName().get());
+        if (record.isEmpty()) {
+            return; // Stale/deleted Kyt name -- treated the same as unset, per GuardKitStandEntity's own doc.
+        }
+        com.github.cerealklla.settlemynts.zone.PlotRecord plot = core.getPlots().stream()
+                .filter(p -> p.plotId().equals(stand.plotId())).findFirst().orElse(null);
         if (plot == null) {
             return;
         }
-        int tier = plot.boxPos().isPresent() && ModList.get().isLoaded("blueprynts")
-                ? com.github.cerealklla.blueprynts.api.Blueprynts.getConstructionBoxTier(level, plot.boxPos().get()).orElse(0)
-                : 0;
-        int capacity = GuardhouseConstants.capacityForTier(tier);
-        for (int i = 0; i < capacity; i++) {
-            fillSlot(level, guardhouse, guardhousePos, i, plotId);
-        }
-    }
 
-    private void fillSlot(ServerLevel level, GuardhouseBlockEntity guardhouse, BlockPos guardhousePos, int index, UUID plotId) {
-        GarrisonSlot slot = guardhouse.garrisonSlots().get(index);
-        if (slot.kytLoadoutName().isEmpty()) {
-            return;
-        }
-        // Trusts the persisted slot outright now -- fixed 2026-10-13, real live bug: this used to
-        // also require resolving the guard's live entity (level.getEntity + isAlive) before counting
-        // the slot as filled, but a patrolling guard easily wanders outside currently-loaded chunks
-        // (it can patrol the whole settlement's road network, not just stand next to the Guardhouse),
-        // and an entity can only ever actually die while its own chunk is loaded and ticking -- so
-        // "can't resolve it right now" was never real evidence of death, just evidence it was out of
-        // render range. That false "it died" conclusion spawned a redundant guard into the same slot
-        // every time, compounding across restarts (confirmed live: 9 guards found tagged to one plot,
-        // whose absolute max garrison size is 8). See GuardEntity#die/GuardhouseBlockEntity#clearGuardIdIfMatches
-        // for the real, push-based replacement -- a slot is only ever cleared by an actual death now.
-        if (guardhouse.guardId(index).isPresent()) {
-            return;
-        }
-        Optional<LoadoutRecord> record = KytGuardhouseBridge.getKyt(slot.kytLoadoutName().get());
-        if (record.isEmpty()) {
-            return; // Stale/deleted Kyt name -- treated the same as unset, per GarrisonSlot's own doc.
-        }
         GuardEntity guard = new GuardEntity(ModEntities.GUARD.get(), level);
-        BlockPos spawnPos = guardhousePos.above();
+        BlockPos spawnPos = stand.blockPosition();
         guard.setPos(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
-        guard.equipFromLoadout(record.get());
-        guard.setPlotIdentity(guardhouse.settlementCoreId(), plotId);
+        List<net.minecraft.world.Container> plotBoxes = Settlemynts.resolvePlotBoxes(level, plot.plotId());
+        guard.equipFromLoadoutUsingBoxes(record.get(), plotBoxes);
+        guard.setPlotIdentity(stand.settlementCoreId(), stand.plotId());
+        guard.setAssignedStandId(standId);
         level.addFreshEntity(guard);
-        guardhouse.setGuardId(index, guard.getUUID());
+        stand.setAssignedGuardId(guard.getUUID());
     }
 }

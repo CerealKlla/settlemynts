@@ -33,9 +33,15 @@ import net.minecraft.resources.Identifier;
  * and isn't a Guardhouse or Town Hall (neither ever spawns the kind of worker this button hires --
  * see {@code resident.ResidentSpawnTicker}'s own Guardhouse/zone-type exclusions). See {@code
  * zone.NpcHireMaintenance}/{@code zone.NpcMaintenanceTicker} for the full feature.
+ *
+ * <p>{@code guardKitStandsAvailable} (added 2026-10-16, Guard Kit Stand overhaul) -- {@code
+ * guardhouse.GuardhouseConstants#capacityForTier(tier) - plot.guardKitStandsIssued()} for a
+ * Guardhouse-typed plot, {@code 0} otherwise. Gates/labels the new "Get Guard Kit Stands" button --
+ * only shown when {@code > 0} (alongside the existing {@code canManage}/{@code hasGarrison} gate).
  */
 public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage, boolean hasGarrison, boolean isTownHall,
-                                             boolean hasConstructionBox, int tier, int maxPlotTier, boolean canHireNpc) implements CustomPacketPayload {
+                                             boolean hasConstructionBox, int tier, int maxPlotTier, boolean canHireNpc,
+                                             int guardKitStandsAvailable) implements CustomPacketPayload {
 
     public static final Type<OpenPlotConfigSignMenuPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_plot_config_sign_menu"));
@@ -49,6 +55,7 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
             ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::tier,
             ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::maxPlotTier,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::canHireNpc,
+            ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::guardKitStandsAvailable,
             OpenPlotConfigSignMenuPayload::new);
 
     @Override

@@ -91,6 +91,15 @@ public final class ModItems {
                     .stacksTo(256)
                     .setId(ResourceKey.create(Registries.ITEM, id))));
 
+    // Guard Kit Stand overhaul (added 2026-10-16) -- the held form of a picked-up
+    // guardhouse.GuardKitStandEntity; stacksTo(1) since each one is a distinct, individually-managed
+    // guard slot (its own GuardKitStandData identity), same reasoning as PLOT_PLACEMENT_STAKE.
+    public static final DeferredItem<com.github.cerealklla.settlemynts.guardhouse.GuardKitStandItem> GUARD_KIT_STAND = ITEMS.register(
+            "guard_kit_stand",
+            id -> new com.github.cerealklla.settlemynts.guardhouse.GuardKitStandItem(new Item.Properties()
+                    .stacksTo(1)
+                    .setId(ResourceKey.create(Registries.ITEM, id))));
+
     public static final DeferredRegister.DataComponents DATA_COMPONENTS =
             DeferredRegister.createDataComponents(Registries.DATA_COMPONENT_TYPE, SettlemyntsMod.MODID);
 
@@ -167,4 +176,10 @@ public final class ModItems {
             DATA_COMPONENTS.registerComponentType("highway_stake_tier", builder -> builder
                     .persistent(com.mojang.serialization.Codec.INT)
                     .networkSynchronized(net.minecraft.network.codec.ByteBufCodecs.VAR_INT));
+
+    // Guard Kit Stand overhaul (added 2026-10-16) -- see guardhouse.GuardKitStandData's own doc.
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<com.github.cerealklla.settlemynts.guardhouse.GuardKitStandData>> GUARD_KIT_STAND_DATA =
+            DATA_COMPONENTS.registerComponentType("guard_kit_stand_data", builder -> builder
+                    .persistent(com.github.cerealklla.settlemynts.guardhouse.GuardKitStandData.CODEC)
+                    .networkSynchronized(com.github.cerealklla.settlemynts.guardhouse.GuardKitStandData.STREAM_CODEC));
 }
