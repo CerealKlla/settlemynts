@@ -92,12 +92,28 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
     // explicit user request, both halves of the same ask.
     private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
 
+    // Real live bug, 2026-10-16 (Guard Kit Stand overhaul): "when guards spawn they aren't spawning
+    // on the actual armor stand, they're spawning on the roof." Root cause -- a Guard Kit Stand is
+    // explicitly meant to be placed INSIDE a real Guardhouse building, under its own roof, but the
+    // underground-correction check above was written back when every guard only ever patrolled open
+    // outdoor terrain (the "Town Proper" buffer / Roadway network): `Heightmap.Types
+    // .MOTION_BLOCKING_NO_LEAVES` reads a real building's own roof as "the surface," so a guard
+    // standing on its own stand's indoor floor was being judged "5+ blocks underground" and
+    // immediately teleported up onto that roof, on its very first AI step after spawning. Fixed by
+    // skipping this whole check within a generous horizontal radius of the guard's own spawn point
+    // (its assigned stand, see {@link #homePos}) -- comfortably covers even the largest Guardhouse
+    // Tier's real footprint (5x5 up to 13x13, see this mod's own "Ancients" test Blueprint series),
+    // while leaving the real cave/hole-falling protection fully intact everywhere else a guard
+    // actually patrols outdoors.
+    private static final int UNDERGROUND_CHECK_HOME_RADIUS_BLOCKS = 10;
+
     private final RangedBowAttackGoal<GuardEntity> bowGoal = new RangedBowAttackGoal<>(this, 1.0, 20, 15.0F);
     private final MeleeAttackGoal meleeGoal = new MeleeAttackGoal(this, 1.0, false);
 
     private UUID settlementCoreId;
     private UUID plotId;
     private UUID assignedStandId;
+    private net.minecraft.core.BlockPos homePos;
 
     public GuardEntity(EntityType<? extends GuardEntity> type, Level level) {
         super(type, level);
@@ -113,6 +129,11 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
     /** Called once by {@link GuardSpawnTicker} right after construction -- which {@link GuardKitStandEntity} spawned this guard, so {@link #die} knows which stand to notify. */
     public void setAssignedStandId(UUID assignedStandId) {
         this.assignedStandId = assignedStandId;
+    }
+
+    /** Called once by {@link GuardSpawnTicker} right after construction -- this guard's own spawn point (its assigned stand's position), used only to suppress the underground-correction safety net near home. See that field's own doc. */
+    public void setHomePos(net.minecraft.core.BlockPos homePos) {
+        this.homePos = homePos;
     }
 
     /** This guard's owning settlement -- used by {@code GuardPatrolAreaGoal} to find the WHOLE settlement's road network, not just this guard's own plot. */
@@ -284,6 +305,10 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         super.customServerAiStep(level);
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
+        if (homePos != null
+                && Math.max(Math.abs(blockX - homePos.getX()), Math.abs(blockZ - homePos.getZ())) <= UNDERGROUND_CHECK_HOME_RADIUS_BLOCKS) {
+            return; // Near its own (possibly indoor, under-a-roof) spawn point -- see this field's own doc.
+        }
         int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
         if (surfaceY - getY() > UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS) {
             getNavigation().stop();
@@ -297,6 +322,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         output.storeNullable("SettlementCoreId", UUIDUtil.CODEC, settlementCoreId);
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
         output.storeNullable("AssignedStandId", UUIDUtil.CODEC, assignedStandId);
+        output.storeNullable("HomePos", net.minecraft.core.BlockPos.CODEC, homePos);
     }
 
     @Override
@@ -305,6 +331,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         settlementCoreId = input.read("SettlementCoreId", UUIDUtil.CODEC).orElse(null);
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
         assignedStandId = input.read("AssignedStandId", UUIDUtil.CODEC).orElse(null);
+        homePos = input.read("HomePos", net.minecraft.core.BlockPos.CODEC).orElse(null);
         // Real bug found live, 2026-10-08: a guard that existed before the ranged-attack fix shot
         // nothing on Production even after redeploying, while a freshly-spawned guard worked fine on
         // the Dev Server. Root cause: LivingEntity#readAdditionalSaveData (just called via super,

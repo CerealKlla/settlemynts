@@ -91,6 +91,7 @@ public final class GuardSpawnTicker {
         guard.equipFromLoadoutUsingBoxes(record.get(), plotBoxes);
         guard.setPlotIdentity(stand.settlementCoreId(), stand.plotId());
         guard.setAssignedStandId(standId);
+        guard.setHomePos(spawnPos);
         level.addFreshEntity(guard);
         stand.setAssignedGuardId(guard.getUUID());
     }
