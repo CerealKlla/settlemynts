@@ -70,7 +70,17 @@ public class GuardKitStandItem extends Item {
 
         GuardKitStandEntity stand = new GuardKitStandEntity(ModEntities.GUARD_KIT_STAND.get(), serverLevel);
         stand.setUUID(data.standId());
-        stand.setPos(placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5);
+        // Real live report, 2026-10-16: "doesn't rotate to face the player like it should" -- yaw
+        // was never set at all before (always the entity default), unlike vanilla's own
+        // ArmorStandItem#place, which snaps the new stand to the OPPOSITE of the placing player's own
+        // yaw (confirmed against its real decompiled source: `Mth.wrapDegrees(context.getRotation()
+        // - 180.0F)`, then rounded to the nearest 45 degrees) -- that's what actually makes a freshly
+        // placed vanilla armor stand end up facing back toward the player who placed it. Mirrored
+        // here via `snapTo`, vanilla's own pos+rotation-together setter (also sets old-pos/rot so the
+        // very first rendered frame isn't interpolating from a stale default), skipping the 45-degree
+        // snapping since this stand doesn't need a "pose a decoration" angle, just to face the player.
+        float facingYaw = player.getYRot() + 180.0F;
+        stand.snapTo(placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5, facingYaw, 0.0F);
         stand.setPlotIdentity(data.settlementCoreId(), data.plotId());
         data.boundKytName().ifPresent(stand::setBoundKytName);
         data.assignedGuardId().ifPresent(stand::setAssignedGuardId);
