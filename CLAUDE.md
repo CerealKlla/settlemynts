@@ -356,5 +356,33 @@ Leaving the plot/dying/teleporting away/logging out while holding a stand item d
 (mirrors the existing Plot Stakes "carrying it outside removes it" precedent, scoped to the specific
 plot rather than the whole settlement). `./gradlew build`/`test` green in both repos, whole-suite
 (11 mods) `sync-mods.sh` rebuild green, `runServer` AND `runClient` boot-smoke-tested clean (the
-client test specifically exercises the new `ArmorStandRenderer` registration). **Not yet
-live-tested.**
+client test specifically exercises the new `ArmorStandRenderer` registration).
+
+**Four real Guard Kit Stand live-test bugs fixed the same day** -- crashed on placement
+(`GuardKitStandEntity` had no registered `AttributeSupplier`, confirmed via the crash log; every
+`LivingEntity` subclass needs one, fixed with vanilla's own `ArmorStand.createAttributes()`), the
+item had no model/lang entry at all (fixed, reuses vanilla's `armor_stand` item model), "Get Guard
+Kit Stands" only ever granted one item per click despite its button showing the full available count
+(now grants everything shown at once), a newly-placed stand never faced the player (mirrors vanilla
+`ArmorStandItem#place`'s own opposite-of-player-yaw snap), and the Kit Menu's status line said "Ready
+to spawn" even with no Kyt bound at all (added a real "No Kyt bound" state; also reworded "Guard
+active" -> "Alive" and the respawn countdown to minutes, per the same report).
+
+**Guard Kit Stand "Keep Spares On Hand" + Guardhouse "Preferred Food," same day** (see
+[context/decisions.md](context/decisions.md),
+[context/classes/GuardKitStandPreferredInventory.md](context/classes/GuardKitStandPreferredInventory.md),
+[context/classes/GuardhouseFoodAutoBuy.md](context/classes/GuardhouseFoodAutoBuy.md)) -- two related
+features, confirmed with the user via explicit questions before building. Each Guard Kit Stand now
+has its own "Keep Spares On Hand" count; any stand change (Kyt binding, spares count, placed, picked
+up) wholesale-recalculates the plot's Planned Inventory from every stand currently in the plot
+(summed across stands sharing an item, food items excluded entirely). `zone.PlannedInventoryTarget`
+gained a `derivedFromGuardKitStand` flag so these entries stay invisible on the Planned Inventory
+screen and immune to being wiped by a manual save there -- `zone.PlannedInventoryClearing`'s existing
+nightly trading then funds them with zero changes needed. Separately (confirmed explicitly kept
+independent of the above), the Guardhouse's Food Stores screen gained its own "Preferred Food"
+nutrition-value threshold (Owner/Mayor/Town Planner only, via `IMenuProviderExtension` since a plain
+menu-open packet has no room for extra data), funded at the same midnight tick by buying from other
+plots' real Shop food listings, paid from the Guardhouse plot's own boxes, capped by the Food Store's
+own actual remaining room -- the one place in this mod needing a real capacity cap on a buy. `./gradlew
+build`/`test` green, whole-suite (11 mods) rebuild green, `runServer` AND `runClient` boot-smoke-tested
+clean. **Not yet live-tested.**
