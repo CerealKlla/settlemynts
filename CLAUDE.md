@@ -293,4 +293,29 @@ report both booleans instead of discarding them, so Myssions' new step-by-step m
 Highway Stake directly outside X") needed no new detection logic — see Myssions' own CLAUDE.md for
 the quest-side half. `./gradlew build` green, whole-suite (10 mods) boot-smoke-tested clean.
 
+**NPC interaction reworked into a unified menu, 2026-10-16** (see
+[context/decisions.md](context/decisions.md)) — explicit user spec: replaces the old two-key "G opens
+Shop / H opens chat" direct dispatch with a single menu, opened by either "G" or a plain right-click,
+whose five buttons (Open Store, Manage Store, Change Job, Fire NPC, Talk) are each independently
+visible per the user's own exact rule set, computed server-side in a new shared
+`SettlemyntsMod#computeNpcMenuOptions`/`NpcMenuOptions`. "Manage Store" uses a new, deliberately
+narrower permission rule than the suite's existing wide `PlotPermissions#canManage` (owner-only on a
+player-owned plot, no founder override) — scoped to this menu only; every other caller of the wide
+rule is untouched. "Change Job" (Farmer/Lumberjack, per a mid-spec correction) is owner-only and
+further restricted to a Private Residence plot (checking both the canonical and legacy zone-type
+ids) — new `zone.PlotJob` field on `PlotRecord`, resolved alongside `zoneTypeId` by a new centralized
+`zone.PlotWorkerKind#resolve`, which the four spawn tickers (Resident/Farmer/Lumberjack/Mineshaft) now
+all call instead of their own independently-duplicated zone-type checks, specifically so a plot's
+worker kind can never diverge into two tickers disagreeing once `PlotJob` can override `zoneTypeId`.
+"Fire NPC" reuses the existing `NpcHireMaintenance#despawnHiredWorker` helper, same as "Change Job"
+does to clear out the wrong-type worker before the correct ticker refills it. `VillagerShopInteractListener`
+(right-click) and the "G" key both now funnel through one new shared `SettlemyntsMod#openNpcMenu`, so
+the two trigger paths stay identical. Hit Mojang's real 16-field codec arity limit adding `PlotJob` as
+`PlotRecord`'s 17th raw field — fixed by nesting `npcHired`/`npcLastChargedDay`/`job` into a new
+`HiredNpcState` sub-record (this suite's established `RoadQuestData`/`EscortData`-style workaround),
+with hand-written pass-through accessors keeping all 8 external call sites unchanged. `./gradlew
+build` green, whole-suite (11 mods) boot-smoke-tested clean via `runServer` from Cartographyr — every
+mod's common setup line logged, server reached `Done (` with no exceptions. **Not yet live-tested or
+deployed.**
+
 See [context/classes/](context/classes/) for per-class reference.
