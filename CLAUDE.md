@@ -319,3 +319,18 @@ mod's common setup line logged, server reached `Done (` with no exceptions. **No
 deployed.**
 
 See [context/classes/](context/classes/) for per-class reference.
+
+**Roadway/Highway paving now ignores non-solid blocks (leaf litter), 2026-10-16** (see
+[context/decisions.md](context/decisions.md)) -- real report: "leaf litter is completely screwning
+up the road surface (making it non-flat when it should be) and making it take 10x longer to pave a
+road than necessary." Both `roadway.RoadwayPaver` and `roadway.HighwayPaver` determined "where's the
+real ground" (`isWalkableSurface`) and "what counts as an obstruction to clear" (the cut/clearance
+loops in `paveColumn`) with a plain `isAir()` check -- leaf litter (and any other `noCollision()`
+decorative block: tall grass, flowers, saplings, etc.) is non-air, so it was wrongly treated as
+solid ground wherever it happened to carpet the real terrain (producing an uneven paved surface) and
+as a real obstruction needing clearing in the headroom band above the road (needless extra work).
+Both pavers now check real collision (`state.getCollisionShape(level, pos).isEmpty()`) instead of
+plain air -- a new identical `isSolid` helper added to each file (matching this pair's existing
+"copy and tweak" duplication, not shared into a new utility class). `./gradlew build` green,
+whole-suite (11 mods) boot-smoke-tested clean via `runServer` from Cartographyr. **Not yet
+live-tested or deployed.**
