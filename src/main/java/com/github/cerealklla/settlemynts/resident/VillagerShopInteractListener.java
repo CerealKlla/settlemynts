@@ -5,6 +5,7 @@ import com.github.cerealklla.settlemynts.plotsign.ShopAnchor;
 import com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator;
 import com.github.cerealklla.settlemynts.zone.PlotNpc;
 
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.npc.villager.Villager;
@@ -12,21 +13,16 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 
 /**
- * Right-clicking (or the existing "press G" hotkey, via {@code plotsign.PlotShopProximityTicker})
- * a natural village's own trading Villager opens the same Shop screen a Plot Config Sign's "Enter
- * Shop" would -- Part C of the "Natural settlements..." plan, 2026-10-08, per explicit user
- * direction ("treat the villagers who have trades as the plot sales signs, including having the
- * hotkey to open the menu"). Villager AI itself is untouched (profession, trading offers, breeding
- * all keep working exactly as vanilla) -- only the right-click interaction is redirected; vanilla's
- * own trade screen is canceled so the two don't fight over the same click. Same event shape as
- * Lyfe's existing {@code knowledge.SignListener#onEntityInteract} (there, for an {@code ItemFrame}).
- *
- * <p><b>Widened 2026-10-09, explicit request</b> -- every player-settlement plot NPC ({@code
- * resident.ResidentVillagerEntity}, {@code farm.FarmerWorkerEntity}, {@code
- * lumberyard.LumberjackWorkerEntity} -- see the shared {@link PlotNpc} marker) gets identical
- * treatment, resolved via its own {@code plotId()} field directly (no persistent-data tag needed,
- * unlike the natural-village case, since these entities already carry their plot identity as real
- * fields).
+ * Right-clicking (or the "press G" hotkey, via {@code plotsign.PlotShopProximityTicker}/{@code
+ * SettlemyntsModClient}) a natural village's own trading Villager, or a player-settlement plot NPC
+ * ({@code resident.ResidentVillagerEntity}, {@code farm.FarmerWorkerEntity}, {@code
+ * lumberyard.LumberjackWorkerEntity}, {@code mineshaft.MinerWorkerEntity} -- see the shared
+ * {@link PlotNpc} marker), opens the unified NPC Menu -- explicit user spec, 2026-10-16: "G or right
+ * click now opens a GUI with menu options." Reworked from this listener's earlier direct
+ * {@code handleRequestShop}/{@code handleRequestShopWishlist} dispatch (store-only, or wishlist-only)
+ * into the same {@link SettlemyntsMod#openNpcMenu} both this and the "G" key now share, so a
+ * right-click and "G" are just two different triggers into one identical menu. Vanilla's own trade
+ * screen is still canceled so the two don't fight over the same click.
  */
 public final class VillagerShopInteractListener {
 
@@ -35,30 +31,14 @@ public final class VillagerShopInteractListener {
         if (!(event.getEntity() instanceof ServerPlayer player) || event.getHand() != InteractionHand.MAIN_HAND) {
             return;
         }
-        if (!(player.level() instanceof net.minecraft.server.level.ServerLevel level)) {
+        if (!(player.level() instanceof ServerLevel level)) {
             return;
         }
         if (event.getTarget() instanceof PlotNpc npc && npc.plotId() != null) {
             ShopAnchor.Npc anchor = new ShopAnchor.Npc(event.getTarget().getId());
-            // Real report, 2026-10-09: a plain ResidentVillagerEntity (the ambient decorative NPC on
-            // an NPC-owned, shopless plot like Private Residence) has a real plotId, so it used to
-            // pass this check and still redirect into a dead-end "This plot doesn't have a Shop" --
-            // npcHasOpenableShop is the real, narrower condition; falling through here leaves vanilla's
-            // own interaction (e.g. a plain trade screen) untouched for a shopless worker.
-            if (SettlemyntsMod.npcHasOpenableShop(level, anchor)) {
+            if (SettlemyntsMod.npcMenuHasAnyOption(player, level, anchor)) {
                 event.setCanceled(true);
-                SettlemyntsMod.handleRequestShop(player, anchor, false);
-                return;
-            }
-            // Real report, 2026-10-12: right-clicking the Town Hall plot's own resident did nothing
-            // at all -- that plot's zone type is excluded from ever having a Shop by design (see
-            // SettlemyntsMod#npcHasOpenableShop), so this fell straight through with no fallback,
-            // even though the same NPC can still have a quest-board offer/wishlist to talk about via
-            // "Press H" today. Right-click now offers the identical chat menu when there's real
-            // business, same eligibility check the "Press H" keybind/prompt already use.
-            if (SettlemyntsMod.anchorHasWishlist(level, anchor) || SettlemyntsMod.anchorHasPersonalQuestBusiness(player, level, anchor)) {
-                event.setCanceled(true);
-                SettlemyntsMod.handleRequestShopWishlist(player, level, anchor);
+                SettlemyntsMod.openNpcMenu(player, level, anchor);
             }
             return;
         }
@@ -69,10 +49,10 @@ public final class VillagerShopInteractListener {
             return;
         }
         ShopAnchor.Npc anchor = new ShopAnchor.Npc(villager.getId());
-        if (!SettlemyntsMod.npcHasOpenableShop(level, anchor)) {
+        if (!SettlemyntsMod.npcMenuHasAnyOption(player, level, anchor)) {
             return;
         }
         event.setCanceled(true);
-        SettlemyntsMod.handleRequestShop(player, anchor, false);
+        SettlemyntsMod.openNpcMenu(player, level, anchor);
     }
 }

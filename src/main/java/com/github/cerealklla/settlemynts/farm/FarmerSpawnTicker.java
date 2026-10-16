@@ -11,7 +11,6 @@ import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
-import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -23,7 +22,6 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  */
 public final class FarmerSpawnTicker {
 
-    private static final Identifier FARM_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "farm");
     private static final int SCAN_INTERVAL_TICKS = 100;
     // Staggered 2026-10-12 -- real report: every mob near the player stutter-moving in lockstep,
     // same symptom as an earlier guard-lag investigation. Root cause found this time: eight
@@ -61,7 +59,8 @@ public final class FarmerSpawnTicker {
             return;
         }
         PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
-        if (plot == null || (plot.owner().isPresent() && !plot.npcHired()) || !plot.zoneTypeId().equals(FARM_ZONE_TYPE_ID)) {
+        if (plot == null || (plot.owner().isPresent() && !plot.npcHired())
+                || com.github.cerealklla.settlemynts.zone.PlotWorkerKind.resolve(plot) != com.github.cerealklla.settlemynts.zone.PlotWorkerKind.Kind.FARMER) {
             return;
         }
         // Real, confirmed-live duplicate-worker bug fixed 2026-10-12 (see

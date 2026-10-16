@@ -19,6 +19,7 @@ public final class ClientPlotSignRequests {
     private static volatile OpenPlannedInventoryPayload pendingPlannedInventory;
     private static volatile OpenShopWishlistPayload pendingWishlist;
     private static volatile EstablishHighwayCandidatesPayload pendingEstablishHighwayMap;
+    private static volatile OpenNpcMenuPayload pendingNpcMenu;
 
     private ClientPlotSignRequests() {
     }
@@ -120,6 +121,16 @@ public final class ClientPlotSignRequests {
     public static Optional<EstablishHighwayCandidatesPayload> takePendingEstablishHighwayMap() {
         EstablishHighwayCandidatesPayload request = pendingEstablishHighwayMap;
         pendingEstablishHighwayMap = null;
+        return Optional.ofNullable(request);
+    }
+
+    public static void requestNpcMenu(OpenNpcMenuPayload payload) {
+        pendingNpcMenu = payload;
+    }
+
+    public static Optional<OpenNpcMenuPayload> takePendingNpcMenu() {
+        OpenNpcMenuPayload request = pendingNpcMenu;
+        pendingNpcMenu = null;
         return Optional.ofNullable(request);
     }
 }

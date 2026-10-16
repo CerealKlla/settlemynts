@@ -499,6 +499,25 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.SellToShopWishlistPayload.STREAM_CODEC,
                 (payload, context) -> sellToShopWishlist(payload, context));
 
+        // NPC Menu overhaul (2026-10-16, explicit user spec) -- "G"/right-click both land on
+        // requestNpcMenu; its three follow-up actions (Change Job's picker is a pure client-side
+        // screen, no round trip needed to open it).
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestNpcMenuPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestNpcMenuPayload.STREAM_CODEC,
+                (payload, context) -> requestNpcMenu(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenNpcMenuPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenNpcMenuPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestNpcMenu(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetPlotJobPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SetPlotJobPayload.STREAM_CODEC,
+                (payload, context) -> setPlotJob(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestFireNpcPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestFireNpcPayload.STREAM_CODEC,
+                (payload, context) -> requestFireNpc(payload, context));
+
         // Quest menu inside the same "Press H" chat screen (2026-10-10) -- see
         // bridge.MyssionsQuestBridge's own doc.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.AcceptBoardOfferPayload.TYPE,
@@ -526,10 +545,11 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.SetPlannedInventoryPayload.STREAM_CODEC,
                 (payload, context) -> setPlannedInventory(payload, context));
 
-        // "Press G to open shop" proximity prompt (2026-10-05) -- see PlotShopProximityTicker's own doc.
+        // "Press G to talk" proximity prompt (2026-10-05, reworked 2026-10-16 for the NPC Menu) --
+        // see PlotShopProximityTicker's own doc.
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.STREAM_CODEC,
-                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState.set(payload.present(), payload.anchor(), payload.hasWishlist()));
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState.set(payload.present(), payload.anchor()));
 
         // Personal "!" head marker (2026-10-11) -- see PersonalQuestMarkerPayload's own doc.
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.PersonalQuestMarkerPayload.TYPE,
@@ -1726,6 +1746,161 @@ public class SettlemyntsMod {
                 .orElse(false);
     }
 
+    // The real, canonical Blueprynts-bridged Private Residence zone type, plus the legacy
+    // settlemynts:private_residence id a pre-2026-10-01 plot might still carry (see
+    // zone.ZoneTypeRegistry's own ALIASES map for the full story) -- "Change Job" needs to
+    // recognize both, the same way that registry's own lookups already do.
+    private static final Identifier PRIVATE_RESIDENCE_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "private_residence");
+    private static final Identifier PRIVATE_RESIDENCE_LEGACY_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath(MODID, "private_residence");
+
+    /**
+     * Every button {@code client.NpcMenuScreen} can show, computed once and shared by both {@link
+     * #requestNpcMenu} (what actually opens the menu) and {@code plotsign.PlotShopProximityTicker}
+     * (deciding whether the "Press G" prompt itself should even appear) -- the two can never
+     * disagree about whether there's "something here" this way.
+     *
+     * <p>{@code canManageStore} is deliberately NARROWER than {@code zone.PlotPermissions#canManage}
+     * (explicit user spec, 2026-10-16: "Visible to Owner if non-NPC, otherwise visible to Mayor or
+     * Town Planners") -- on a player-owned plot this drops {@code canManage}'s usual founder-always-
+     * wins override, showing "Manage Store" only to that plot's own real owner. This is scoped to
+     * the NPC Menu alone; the Plot Config Sign's own separate "Manage Shop" button still uses the
+     * wider, unchanged {@code canManage} (right-clicking the physical sign is a different
+     * interaction surface this request didn't ask to touch).
+     *
+     * <p>{@code canChangeJob} needs {@code zoneTypeId} to actually be Private Residence -- explicit
+     * user follow-up, "I forgot to specify, the 'change job' is only available for an NPC on a
+     * private property plot." A Farm/Lumberyard plot already gets the matching worker for free via
+     * {@code zone.PlotWorkerKind}; "Change Job" exists specifically to let a Private Residence
+     * owner's hired NPC do productive work instead of just standing around decoratively.
+     */
+    public static NpcMenuOptions computeNpcMenuOptions(ServerPlayer player, ServerLevel level, com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc anchor) {
+        java.util.Optional<ShopContext> resolved = resolveShopContext(level, anchor);
+        if (resolved.isEmpty()) {
+            return NpcMenuOptions.NONE;
+        }
+        PlotRecord plot = resolved.get().plot();
+        com.github.cerealklla.settlemynts.zone.PlotOwner owner = resolved.get().owner();
+        UUID playerId = player.getUUID();
+
+        boolean canOpenStore = npcHasOpenableShop(level, anchor);
+
+        boolean isOwnerViewing = plot.owner().map(playerId::equals).orElse(false);
+        boolean canManageStore;
+        if (!canOpenStore) {
+            canManageStore = false;
+        } else if (plot.owner().isPresent()) {
+            canManageStore = isOwnerViewing;
+        } else {
+            canManageStore = owner instanceof GhostTownHallCoreEntity core && core.isTownPlanner(playerId);
+        }
+
+        boolean isPrivateResidence = plot.zoneTypeId().equals(PRIVATE_RESIDENCE_ZONE_TYPE_ID)
+                || plot.zoneTypeId().equals(PRIVATE_RESIDENCE_LEGACY_ZONE_TYPE_ID);
+        boolean canChangeJob = isOwnerViewing && isPrivateResidence;
+
+        boolean canFireNpc = isOwnerViewing && plot.npcHired();
+
+        boolean canTalk = plot.owner().isEmpty();
+
+        return new NpcMenuOptions(canOpenStore, canManageStore, canChangeJob, canFireNpc, canTalk);
+    }
+
+    public record NpcMenuOptions(boolean canOpenStore, boolean canManageStore, boolean canChangeJob, boolean canFireNpc, boolean canTalk) {
+        public static final NpcMenuOptions NONE = new NpcMenuOptions(false, false, false, false, false);
+
+        public boolean any() {
+            return canOpenStore || canManageStore || canChangeJob || canFireNpc || canTalk;
+        }
+    }
+
+    /** Whether {@code client.NpcMenuScreen} would show anything at all for this NPC right now -- see {@link #computeNpcMenuOptions}'s own doc. */
+    public static boolean npcMenuHasAnyOption(ServerPlayer player, ServerLevel level, com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc anchor) {
+        return computeNpcMenuOptions(player, level, anchor).any();
+    }
+
+    private static void requestNpcMenu(com.github.cerealklla.settlemynts.plotsign.RequestNpcMenuPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        openNpcMenu(player, serverLevel, payload.anchor());
+    }
+
+    /** Sends {@code client.NpcMenuScreen}'s data -- shared by {@link #requestNpcMenu} (the "G" key)
+     *  and {@code resident.VillagerShopInteractListener} (a plain right-click), so both paths into
+     *  the menu stay identical. A no-op if {@code anchor} no longer resolves to a real entity. */
+    public static void openNpcMenu(ServerPlayer player, ServerLevel level, com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc anchor) {
+        if (!(level.getEntity(anchor.entityId()) instanceof net.minecraft.world.entity.LivingEntity npc)) {
+            return;
+        }
+        NpcMenuOptions options = computeNpcMenuOptions(player, level, anchor);
+        String npcName = npc.getName().getString();
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenNpcMenuPayload(
+                anchor, npcName, options.canOpenStore(), options.canManageStore(), options.canChangeJob(), options.canFireNpc(), options.canTalk()));
+    }
+
+    /**
+     * Resolves the {@code plotsign.PlotConfigSignBlockEntity} for whichever plot {@code anchor}
+     * (an NPC, not a sign position) belongs to -- "Change Job"/"Fire NPC" both need the real sign to
+     * discard a worker through ({@code zone.NpcHireMaintenance#despawnHiredWorker}), but only ever
+     * have an NPC anchor to start from. Same {@code PlotConfigSignIndex} plotId lookup {@code
+     * zone.PlotNpcDeathListener} already uses for the identical problem.
+     */
+    private static java.util.Optional<com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity> resolveSignForPlot(net.minecraft.server.MinecraftServer server, UUID plotId) {
+        return com.github.cerealklla.settlemynts.plotsign.PlotConfigSignIndex.get(server).get(plotId).flatMap(globalPos -> {
+            ServerLevel signLevel = server.getLevel(globalPos.dimension());
+            if (signLevel == null || !(signLevel.getBlockEntity(globalPos.pos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)) {
+                return java.util.Optional.empty();
+            }
+            return java.util.Optional.of(sign);
+        });
+    }
+
+    private static void setPlotJob(com.github.cerealklla.settlemynts.plotsign.SetPlotJobPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc anchor = payload.anchor();
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, anchor);
+        if (resolved.isEmpty() || !(resolved.get().owner() instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        NpcMenuOptions options = computeNpcMenuOptions(player, serverLevel, anchor);
+        if (!options.canChangeJob()) {
+            player.sendSystemMessage(Component.literal("You can't change this NPC's job."));
+            return;
+        }
+        core.updatePlot(plot.withJob(payload.job()));
+        resolveSignForPlot(serverLevel.getServer(), plot.plotId())
+                .ifPresent(sign -> com.github.cerealklla.settlemynts.zone.NpcHireMaintenance.despawnHiredWorker(serverLevel, sign));
+        player.sendSystemMessage(Component.literal(payload.job() == com.github.cerealklla.settlemynts.zone.PlotJob.NONE
+                ? "Job cleared -- the NPC will go back to its usual role."
+                : "Job changed to " + payload.job().name().charAt(0) + payload.job().name().substring(1).toLowerCase(java.util.Locale.ROOT) + "."));
+    }
+
+    private static void requestFireNpc(com.github.cerealklla.settlemynts.plotsign.RequestFireNpcPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc anchor = payload.anchor();
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, anchor);
+        if (resolved.isEmpty() || !(resolved.get().owner() instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        NpcMenuOptions options = computeNpcMenuOptions(player, serverLevel, anchor);
+        if (!options.canFireNpc()) {
+            player.sendSystemMessage(Component.literal("You can't fire this NPC."));
+            return;
+        }
+        core.updatePlot(plot.withNpcHired(false));
+        resolveSignForPlot(serverLevel.getServer(), plot.plotId())
+                .ifPresent(sign -> com.github.cerealklla.settlemynts.zone.NpcHireMaintenance.despawnHiredWorker(serverLevel, sign));
+        player.sendSystemMessage(Component.literal("Fired. Click \"Hire NPC\" again whenever you want to re-staff this plot."));
+    }
+
     private static java.util.Optional<PlotRecordAndCore> resolvePlotForManage(ServerLevel level, net.minecraft.core.BlockPos signPos, UUID playerId) {
         if (!(level.getBlockEntity(signPos) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
                 || sign.settlementCoreId() == null
@@ -2479,7 +2654,7 @@ public class SettlemyntsMod {
                     Map.of(Identifier.withDefaultNamespace("gold_nugget"), 1), 1L));
         }
 
-        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1, java.util.List.of(), 0, false, -1L);
+        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1, java.util.List.of(), 0, PlotRecord.HiredNpcState.NONE);
         core.addPlot(plotRecord);
 
         // Plot Config Sign (design doc Section 14a) -- spawned unconditionally, next to the same

@@ -11,7 +11,6 @@ import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
-import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -27,7 +26,6 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  */
 public final class MineshaftSpawnTicker {
 
-    private static final Identifier MINESHAFT_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "mineshaft");
     private static final int SCAN_INTERVAL_TICKS = 100; // 5 seconds, same cadence as the other spawn tickers.
     // Staggered 2026-10-12 against the other seven 100-tick full-world scan tickers across this
     // suite -- see FarmerSpawnTicker's own doc for the full "thundering herd" root cause.
@@ -56,7 +54,8 @@ public final class MineshaftSpawnTicker {
             return;
         }
         PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
-        if (plot == null || (plot.owner().isPresent() && !plot.npcHired()) || !plot.zoneTypeId().equals(MINESHAFT_ZONE_TYPE_ID)) {
+        if (plot == null || (plot.owner().isPresent() && !plot.npcHired())
+                || com.github.cerealklla.settlemynts.zone.PlotWorkerKind.resolve(plot) != com.github.cerealklla.settlemynts.zone.PlotWorkerKind.Kind.MINER) {
             return;
         }
 

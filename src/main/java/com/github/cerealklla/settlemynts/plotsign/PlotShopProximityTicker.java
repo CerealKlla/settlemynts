@@ -93,9 +93,17 @@ public final class PlotShopProximityTicker {
     }
 
     /**
-     * "Press G to open shop" / "Press H to chat" eligibility, plus the public "?" wishlist nameplate
-     * refresh for every NPC candidate actually resolved here (preserves the old behavior where an
-     * NPC's nameplate got refreshed as a side effect of some player merely walking near it).
+     * "Press G to talk" eligibility, plus the public "?" wishlist nameplate refresh for every NPC
+     * candidate actually resolved here (preserves the old behavior where an NPC's nameplate got
+     * refreshed as a side effect of some player merely walking near it).
+     *
+     * <p><b>NPC-only as of 2026-10-16</b> (the NPC Menu overhaul, explicit user spec: "I'd like to
+     * adjust NPCs") -- Sign candidates are no longer considered at all here. A Plot Config Sign was
+     * never actually gated by this prompt to begin with (right-clicking the physical sign block
+     * always opened its own Main Menu directly, independent of this proximity system -- see {@code
+     * PlotConfigSignBlock#useWithoutItem}), so dropping it changes nothing reachable, just the
+     * (previously meaningless, since G already opened the Shop for a sign too) possibility of the
+     * prompt/G-key firing for one.
      */
     private static void handleNearCandidates(ServerPlayer player, ServerLevel level, List<ShopAnchor> candidates) {
         // A little slack over the client's own scan radius absorbs the latency between the client's
@@ -103,35 +111,34 @@ public final class PlotShopProximityTicker {
         // measured as in-range a tick or two ago, by which point the player may have moved slightly.
         double maxTrustedDistSq = (double) (RADIUS_BLOCKS + 2) * (RADIUS_BLOCKS + 2);
 
-        ShopAnchor nearest = null;
+        ShopAnchor.Npc nearest = null;
         double nearestDistSq = Double.MAX_VALUE;
 
         for (ShopAnchor candidate : candidates) {
-            double distSq;
-            if (candidate instanceof ShopAnchor.Sign sign) {
-                if (!(level.getBlockEntity(sign.pos()) instanceof PlotConfigSignBlockEntity signEntity)
-                        || !PlotConfigSignBlock.hasShop(level, signEntity)) {
-                    continue;
-                }
-                distSq = sign.pos().distSqr(player.blockPosition());
-            } else {
-                ShopAnchor.Npc npcAnchor = (ShopAnchor.Npc) candidate;
-                if (!(level.getEntity(npcAnchor.entityId()) instanceof Villager villager)) {
-                    continue;
-                }
-                // Refreshed for every resolved candidate, not just whichever ends up nearest -- same
-                // "any nearby NPC gets its public state re-synced" behavior the old per-tick scan had.
-                updateWishlistNameplate(level, villager, npcAnchor);
-                if (!SettlemyntsMod.npcHasOpenableShop(level, npcAnchor)) {
-                    continue;
-                }
-                distSq = villager.distanceToSqr(player);
+            if (!(candidate instanceof ShopAnchor.Npc npcAnchor)) {
+                continue;
             }
+            if (!(level.getEntity(npcAnchor.entityId()) instanceof Villager villager)) {
+                continue;
+            }
+            // Refreshed for every resolved candidate, not just whichever ends up nearest -- same
+            // "any nearby NPC gets its public state re-synced" behavior the old per-tick scan had.
+            updateWishlistNameplate(level, villager, npcAnchor);
+            // The NPC Menu can offer Talk/Change Job/Fire NPC even for an NPC with no openable Shop
+            // at all (e.g. a plain Resident on a Private Residence) -- eligibility for the PROMPT
+            // itself is deliberately broader than the old "has a Shop" gate: anything the menu could
+            // show at all is enough to invite a press. SettlemyntsMod#npcMenuHasAnyOption is the same
+            // computation requestNpcMenu itself uses, so the prompt and the menu's own real content
+            // can never disagree about whether there's "something here."
+            if (!SettlemyntsMod.npcMenuHasAnyOption(player, level, npcAnchor)) {
+                continue;
+            }
+            double distSq = villager.distanceToSqr(player);
             if (distSq > maxTrustedDistSq || distSq >= nearestDistSq) {
                 continue;
             }
             nearestDistSq = distSq;
-            nearest = candidate;
+            nearest = npcAnchor;
         }
 
         UUID playerId = player.getUUID();
@@ -141,15 +148,10 @@ public final class PlotShopProximityTicker {
         }
         if (nearest != null) {
             lastSent.put(playerId, nearest);
-            // "Press H to chat" is NPC-only -- see this class's own doc. A sign anchor always
-            // reports false here even if its own shop has a real wishlist deficit; "Press G to open
-            // shop" (gated only on `nearest` being present at all, not on this flag) still works.
-            boolean canChat = nearest instanceof ShopAnchor.Npc
-                    && (SettlemyntsMod.anchorHasWishlist(level, nearest) || SettlemyntsMod.anchorHasPersonalQuestBusiness(player, level, nearest));
-            PacketDistributor.sendToPlayer(player, new PlotShopPromptPayload(true, nearest, canChat));
+            PacketDistributor.sendToPlayer(player, new PlotShopPromptPayload(true, nearest));
         } else {
             lastSent.remove(playerId);
-            PacketDistributor.sendToPlayer(player, new PlotShopPromptPayload(false, new ShopAnchor.Sign(BlockPos.ZERO), false));
+            PacketDistributor.sendToPlayer(player, new PlotShopPromptPayload(false, new ShopAnchor.Sign(BlockPos.ZERO)));
         }
     }
 

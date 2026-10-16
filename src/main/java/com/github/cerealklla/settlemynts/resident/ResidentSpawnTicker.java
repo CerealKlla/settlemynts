@@ -32,13 +32,13 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * <p>Every finalized plot with {@code PlotRecord#owner().isEmpty()} (NPC-owned, the default -- see
  * {@code construction.NpcAutoFundingTicker}'s identical check), or a player-owned plot with {@code
  * PlotRecord#npcHired()} set (added 2026-10-15, see that field's own doc and {@code
- * zone.NpcMaintenanceTicker}), is eligible, regardless of zone
- * type -- except a Guardhouse (real report, 2026-10-05: "do not spawn an NPC at the guardhouse,
- * they already spawn actual guards" -- this is exactly the "worth revisiting" case this doc used
- * to flag as open; it's now resolved, a Guardhouse plot never gets a resident), and, same day,
- * Lumberyard/Farm/Mineshaft plots once their own specialized worker NPCs (see {@code
+ * zone.NpcMaintenanceTicker}), is eligible -- but only once {@code zone.PlotWorkerKind#resolve}
+ * (added 2026-10-16, replacing four separate hand-duplicated zone-type checks -- see its own doc)
+ * says this plot's real worker kind is {@code RESIDENT}: never a Guardhouse or Town Hall (neither
+ * has a worker-NPC concept at all), and never a plot whose real Zone Type -- or an explicit {@code
+ * zone.PlotJob} "Change Job" override -- resolves to Farmer/Lumberjack/Miner instead (see {@code
  * lumberyard.LumberjackSpawnTicker}/{@code farm.FarmerSpawnTicker}/{@code
- * mineshaft.MineshaftSpawnTicker}) replaced the generic resident for those zone types too.
+ * mineshaft.MineshaftSpawnTicker}, which get their own specialized worker for those cases).
  */
 public final class ResidentSpawnTicker {
 
@@ -73,13 +73,10 @@ public final class ResidentSpawnTicker {
         if (plot == null || (plot.owner().isPresent() && !plot.npcHired())) {
             return; // Player-owned, and no hired NPC paid for -- no resident.
         }
-        if (plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
-            return; // Guardhouse already has its own guards -- no resident villager too.
-        }
-        if (plot.zoneTypeId().equals(net.minecraft.resources.Identifier.fromNamespaceAndPath("blueprynts", "lumberyard"))
-                || plot.zoneTypeId().equals(net.minecraft.resources.Identifier.fromNamespaceAndPath("blueprynts", "farm"))
-                || plot.zoneTypeId().equals(net.minecraft.resources.Identifier.fromNamespaceAndPath("blueprynts", "mineshaft"))) {
-            return; // These get their own specialized worker instead (see lumberyard/farm/mineshaft packages).
+        if (com.github.cerealklla.settlemynts.zone.PlotWorkerKind.resolve(plot) != com.github.cerealklla.settlemynts.zone.PlotWorkerKind.Kind.RESIDENT) {
+            return; // Guardhouse/Town Hall get no worker at all, and Farm/Lumberyard/Mineshaft (by
+            // zoneTypeId or an explicit PlotJob override) get their own specialized worker instead --
+            // see PlotWorkerKind's own doc for why this single check replaced four separate ones.
         }
 
         // Real, confirmed-live duplicate-worker bug fixed 2026-10-12 (see

@@ -9,12 +9,17 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.neoforged.neoforge.client.gui.GuiLayer;
 
 /**
- * "Press &lt;hotkey&gt; to open shop" -- floating text centered over the player's XP bar while
- * within 4 blocks of a shop-eligible Plot Config Sign (design doc Section 14a, 2026-10-05). Driven
- * entirely by {@link ClientShopPromptState} (updated from {@code PlotShopPromptPayload}) -- no
- * per-frame server round-trip. Same render-from-client-state shape as {@code
- * zone.PlotValidityOverlay}, positioned instead right above vanilla's own XP bar (an eyeballed
- * offset, like every other HUD margin in this suite).
+ * "Press &lt;hotkey&gt; to talk" -- floating text centered over the player's XP bar while within 4
+ * blocks of an eligible NPC (design doc Section 14a, 2026-10-05). Driven entirely by {@link
+ * ClientShopPromptState} (updated from {@code PlotShopPromptPayload}) -- no per-frame server
+ * round-trip. Same render-from-client-state shape as {@code zone.PlotValidityOverlay}, positioned
+ * instead right above vanilla's own XP bar (an eyeballed offset, like every other HUD margin in this
+ * suite).
+ *
+ * <p><b>Reworked 2026-10-16</b>, NPC Menu overhaul (explicit user spec: "Remove 'Press H to talk' /
+ * Change G to 'Press G to talk'") -- collapsed back down to a single line/single key. What used to
+ * be two separate destinations ("open shop" via G, "chat" via H) are now both just entries inside
+ * the one menu G opens -- see {@code client.NpcMenuScreen}.
  */
 public final class ShopPromptOverlay implements GuiLayer {
 
@@ -33,26 +38,17 @@ public final class ShopPromptOverlay implements GuiLayer {
             return; // Don't draw over an open menu/screen.
         }
 
-        String keyName = SettlemyntsModClient.OPEN_SHOP.getTranslatedKeyMessage().getString();
-        String text = "Press " + keyName + " to open shop";
-        // "Press <key> to chat" (2026-10-10, public shop wishlist) -- only shown when this shop
-        // actually has something to ask about, see ClientShopPromptState#hasWishlist's own doc.
-        String chatText = ClientShopPromptState.hasWishlist()
-                ? "Press " + SettlemyntsModClient.TALK.getTranslatedKeyMessage().getString() + " to chat"
-                : null;
+        String keyName = SettlemyntsModClient.OPEN_NPC_MENU.getTranslatedKeyMessage().getString();
+        String text = "Press " + keyName + " to talk";
 
         Font font = minecraft.font;
-        int textWidth = Math.max(font.width(text), chatText != null ? font.width(chatText) : 0);
+        int textWidth = font.width(text);
         int left = guiGraphics.guiWidth() / 2 - textWidth / 2 - PADDING;
         int right = left + textWidth + PADDING * 2;
-        int lineCount = chatText != null ? 2 : 1;
         int bottom = guiGraphics.guiHeight() - MARGIN_FROM_BOTTOM;
-        int top = bottom - font.lineHeight * lineCount - PADDING * 2;
+        int top = bottom - font.lineHeight - PADDING * 2;
 
         guiGraphics.fill(left, top, right, bottom, BACKGROUND_COLOR);
         guiGraphics.text(font, text, left + PADDING, top + PADDING, TEXT_COLOR);
-        if (chatText != null) {
-            guiGraphics.text(font, chatText, left + PADDING, top + PADDING + font.lineHeight, TEXT_COLOR);
-        }
     }
 }

@@ -14,12 +14,11 @@ import com.github.cerealklla.settlemynts.guardhouse.client.GuardRenderer;
 import com.github.cerealklla.settlemynts.guardhouse.client.GuardhouseFoodScreen;
 import com.github.cerealklla.settlemynts.guardhouse.client.SelectKytScreen;
 import com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests;
-import com.github.cerealklla.settlemynts.plotsign.RequestShopPayload;
-import com.github.cerealklla.settlemynts.plotsign.RequestShopWishlistPayload;
 import com.github.cerealklla.settlemynts.plotsign.client.ClientProximityScanner;
 import com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotConfigSignMenuScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotDetailsScreen;
+import com.github.cerealklla.settlemynts.plotsign.client.NpcMenuScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotManagementScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.ShopPromptOverlay;
 import com.github.cerealklla.settlemynts.plotsign.client.ShopScreen;
@@ -58,22 +57,18 @@ public class SettlemyntsModClient {
                 new com.github.cerealklla.settlemynts.plotsign.client.PersonalQuestMarkerRenderer());
     }
 
-    // "Press G to open shop" (design doc Section 14a, 2026-10-05) -- "G" is free across the whole
-    // suite (Lyfe uses "[", "]", "O", "K"), flagged as an easy-to-rebind placeholder like every
-    // other keybind in this project.
-    public static final KeyMapping OPEN_SHOP = new KeyMapping(
-            "key.settlemynts.open_shop", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G, KeyMapping.Category.MISC);
-
-    // "Press H to chat" (2026-10-10, public shop wishlist -- see zone.ShopWishlist's own doc). "H"
-    // is free across the whole suite the same way "G" was -- flagged as an easy-to-rebind
-    // placeholder like every other keybind in this project.
-    public static final KeyMapping TALK = new KeyMapping(
-            "key.settlemynts.talk", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_H, KeyMapping.Category.MISC);
+    // "Press G to talk" (design doc Section 14a, originally 2026-10-05; reworked 2026-10-16, NPC
+    // Menu overhaul, explicit user spec: "Remove 'Press H to talk' / Change G to 'Press G to
+    // talk'") -- "G" is free across the whole suite (Lyfe uses "[", "]", "O", "K"), flagged as an
+    // easy-to-rebind placeholder like every other keybind in this project. The old separate "H"
+    // keybind is gone entirely -- both G and a plain right-click now open the same unified NPC
+    // Menu (see client.NpcMenuScreen), which is where "chat" (Talk) lives now.
+    public static final KeyMapping OPEN_NPC_MENU = new KeyMapping(
+            "key.settlemynts.open_npc_menu", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G, KeyMapping.Category.MISC);
 
     @SubscribeEvent
     static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
-        event.register(OPEN_SHOP);
-        event.register(TALK);
+        event.register(OPEN_NPC_MENU);
     }
 
     @SubscribeEvent
@@ -185,20 +180,17 @@ public class SettlemyntsModClient {
             }
         });
 
-        // "Press G to open shop" (2026-10-05) -- sends the exact same request the Main Menu's
-        // "Enter Shop" button already sends (manage=false), now against the real Shop backend.
-        while (OPEN_SHOP.consumeClick()) {
+        // "Press G to talk" (reworked 2026-10-16, NPC Menu overhaul) -- opens the unified NPC Menu
+        // instead of jumping straight to the Shop; same "server resolves eligibility, client just
+        // reacts to the last snapshot" shape the old prompt already used. ClientShopPromptState is
+        // NPC-only now (see its own doc), so this cast is always safe.
+        while (OPEN_NPC_MENU.consumeClick()) {
             if (Minecraft.getInstance().screen == null) {
-                ClientShopPromptState.get().ifPresent(anchor -> send(new RequestShopPayload(anchor, false)));
-            }
-        }
-
-        // "Press H to chat" (2026-10-10) -- only offered while ClientShopPromptState.hasWishlist(),
-        // same "server resolves eligibility, client just reacts to the last snapshot" shape as the
-        // "Press G to open shop" prompt above.
-        while (TALK.consumeClick()) {
-            if (Minecraft.getInstance().screen == null && ClientShopPromptState.hasWishlist()) {
-                ClientShopPromptState.get().ifPresent(anchor -> send(new RequestShopWishlistPayload(anchor)));
+                ClientShopPromptState.get().ifPresent(anchor -> {
+                    if (anchor instanceof com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Npc npcAnchor) {
+                        send(new com.github.cerealklla.settlemynts.plotsign.RequestNpcMenuPayload(npcAnchor));
+                    }
+                });
             }
         }
 
@@ -260,6 +252,13 @@ public class SettlemyntsModClient {
         ClientPlotSignRequests.takePendingStockUpdate().ifPresent(update -> {
             if (Minecraft.getInstance().screen instanceof ShopScreen shopScreen) {
                 shopScreen.updateListings(update.listings());
+            }
+        });
+
+        // NPC Menu overhaul (2026-10-16) -- "G" (above) and a plain right-click both land here.
+        ClientPlotSignRequests.takePendingNpcMenu().ifPresent(request -> {
+            if (Minecraft.getInstance().screen == null) {
+                Minecraft.getInstance().setScreen(new NpcMenuScreen(request));
             }
         });
     }
