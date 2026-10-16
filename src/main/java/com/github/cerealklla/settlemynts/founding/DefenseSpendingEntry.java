@@ -1,4 +1,4 @@
-package com.github.cerealklla.settlemynts.plotsign;
+package com.github.cerealklla.settlemynts.founding;
 
 import java.util.UUID;
 

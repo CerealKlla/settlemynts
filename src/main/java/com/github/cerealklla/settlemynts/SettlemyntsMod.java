@@ -621,17 +621,19 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload.STREAM_CODEC,
                 (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestPlotManagement(payload));
 
-        // "Defense Spending" (explicit user spec, 2026-10-16) -- Town Hall plot's own sign.
-        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestDefenseSpendingPayload.TYPE,
-                com.github.cerealklla.settlemynts.plotsign.RequestDefenseSpendingPayload.STREAM_CODEC,
+        // "Defense Spending" (explicit user spec, 2026-10-16) -- the Ghost Town Hall Core's own
+        // direct right-click menu (FoundingScreen), NOT the Plot Config Sign -- a real correction,
+        // see decisions.md.
+        registrar.playToServer(com.github.cerealklla.settlemynts.founding.RequestDefenseSpendingPayload.TYPE,
+                com.github.cerealklla.settlemynts.founding.RequestDefenseSpendingPayload.STREAM_CODEC,
                 (payload, context) -> requestDefenseSpending(payload, context));
 
-        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenDefenseSpendingMenuPayload.TYPE,
-                com.github.cerealklla.settlemynts.plotsign.OpenDefenseSpendingMenuPayload.STREAM_CODEC,
-                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestDefenseSpending(payload));
+        registrar.playToClient(com.github.cerealklla.settlemynts.founding.OpenDefenseSpendingMenuPayload.TYPE,
+                com.github.cerealklla.settlemynts.founding.OpenDefenseSpendingMenuPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.founding.ClientFoundingRequests.requestDefenseSpendingScreen(payload));
 
-        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetDefenseSpendingPayload.TYPE,
-                com.github.cerealklla.settlemynts.plotsign.SetDefenseSpendingPayload.STREAM_CODEC,
+        registrar.playToServer(com.github.cerealklla.settlemynts.founding.SetDefenseSpendingPayload.TYPE,
+                com.github.cerealklla.settlemynts.founding.SetDefenseSpendingPayload.STREAM_CODEC,
                 (payload, context) -> setDefenseSpending(payload, context));
 
         // Guard Kit Stand overhaul (design doc Section 14a, reworked 2026-10-16) -- "Get Guard Kit
@@ -2103,27 +2105,21 @@ public class SettlemyntsMod {
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload(entries));
     }
 
-    /** "Defense Spending" button click -- Town Hall plot only, same resolve/validate shape as {@link #requestPlotManagement}. */
-    private static void requestDefenseSpending(com.github.cerealklla.settlemynts.plotsign.RequestDefenseSpendingPayload payload, IPayloadContext context) {
+    /** "Defense Spending..." button click on {@code client.FoundingScreen} -- the Ghost Town Hall Core's own direct menu, same resolve/validate shape as {@link #setBoundaryVisible}. */
+    private static void requestDefenseSpending(com.github.cerealklla.settlemynts.founding.RequestDefenseSpendingPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
-                || sign.settlementCoreId() == null
-                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
-            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+        if (!(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal(
+                    "Couldn't find this settlement's Town Hall Core anymore -- try right-clicking it again to reopen this screen."));
             return;
         }
-        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
-        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
-            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+        if (!core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
             return;
         }
-        if (!plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)) {
-            player.sendSystemMessage(Component.literal("Defense Spending is only available on the Town Hall plot."));
-            return;
-        }
-        List<com.github.cerealklla.settlemynts.plotsign.DefenseSpendingEntry> entries = new ArrayList<>();
+        List<com.github.cerealklla.settlemynts.founding.DefenseSpendingEntry> entries = new ArrayList<>();
         for (PlotRecord p : core.getPlots()) {
             if (!p.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
                 continue;
@@ -2137,26 +2133,23 @@ public class SettlemyntsMod {
                         }
                         return java.util.Optional.<Integer>empty();
                     }).orElse(0);
-            entries.add(new com.github.cerealklla.settlemynts.plotsign.DefenseSpendingEntry(p.plotId(), p.name(), allocation));
+            entries.add(new com.github.cerealklla.settlemynts.founding.DefenseSpendingEntry(p.plotId(), p.name(), allocation));
         }
-        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenDefenseSpendingMenuPayload(payload.signPos(), entries));
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.founding.OpenDefenseSpendingMenuPayload(payload.coreEntityId(), entries));
     }
 
-    /** "Set" button click on {@code client.DefenseSpendingScreen} -- re-validates canManage against the Town Hall plot, then matches {@code guardhousePlotId} against this SAME settlement's own plot list before applying. */
-    private static void setDefenseSpending(com.github.cerealklla.settlemynts.plotsign.SetDefenseSpendingPayload payload, IPayloadContext context) {
+    /** "Set" button click on {@code client.DefenseSpendingScreen} -- re-validates {@code isTownPlanner} against the Town Hall Core, then matches {@code guardhousePlotId} against this SAME settlement's own plot list before applying. */
+    private static void setDefenseSpending(com.github.cerealklla.settlemynts.founding.SetDefenseSpendingPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
-                || sign.settlementCoreId() == null
-                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
-            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+        if (!(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal(
+                    "Couldn't find this settlement's Town Hall Core anymore -- try right-clicking it again to reopen this screen."));
             return;
         }
-        PlotRecord townHall = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
-        if (townHall == null || !PlotPermissions.canManage(townHall, core, player.getUUID())
-                || !townHall.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID)) {
-            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+        if (!core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
             return;
         }
         PlotRecord guardhousePlot = core.getPlots().stream().filter(p -> p.plotId().equals(payload.guardhousePlotId())

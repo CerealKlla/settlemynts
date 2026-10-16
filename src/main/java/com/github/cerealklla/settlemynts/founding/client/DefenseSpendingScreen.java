@@ -1,8 +1,8 @@
-package com.github.cerealklla.settlemynts.plotsign.client;
+package com.github.cerealklla.settlemynts.founding.client;
 
-import com.github.cerealklla.settlemynts.plotsign.DefenseSpendingEntry;
-import com.github.cerealklla.settlemynts.plotsign.OpenDefenseSpendingMenuPayload;
-import com.github.cerealklla.settlemynts.plotsign.SetDefenseSpendingPayload;
+import com.github.cerealklla.settlemynts.founding.DefenseSpendingEntry;
+import com.github.cerealklla.settlemynts.founding.OpenDefenseSpendingMenuPayload;
+import com.github.cerealklla.settlemynts.founding.SetDefenseSpendingPayload;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -13,10 +13,13 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 
 /**
- * "Defense Spending" (explicit user spec, 2026-10-16) -- the Town Hall plot's own sign, listing
- * every Guardhouse in the settlement with an editable gold top-up amount each. {@code
- * guardhouse.DefenseSpendingTransfer} is what actually moves the gold, at midnight. No scrolling
- * yet -- same accepted v1 limitation as {@code PlotManagementScreen}.
+ * "Defense Spending" (explicit user spec, 2026-10-16: "Town Hall Core should have a menu option for
+ * 'Defense Spending'") -- opened from {@code FoundingScreen}'s own "Defense Spending..." button, the
+ * Ghost Town Hall Core's own direct right-click menu, NOT the Plot Config Sign (a real correction --
+ * a first pass put this on the sign instead). Lists every Guardhouse in the settlement with an
+ * editable gold top-up amount each. {@code guardhouse.DefenseSpendingTransfer} is what actually moves
+ * the gold, at midnight. No scrolling yet -- same accepted v1 limitation as {@code
+ * PlotManagementScreen}.
  */
 public final class DefenseSpendingScreen extends Screen {
 
@@ -62,7 +65,7 @@ public final class DefenseSpendingScreen extends Screen {
             value = 0;
         }
         Minecraft.getInstance().getConnection().send(new ServerboundCustomPayloadPacket(
-                new SetDefenseSpendingPayload(data.signPos(), entry.plotId(), Math.max(0, value))));
+                new SetDefenseSpendingPayload(data.coreEntityId(), entry.plotId(), Math.max(0, value))));
     }
 
     @Override

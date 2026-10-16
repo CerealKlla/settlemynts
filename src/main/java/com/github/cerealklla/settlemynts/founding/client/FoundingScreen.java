@@ -100,6 +100,14 @@ public final class FoundingScreen extends Screen {
             addRenderableWidget(Button.builder(Component.literal("Roadways..."), b -> openRoadwayManagement())
                     .bounds(centerX - 100, y, 245, 20).build());
             y += 30;
+
+            // "Defense Spending" (explicit user spec, 2026-10-16: "Town Hall Core should have a menu
+            // option for 'Defense Spending'") -- needs a server round trip first (the settlement's
+            // live Guardhouse list + current allocations), unlike Plots.../Roadways... above, so this
+            // sends a request and closes rather than opening a screen directly.
+            addRenderableWidget(Button.builder(Component.literal("Defense Spending..."), b -> openDefenseSpending())
+                    .bounds(centerX - 100, y, 245, 20).build());
+            y += 30;
         }
 
         if (viewerIsFounder) {
@@ -162,6 +170,11 @@ public final class FoundingScreen extends Screen {
 
     private void openRoadwayManagement() {
         Minecraft.getInstance().setScreen(new RoadwayManagementScreen(this, coreEntityId, showRoadwayStakes));
+    }
+
+    private void openDefenseSpending() {
+        send(new com.github.cerealklla.settlemynts.founding.RequestDefenseSpendingPayload(coreEntityId));
+        onClose();
     }
 
     /** Keeps this screen's own copy in sync so re-opening "Plots..." after a toggle shows the current state, not whatever it was when this screen was first built. */

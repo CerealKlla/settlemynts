@@ -70,6 +70,16 @@ public class GuardPickUpItemsGoal extends Goal {
 
     @Override
     public void tick() {
+        // Real production crash, 2026-10-16: GoalSelector#tickRunningGoals(true) ticks every
+        // still-"running" goal EVERY tick, independent of the separate, throttled cleanup pass that
+        // actually calls stop() once canContinueToUse() goes false -- confirmed directly against the
+        // decompiled GoalSelector#tick()/tickRunningGoals bytecode. pickUp() nulls `target` the
+        // instant it discards the item, but the goal can still get ticked once more before the next
+        // cleanup pass catches up and formally stops it. Must not assume canContinueToUse() was just
+        // re-checked.
+        if (target == null || !target.isAlive()) {
+            return;
+        }
         guard.getLookControl().setLookAt(target.getX(), target.getY(), target.getZ());
         if (guard.distanceToSqr(target) <= PICKUP_RANGE_SQ) {
             pickUp();

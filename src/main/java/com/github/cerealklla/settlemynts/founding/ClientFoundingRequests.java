@@ -18,6 +18,7 @@ public final class ClientFoundingRequests {
     private static volatile OpenFoundingScreenPayload pendingFounding;
     private static volatile OpenStakeScreenPayload pendingStake;
     private static volatile OpenPlotStakeScreenPayload pendingPlotStake;
+    private static volatile OpenDefenseSpendingMenuPayload pendingDefenseSpending;
 
     private ClientFoundingRequests() {
     }
@@ -49,6 +50,16 @@ public final class ClientFoundingRequests {
     public static Optional<OpenPlotStakeScreenPayload> takePendingPlotStakeScreen() {
         OpenPlotStakeScreenPayload request = pendingPlotStake;
         pendingPlotStake = null;
+        return Optional.ofNullable(request);
+    }
+
+    public static void requestDefenseSpendingScreen(OpenDefenseSpendingMenuPayload payload) {
+        pendingDefenseSpending = payload;
+    }
+
+    public static Optional<OpenDefenseSpendingMenuPayload> takePendingDefenseSpendingScreen() {
+        OpenDefenseSpendingMenuPayload request = pendingDefenseSpending;
+        pendingDefenseSpending = null;
         return Optional.ofNullable(request);
     }
 }
