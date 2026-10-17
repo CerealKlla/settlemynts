@@ -440,4 +440,35 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
             setItemSlot(slot, taken.get(0));
         }
     }
+
+    /**
+     * "Any time a guardhouse's inventory changes, check all guards for that guardhouse and if they
+     * are missing gear which is now available equip them with it" (explicit user spec, 2026-10-17).
+     * Same per-slot withdraw as {@link #equipFromLoadoutUsingBoxes}, but only for a slot this guard
+     * doesn't already have something equipped in -- never replaces gear it already has, and never
+     * double-withdraws from the boxes for a slot that's already filled. Called periodically by
+     * {@code GuardSpawnTicker} for every already-spawned guard (there's no real "container changed"
+     * event for a plain world chest to react to directly, so a short poll interval stands in for it,
+     * same as every other reactive-feeling mechanic in this mod).
+     */
+    public void equipMissingFromLoadoutUsingBoxes(LoadoutRecord record, List<Container> plotBoxes) {
+        withdrawAndEquipIfMissing(plotBoxes, record.helmet(), EquipmentSlot.HEAD);
+        withdrawAndEquipIfMissing(plotBoxes, record.chestplate(), EquipmentSlot.CHEST);
+        withdrawAndEquipIfMissing(plotBoxes, record.leggings(), EquipmentSlot.LEGS);
+        withdrawAndEquipIfMissing(plotBoxes, record.boots(), EquipmentSlot.FEET);
+        withdrawAndEquipIfMissing(plotBoxes, record.offhand(), EquipmentSlot.OFFHAND);
+        for (ItemStack stack : record.hotbar()) {
+            if (!stack.isEmpty()) {
+                withdrawAndEquipIfMissing(plotBoxes, stack, EquipmentSlot.MAINHAND);
+                break;
+            }
+        }
+    }
+
+    private void withdrawAndEquipIfMissing(List<Container> plotBoxes, ItemStack template, EquipmentSlot slot) {
+        if (!getItemBySlot(slot).isEmpty()) {
+            return;
+        }
+        withdrawAndEquip(plotBoxes, template, slot);
+    }
 }

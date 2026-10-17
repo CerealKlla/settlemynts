@@ -400,3 +400,11 @@ filter) and that the keybind (originally "V") collided with Simple Voice Chat's 
 Chat Menu" key, confirmed by decompiling SVC's `KeyEvents.class` -- moved to "R" instead of
 rebinding SVC's key, since Auto-Drop is the brand-new side with no existing player config to
 preserve. `./gradlew build`/`test` green.
+
+**Guard Kit Stands top up already-alive guards' missing gear, 2026-10-17** (see
+[context/decisions.md](context/decisions.md)) -- explicit request: a guard that spawned under-geared
+(boxes empty at spawn time) now gets equipped automatically once the plot's boxes are restocked,
+without needing to die and respawn first. `GuardSpawnTicker`'s existing 5-second scan now also
+re-checks already-alive guards via a new `GuardEntity#equipMissingFromLoadoutUsingBoxes`, which only
+fills slots the guard doesn't already have something in. `./gradlew build` green. **Not yet
+live-tested.**

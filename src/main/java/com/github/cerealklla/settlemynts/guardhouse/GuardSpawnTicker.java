@@ -31,6 +31,15 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * guard from the plot's own boxes (best-effort per slot, see {@link
  * GuardEntity#equipFromLoadoutUsingBoxes}) instead of the old unconditional full-Kyt equip.
  *
+ * <p><b>Also tops up already-alive guards, 2026-10-17</b> (explicit user spec: "any time a
+ * guardhouse's inventory changes, check all guards for that guardhouse and if they are missing
+ * gear which is now available equip them with it") -- when a stand's {@code assignedGuardId} is
+ * already alive, this same periodic scan now calls {@link
+ * GuardEntity#equipMissingFromLoadoutUsingBoxes} on it instead of skipping, filling any slot the
+ * guard still doesn't have something equipped in. There's no real "container changed" event for a
+ * plain world chest to hook directly, so this scan's existing 5-second cadence stands in for one --
+ * the same approximation every other reactive-feeling mechanic in this mod already relies on.
+ *
  * <p><b>Known scaling simplification</b>, same as every other full-world-scanning ticker in this
  * mod: a stand whose chunk isn't currently loaded is silently skipped for that scan, same
  * limitation {@code NpcAutoFundingTicker}'s own box-delivery pacing already has.
@@ -68,10 +77,7 @@ public final class GuardSpawnTicker {
                 || !(level.getEntity(stand.settlementCoreId()) instanceof com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity core)) {
             return; // Chunk not loaded, or the stand/core couldn't be resolved -- skip this scan.
         }
-        if (stand.boundKytName().isEmpty() || stand.assignedGuardId().isPresent()) {
-            return;
-        }
-        if (level.getGameTime() < stand.respawnReadyAtGameTime()) {
+        if (stand.boundKytName().isEmpty()) {
             return;
         }
         Optional<LoadoutRecord> record = KytGuardhouseBridge.getKyt(stand.boundKytName().get());
@@ -81,6 +87,19 @@ public final class GuardSpawnTicker {
         com.github.cerealklla.settlemynts.zone.PlotRecord plot = core.getPlots().stream()
                 .filter(p -> p.plotId().equals(stand.plotId())).findFirst().orElse(null);
         if (plot == null) {
+            return;
+        }
+
+        if (stand.assignedGuardId().isPresent()) {
+            // Guard already alive (GuardEntity#die clears this field, so "present" means genuinely
+            // alive, same assumption the old early-return here already made) -- top up any gear
+            // still missing now that the plot's boxes may have changed since it last equipped.
+            if (level.getEntity(stand.assignedGuardId().get()) instanceof GuardEntity guard) {
+                guard.equipMissingFromLoadoutUsingBoxes(record.get(), Settlemynts.resolvePlotBoxes(level, plot.plotId()));
+            }
+            return;
+        }
+        if (level.getGameTime() < stand.respawnReadyAtGameTime()) {
             return;
         }
 
