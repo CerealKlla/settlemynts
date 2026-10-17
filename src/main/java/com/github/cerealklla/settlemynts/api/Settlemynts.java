@@ -504,8 +504,21 @@ public final class Settlemynts {
      */
     public static List<Container> resolveBoxesForPolygon(ServerLevel level, Geometry.Polygon polygon) {
         List<Container> containers = new ArrayList<>();
+        // Real report, 2026-10-17 (Auto-Drop): two single chests placed adjacent form a vanilla
+        // double chest visually, but each half has its own independently-tracked BOX_ID (see
+        // Cartography.resolveBoxContainer's own doc) -- without this dedup, both halves' ids would
+        // each resolve to the same already-merged Container (resolveBoxContainer merges them), and
+        // this list would then double-count that one physical chest's stock. Tracked by block
+        // position, not boxId, so a paired half is skipped once its sibling has already contributed
+        // the merged container.
+        java.util.Set<BlockPos> visited = new java.util.HashSet<>();
         for (UUID boxId : Cartography.getBoxesAt(level, polygon)) {
+            Optional<BlockPos> pos = Cartography.getBoxLocation(level, boxId).map(net.minecraft.core.GlobalPos::pos);
+            if (pos.isEmpty() || !visited.add(pos.get())) {
+                continue;
+            }
             Cartography.resolveBoxContainer(level, boxId).ifPresent(containers::add);
+            Cartography.getPairedBoxPosition(level, pos.get()).ifPresent(visited::add);
         }
         return containers;
     }

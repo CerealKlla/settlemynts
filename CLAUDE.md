@@ -409,6 +409,16 @@ re-checks already-alive guards via a new `GuardEntity#equipMissingFromLoadoutUsi
 fills slots the guard doesn't already have something in. `./gradlew build` green. **Not yet
 live-tested.**
 
+**Auto-Drop (and every box consumer) now treats a double chest as one box, 2026-10-17** (see
+[context/decisions.md](context/decisions.md), Cartographyr's own CLAUDE.md for the real fix) --
+real report: two single chests placed adjacent (a vanilla double chest) were tracked as two
+separate boxes, since placing never merges the underlying block entities, only vanilla's own
+chest-open code does. `api.Settlemynts#resolveBoxesForPolygon` now dedupes by block position so a
+merged pair's stock is counted once, not twice -- fixes every box consumer in this mod at once
+(Auto-Drop, Shop stocking, Planned Inventory, worker NPC deposits), not just Auto-Drop. `./gradlew
+build` green, whole-suite (12 mods) rebuild + `runServer` boot-smoke-test clean. **Not yet
+re-confirmed live.**
+
 **`Client*Request*` bridge classes rebuilt atop Nuclyus's shared `ClientRequestSlot`, 2026-10-17**
 (see Nuclyus's own CLAUDE.md/decisions.md) -- `founding.ClientFoundingRequests`,
 `plotsign.ClientPlotSignRequests`, and `guardhouse.ClientGuardhouseRequests` each replace their own
