@@ -2,6 +2,8 @@ package com.github.cerealklla.settlemynts.plotsign;
 
 import java.util.Optional;
 
+import com.github.cerealklla.nuclyus.request.ClientRequestSlot;
+
 /**
  * Client-side bridge for "the Plot Config Sign's Main Menu should open" -- same zero-client-import
  * poll-once-handoff pattern as {@code founding.ClientFoundingRequests} (kept as its own small class
@@ -9,128 +11,106 @@ import java.util.Optional;
  */
 public final class ClientPlotSignRequests {
 
-    private static volatile OpenPlotConfigSignMenuPayload pendingMenu;
-    private static volatile OpenPlotDetailsPayload pendingPlotDetails;
-    private static volatile OpenPlotManagementPayload pendingPlotManagement;
-    private static volatile OpenShopPayload pendingShop;
-    private static volatile ShopGoldUpdatePayload pendingGoldUpdate;
-    private static volatile ShopStockUpdatePayload pendingStockUpdate;
-    private static volatile UpgradePlotPreviewPayload pendingUpgradePlotPreview;
-    private static volatile OpenPlannedInventoryPayload pendingPlannedInventory;
-    private static volatile OpenShopWishlistPayload pendingWishlist;
-    private static volatile EstablishHighwayCandidatesPayload pendingEstablishHighwayMap;
-    private static volatile OpenNpcMenuPayload pendingNpcMenu;
+    private static final ClientRequestSlot<OpenPlotConfigSignMenuPayload> MENU = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenPlotDetailsPayload> PLOT_DETAILS = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenPlotManagementPayload> PLOT_MANAGEMENT = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenShopPayload> SHOP = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<ShopGoldUpdatePayload> GOLD_UPDATE = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<ShopStockUpdatePayload> STOCK_UPDATE = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<UpgradePlotPreviewPayload> UPGRADE_PLOT_PREVIEW = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenPlannedInventoryPayload> PLANNED_INVENTORY = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenShopWishlistPayload> WISHLIST = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<EstablishHighwayCandidatesPayload> ESTABLISH_HIGHWAY_MAP = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenNpcMenuPayload> NPC_MENU = new ClientRequestSlot<>();
 
     private ClientPlotSignRequests() {
     }
 
     public static void requestMenu(OpenPlotConfigSignMenuPayload payload) {
-        pendingMenu = payload;
+        MENU.request(payload);
     }
 
     public static Optional<OpenPlotConfigSignMenuPayload> takePendingMenu() {
-        OpenPlotConfigSignMenuPayload request = pendingMenu;
-        pendingMenu = null;
-        return Optional.ofNullable(request);
+        return MENU.takePending();
     }
 
     public static void requestPlotDetails(OpenPlotDetailsPayload payload) {
-        pendingPlotDetails = payload;
+        PLOT_DETAILS.request(payload);
     }
 
     public static Optional<OpenPlotDetailsPayload> takePendingPlotDetails() {
-        OpenPlotDetailsPayload request = pendingPlotDetails;
-        pendingPlotDetails = null;
-        return Optional.ofNullable(request);
+        return PLOT_DETAILS.takePending();
     }
 
     public static void requestPlotManagement(OpenPlotManagementPayload payload) {
-        pendingPlotManagement = payload;
+        PLOT_MANAGEMENT.request(payload);
     }
 
     public static Optional<OpenPlotManagementPayload> takePendingPlotManagement() {
-        OpenPlotManagementPayload request = pendingPlotManagement;
-        pendingPlotManagement = null;
-        return Optional.ofNullable(request);
+        return PLOT_MANAGEMENT.takePending();
     }
 
     public static void requestShop(OpenShopPayload payload) {
-        pendingShop = payload;
+        SHOP.request(payload);
     }
 
     public static Optional<OpenShopPayload> takePendingShop() {
-        OpenShopPayload request = pendingShop;
-        pendingShop = null;
-        return Optional.ofNullable(request);
+        return SHOP.takePending();
     }
 
     public static void requestGoldUpdate(ShopGoldUpdatePayload payload) {
-        pendingGoldUpdate = payload;
+        GOLD_UPDATE.request(payload);
     }
 
     public static Optional<ShopGoldUpdatePayload> takePendingGoldUpdate() {
-        ShopGoldUpdatePayload request = pendingGoldUpdate;
-        pendingGoldUpdate = null;
-        return Optional.ofNullable(request);
+        return GOLD_UPDATE.takePending();
     }
 
     public static void requestStockUpdate(ShopStockUpdatePayload payload) {
-        pendingStockUpdate = payload;
+        STOCK_UPDATE.request(payload);
     }
 
     public static Optional<ShopStockUpdatePayload> takePendingStockUpdate() {
-        ShopStockUpdatePayload request = pendingStockUpdate;
-        pendingStockUpdate = null;
-        return Optional.ofNullable(request);
+        return STOCK_UPDATE.takePending();
     }
 
     public static void requestUpgradePlotPreview(UpgradePlotPreviewPayload payload) {
-        pendingUpgradePlotPreview = payload;
+        UPGRADE_PLOT_PREVIEW.request(payload);
     }
 
     public static Optional<UpgradePlotPreviewPayload> takePendingUpgradePlotPreview() {
-        UpgradePlotPreviewPayload request = pendingUpgradePlotPreview;
-        pendingUpgradePlotPreview = null;
-        return Optional.ofNullable(request);
+        return UPGRADE_PLOT_PREVIEW.takePending();
     }
 
     public static void requestPlannedInventory(OpenPlannedInventoryPayload payload) {
-        pendingPlannedInventory = payload;
+        PLANNED_INVENTORY.request(payload);
     }
 
     public static Optional<OpenPlannedInventoryPayload> takePendingPlannedInventory() {
-        OpenPlannedInventoryPayload request = pendingPlannedInventory;
-        pendingPlannedInventory = null;
-        return Optional.ofNullable(request);
+        return PLANNED_INVENTORY.takePending();
     }
 
     public static void requestWishlist(OpenShopWishlistPayload payload) {
-        pendingWishlist = payload;
+        WISHLIST.request(payload);
     }
 
     public static Optional<OpenShopWishlistPayload> takePendingWishlist() {
-        OpenShopWishlistPayload request = pendingWishlist;
-        pendingWishlist = null;
-        return Optional.ofNullable(request);
+        return WISHLIST.takePending();
     }
 
     public static void requestEstablishHighwayMap(EstablishHighwayCandidatesPayload payload) {
-        pendingEstablishHighwayMap = payload;
+        ESTABLISH_HIGHWAY_MAP.request(payload);
     }
 
     public static Optional<EstablishHighwayCandidatesPayload> takePendingEstablishHighwayMap() {
-        EstablishHighwayCandidatesPayload request = pendingEstablishHighwayMap;
-        pendingEstablishHighwayMap = null;
-        return Optional.ofNullable(request);
+        return ESTABLISH_HIGHWAY_MAP.takePending();
     }
 
     public static void requestNpcMenu(OpenNpcMenuPayload payload) {
-        pendingNpcMenu = payload;
+        NPC_MENU.request(payload);
     }
 
     public static Optional<OpenNpcMenuPayload> takePendingNpcMenu() {
-        OpenNpcMenuPayload request = pendingNpcMenu;
-        pendingNpcMenu = null;
-        return Optional.ofNullable(request);
+        return NPC_MENU.takePending();
     }
 }

@@ -408,3 +408,10 @@ without needing to die and respawn first. `GuardSpawnTicker`'s existing 5-second
 re-checks already-alive guards via a new `GuardEntity#equipMissingFromLoadoutUsingBoxes`, which only
 fills slots the guard doesn't already have something in. `./gradlew build` green. **Not yet
 live-tested.**
+
+**`Client*Request*` bridge classes rebuilt atop Nuclyus's shared `ClientRequestSlot`, 2026-10-17**
+(see Nuclyus's own CLAUDE.md/decisions.md) -- `founding.ClientFoundingRequests`,
+`plotsign.ClientPlotSignRequests`, and `guardhouse.ClientGuardhouseRequests` each replace their own
+hand-rolled volatile-field-plus-request/takePending pairs with `nuclyus.request.ClientRequestSlot`
+instances; every public `request*`/`takePending*` method signature is unchanged. `./gradlew build`
+green, whole-suite (12 mods) rebuild green, `runServer` boot-smoke-tested clean.

@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.founding;
 
 import java.util.Optional;
 
+import com.github.cerealklla.nuclyus.request.ClientRequestSlot;
 import com.github.cerealklla.settlemynts.zone.OpenPlotStakeScreenPayload;
 
 /**
@@ -15,51 +16,43 @@ import com.github.cerealklla.settlemynts.zone.OpenPlotStakeScreenPayload;
  */
 public final class ClientFoundingRequests {
 
-    private static volatile OpenFoundingScreenPayload pendingFounding;
-    private static volatile OpenStakeScreenPayload pendingStake;
-    private static volatile OpenPlotStakeScreenPayload pendingPlotStake;
-    private static volatile OpenDefenseSpendingMenuPayload pendingDefenseSpending;
+    private static final ClientRequestSlot<OpenFoundingScreenPayload> FOUNDING = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenStakeScreenPayload> STAKE = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenPlotStakeScreenPayload> PLOT_STAKE = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenDefenseSpendingMenuPayload> DEFENSE_SPENDING = new ClientRequestSlot<>();
 
     private ClientFoundingRequests() {
     }
 
     public static void requestFoundingScreen(OpenFoundingScreenPayload payload) {
-        pendingFounding = payload;
+        FOUNDING.request(payload);
     }
 
     public static Optional<OpenFoundingScreenPayload> takePendingFoundingScreen() {
-        OpenFoundingScreenPayload request = pendingFounding;
-        pendingFounding = null;
-        return Optional.ofNullable(request);
+        return FOUNDING.takePending();
     }
 
     public static void requestStakeScreen(OpenStakeScreenPayload payload) {
-        pendingStake = payload;
+        STAKE.request(payload);
     }
 
     public static Optional<OpenStakeScreenPayload> takePendingStakeScreen() {
-        OpenStakeScreenPayload request = pendingStake;
-        pendingStake = null;
-        return Optional.ofNullable(request);
+        return STAKE.takePending();
     }
 
     public static void requestPlotStakeScreen(OpenPlotStakeScreenPayload payload) {
-        pendingPlotStake = payload;
+        PLOT_STAKE.request(payload);
     }
 
     public static Optional<OpenPlotStakeScreenPayload> takePendingPlotStakeScreen() {
-        OpenPlotStakeScreenPayload request = pendingPlotStake;
-        pendingPlotStake = null;
-        return Optional.ofNullable(request);
+        return PLOT_STAKE.takePending();
     }
 
     public static void requestDefenseSpendingScreen(OpenDefenseSpendingMenuPayload payload) {
-        pendingDefenseSpending = payload;
+        DEFENSE_SPENDING.request(payload);
     }
 
     public static Optional<OpenDefenseSpendingMenuPayload> takePendingDefenseSpendingScreen() {
-        OpenDefenseSpendingMenuPayload request = pendingDefenseSpending;
-        pendingDefenseSpending = null;
-        return Optional.ofNullable(request);
+        return DEFENSE_SPENDING.takePending();
     }
 }
