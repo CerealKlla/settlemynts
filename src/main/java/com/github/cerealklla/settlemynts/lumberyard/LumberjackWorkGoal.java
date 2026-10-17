@@ -436,12 +436,16 @@ public class LumberjackWorkGoal extends Goal {
     }
 
     // Bounds the log flood-fill's worst case, mirroring Lyfe's own Lumberjack-skill cap exactly
-    // (gathering.WholeStructureClear#MAX_BLOCKS) -- "comfortably larger than any vanilla tree," and
-    // the same accepted tradeoff that cap already makes: a flood-fill could in principle walk from a
-    // real tree's trunk into an adjacent player-built log structure if the two happen to touch, but
-    // isRealTree already gates entry (a cabin wall alone never qualifies), and this cap bounds how far
-    // into anything connected the clear can ever reach regardless.
-    private static final int MAX_CONNECTED_LOGS = 64;
+    // (gathering.WholeStructureClear#MAX_BLOCKS, raised 64 -> 256 the same day for the same real
+    // report: "insta-chop for trees needs to clear even higher; i have some huge oaks and it's
+    // leaving the very tops" -- a large/fancy 2x2-trunk oak's own logs can genuinely exceed 64, and
+    // since this is a breadth-first fill, hitting the cap leaves out whichever blocks are farthest
+    // from the start first, which for a tall tree is the top). Same accepted tradeoff that cap
+    // already makes: a flood-fill could in principle walk from a real tree's trunk into an adjacent
+    // player-built log structure if the two happen to touch, but isRealTree already gates entry (a
+    // cabin wall alone never qualifies), and this cap bounds how far into anything connected the
+    // clear can ever reach regardless.
+    private static final int MAX_CONNECTED_LOGS = 256;
 
     /**
      * Flood-fills every log connected to {@code base} (26-neighbor, matching {@code BlockTags.LOGS})
