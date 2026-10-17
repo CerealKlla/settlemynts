@@ -128,9 +128,6 @@ public final class PlannedInventoryClearing {
      * gone quiet on that one shop for 10 seconds.
      */
     public static void craftFromOwnStockForGroup(ServerLevel level, List<PlotRecord> plots) {
-        if (!LyfeCraftingBridge.isLoaded()) {
-            return;
-        }
         for (PlotRecord plot : plots) {
             if (plot.shopId().isEmpty() || plot.plannedInventory().isEmpty()) {
                 continue;
@@ -146,25 +143,29 @@ public final class PlannedInventoryClearing {
 
     /** Single-plot entry point -- see {@link #craftFromOwnStockForGroup}'s own doc for the full story. */
     public static int craftFromOwnStock(ServerLevel level, PlotRecord plot, Geometry.Polygon polygon, List<Container> boxes) {
-        if (!LyfeCraftingBridge.isLoaded() || boxes.isEmpty()) {
+        if (boxes.isEmpty()) {
             return 0;
         }
         int structureTier = -1; // Lazily resolved once -- -1 means "not checked yet."
+        boolean hasFurnace = false;
+        boolean capabilityResolved = false;
         int crafted = 0;
         for (PlannedInventoryTarget target : plot.plannedInventory()) {
             if (target.isTag()) {
                 continue; // A crafting recipe's output is always a concrete item.
             }
-            Optional<LyfeCraftingBridge.RecipeInfo> recipeOpt = LyfeCraftingBridge.getRecipe(target.resourceKey());
+            Optional<LyfeCraftingBridge.RecipeInfo> recipeOpt = resolveRecipe(level, target.resourceKey());
             if (recipeOpt.isEmpty()) {
                 continue;
             }
-            if (structureTier < 0) {
+            if (!capabilityResolved) {
                 structureTier = PlotCraftingStructures.maxCraftingStructureTier(level, polygon);
+                hasFurnace = PlotCraftingStructures.hasFurnace(level, polygon);
+                capabilityResolved = true;
             }
             LyfeCraftingBridge.RecipeInfo recipe = recipeOpt.get();
-            if (structureTier < recipe.tier()) {
-                continue; // No sufficiently-tiered crafting structure present on this plot.
+            if (!recipe.craftableWith(structureTier, hasFurnace)) {
+                continue; // No sufficiently-tiered crafting structure (or Furnace) present on this plot.
             }
             for (int i = 0; i < MAX_CRAFTS_PER_PLOT_PER_TARGET; i++) {
                 Map<Identifier, Integer> available = Settlemynts.scanItemStock(boxes);
@@ -195,9 +196,23 @@ public final class PlannedInventoryClearing {
     private record Seller(Participant participant, int remainingSurplus, int pricePerUnit) {
     }
 
+    /**
+     * Central recipe-source resolution -- {@link SmeltingRecipes} (plain vanilla, no Lyfe needed)
+     * first, then {@link LyfeCraftingBridge} (tool/weapon/armor/food, if loaded) -- see {@code
+     * SmeltingRecipes}' own doc for why these are two genuinely separate sources rather than one
+     * merged into the other.
+     */
+    private static Optional<LyfeCraftingBridge.RecipeInfo> resolveRecipe(ServerLevel level, Identifier id) {
+        Optional<LyfeCraftingBridge.RecipeInfo> smelting = SmeltingRecipes.get(level, id);
+        if (smelting.isPresent()) {
+            return smelting;
+        }
+        return LyfeCraftingBridge.isLoaded() ? LyfeCraftingBridge.getRecipe(id) : Optional.empty();
+    }
+
     private static void settleResource(ServerLevel level, List<Participant> participants, ResourceKey key) {
-        if (!key.isTag() && LyfeCraftingBridge.isLoaded()) {
-            Optional<LyfeCraftingBridge.RecipeInfo> recipe = LyfeCraftingBridge.getRecipe(key.id());
+        if (!key.isTag()) {
+            Optional<LyfeCraftingBridge.RecipeInfo> recipe = resolveRecipe(level, key.id());
             if (recipe.isPresent()) {
                 settleCraftableResource(level, participants, key, recipe.get());
                 return;
@@ -391,8 +406,9 @@ public final class PlannedInventoryClearing {
                 continue;
             }
             int buyerTier = PlotCraftingStructures.maxCraftingStructureTier(level, buyer.plot().plotId());
+            boolean hasFurnace = PlotCraftingStructures.hasFurnace(level, buyer.plot().plotId());
             for (int i = 0; i < deficit; i++) {
-                if (!fulfillOneUnit(level, participants, buyer, key, buyerTier, new LinkedHashSet<>())) {
+                if (!fulfillOneUnit(level, participants, buyer, key, buyerTier, hasFurnace, new LinkedHashSet<>())) {
                     break; // Can't make further progress on this resource for this buyer this round.
                 }
             }
@@ -405,24 +421,23 @@ public final class PlannedInventoryClearing {
      * succeeded. {@code visiting} is the cycle guard for the self-craft recursion below.
      */
     private static boolean fulfillOneUnit(ServerLevel level, List<Participant> participants, Participant buyer,
-                                           ResourceKey key, int buyerTier, Set<Identifier> visiting) {
+                                           ResourceKey key, int buyerTier, boolean hasFurnace, Set<Identifier> visiting) {
         if (visiting.contains(key.id())) {
             return false;
         }
         long directCost = cheapestSellerPrice(level, participants, buyer, key);
 
-        Optional<LyfeCraftingBridge.RecipeInfo> recipe = key.isTag() || !LyfeCraftingBridge.isLoaded()
-                ? Optional.empty() : LyfeCraftingBridge.getRecipe(key.id());
-        boolean canCraft = recipe.isPresent() && buyerTier >= recipe.get().tier();
+        Optional<LyfeCraftingBridge.RecipeInfo> recipe = key.isTag() ? Optional.empty() : resolveRecipe(level, key.id());
+        boolean canCraft = recipe.isPresent() && recipe.get().craftableWith(buyerTier, hasFurnace);
         long craftCost = -1;
         if (canCraft) {
             Set<Identifier> nextVisiting = withAdded(visiting, key.id());
-            craftCost = estimateCraftCost(level, participants, buyer, recipe.get(), buyerTier, nextVisiting);
+            craftCost = estimateCraftCost(level, participants, buyer, recipe.get(), buyerTier, hasFurnace, nextVisiting);
         }
 
         boolean useCraft = canCraft && craftCost >= 0 && (directCost < 0 || craftCost <= directCost);
         if (useCraft) {
-            return executeCraftOne(level, participants, buyer, recipe.get(), buyerTier, withAdded(visiting, key.id()));
+            return executeCraftOne(level, participants, buyer, recipe.get(), buyerTier, hasFurnace, withAdded(visiting, key.id()));
         }
         if (directCost >= 0) {
             return executeDirectBuyOne(level, participants, buyer, key);
@@ -432,10 +447,10 @@ public final class PlannedInventoryClearing {
 
     /** Non-mutating: the recursive total cost to obtain every ingredient for one craft of {@code recipe}, or {@code -1} if any piece is unobtainable. */
     private static long estimateCraftCost(ServerLevel level, List<Participant> participants, Participant buyer,
-                                           LyfeCraftingBridge.RecipeInfo recipe, int buyerTier, Set<Identifier> visiting) {
+                                           LyfeCraftingBridge.RecipeInfo recipe, int buyerTier, boolean hasFurnace, Set<Identifier> visiting) {
         long total = 0;
         for (Map.Entry<Identifier, Integer> entry : recipe.specificComponents().entrySet()) {
-            long unitCost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(entry.getKey(), false), buyerTier, visiting);
+            long unitCost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(entry.getKey(), false), buyerTier, hasFurnace, visiting);
             if (unitCost < 0) {
                 return -1;
             }
@@ -444,7 +459,7 @@ public final class PlannedInventoryClearing {
         for (Map.Entry<String, Integer> entry : recipe.genericComponents().entrySet()) {
             long cheapestMemberUnitCost = -1;
             for (Identifier member : LyfeCraftingBridge.componentGroupMembers(entry.getKey())) {
-                long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), buyerTier, visiting);
+                long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), buyerTier, hasFurnace, visiting);
                 if (cost >= 0 && (cheapestMemberUnitCost < 0 || cost < cheapestMemberUnitCost)) {
                     cheapestMemberUnitCost = cost;
                 }
@@ -459,13 +474,13 @@ public final class PlannedInventoryClearing {
 
     /** Non-mutating: the cheaper of direct-buy or recursive self-craft for one unit of {@code key}, or {@code -1} if neither is achievable. */
     private static long cheapestCostForOneUnit(ServerLevel level, List<Participant> participants, Participant buyer,
-                                                ResourceKey key, int buyerTier, Set<Identifier> visiting) {
+                                                ResourceKey key, int buyerTier, boolean hasFurnace, Set<Identifier> visiting) {
         long direct = cheapestSellerPrice(level, participants, buyer, key);
         long craft = -1;
-        if (!key.isTag() && !visiting.contains(key.id()) && LyfeCraftingBridge.isLoaded()) {
-            Optional<LyfeCraftingBridge.RecipeInfo> recipe = LyfeCraftingBridge.getRecipe(key.id());
-            if (recipe.isPresent() && buyerTier >= recipe.get().tier()) {
-                craft = estimateCraftCost(level, participants, buyer, recipe.get(), buyerTier, withAdded(visiting, key.id()));
+        if (!key.isTag() && !visiting.contains(key.id())) {
+            Optional<LyfeCraftingBridge.RecipeInfo> recipe = resolveRecipe(level, key.id());
+            if (recipe.isPresent() && recipe.get().craftableWith(buyerTier, hasFurnace)) {
+                craft = estimateCraftCost(level, participants, buyer, recipe.get(), buyerTier, hasFurnace, withAdded(visiting, key.id()));
             }
         }
         if (direct < 0) {
@@ -556,7 +571,7 @@ public final class PlannedInventoryClearing {
      * required ingredient couldn't be fully topped up.
      */
     private static boolean executeCraftOne(ServerLevel level, List<Participant> participants, Participant buyer,
-                                            LyfeCraftingBridge.RecipeInfo recipe, int buyerTier, Set<Identifier> visiting) {
+                                            LyfeCraftingBridge.RecipeInfo recipe, int buyerTier, boolean hasFurnace, Set<Identifier> visiting) {
         // Scans the Participant's own already-resolved boxes directly -- same real lag fix as
         // zone.PlotCraftingTicker (see api.Settlemynts#scanItemStock's own doc): scanPlotItemStock(
         // level, plotId) redundantly re-resolves the whole box list (a full-world entity scan) when
@@ -566,7 +581,7 @@ public final class PlannedInventoryClearing {
         for (Map.Entry<Identifier, Integer> entry : recipe.specificComponents().entrySet()) {
             int need = entry.getValue() - available.getOrDefault(entry.getKey(), 0);
             for (int i = 0; i < need; i++) {
-                if (!fulfillOneUnit(level, participants, buyer, new ResourceKey(entry.getKey(), false), buyerTier, visiting)) {
+                if (!fulfillOneUnit(level, participants, buyer, new ResourceKey(entry.getKey(), false), buyerTier, hasFurnace, visiting)) {
                     return false;
                 }
             }
@@ -576,8 +591,8 @@ public final class PlannedInventoryClearing {
             int have = members.stream().mapToInt(m -> available.getOrDefault(m, 0)).sum();
             int need = entry.getValue() - have;
             for (int i = 0; i < need; i++) {
-                Identifier cheapestMember = cheapestGroupMember(level, participants, buyer, members, buyerTier, visiting);
-                if (cheapestMember == null || !fulfillOneUnit(level, participants, buyer, new ResourceKey(cheapestMember, false), buyerTier, visiting)) {
+                Identifier cheapestMember = cheapestGroupMember(level, participants, buyer, members, buyerTier, hasFurnace, visiting);
+                if (cheapestMember == null || !fulfillOneUnit(level, participants, buyer, new ResourceKey(cheapestMember, false), buyerTier, hasFurnace, visiting)) {
                     return false;
                 }
             }
@@ -595,11 +610,11 @@ public final class PlannedInventoryClearing {
     }
 
     private static Identifier cheapestGroupMember(ServerLevel level, List<Participant> participants, Participant buyer,
-                                                    List<Identifier> members, int buyerTier, Set<Identifier> visiting) {
+                                                    List<Identifier> members, int buyerTier, boolean hasFurnace, Set<Identifier> visiting) {
         Identifier best = null;
         long bestCost = -1;
         for (Identifier member : members) {
-            long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), buyerTier, visiting);
+            long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), buyerTier, hasFurnace, visiting);
             if (cost >= 0 && (bestCost < 0 || cost < bestCost)) {
                 bestCost = cost;
                 best = member;

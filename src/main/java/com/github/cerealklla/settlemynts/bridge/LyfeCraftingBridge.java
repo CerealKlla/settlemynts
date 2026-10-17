@@ -31,8 +31,23 @@ public final class LyfeCraftingBridge {
         return ModList.get().isLoaded("lyfe");
     }
 
-    /** Local mirror of {@code craft.GeneratedRecipe} -- see {@code zone.ShopResource}'s own class doc for why a Yconomics/Lyfe type never appears in a signature outside its bridge. */
-    public record RecipeInfo(Identifier resultId, int tier, Map<Identifier, Integer> specificComponents, Map<String, Integer> genericComponents) {
+    /**
+     * Local mirror of {@code craft.GeneratedRecipe} -- see {@code zone.ShopResource}'s own class doc
+     * for why a Yconomics/Lyfe type never appears in a signature outside its bridge. {@code
+     * requiresFurnace} (added 2026-10-16, explicit user request: "recognize the furnace as a valid
+     * crafting table... 1:1 of the vanilla recipe") -- {@code false} for every real Lyfe-sourced
+     * recipe below; {@code true} only for {@code zone.SmeltingRecipes}' own entries, which also
+     * reuses this exact record type as its "recipe" currency even though it has nothing to do with
+     * Lyfe -- see that class's own doc for why gating by this flag instead of {@code tier} was
+     * necessary (a plain vanilla Furnace has no "Lyfe crafting structure tier" of its own at all).
+     */
+    public record RecipeInfo(Identifier resultId, int tier, Map<Identifier, Integer> specificComponents,
+                              Map<String, Integer> genericComponents, boolean requiresFurnace) {
+
+        /** Whether a plot with this much Lyfe crafting-structure tier and/or a Furnace can craft this recipe. */
+        public boolean craftableWith(int structureTier, boolean hasFurnace) {
+            return requiresFurnace ? hasFurnace : structureTier >= tier;
+        }
     }
 
     public static Optional<RecipeInfo> getRecipe(Identifier resultId) {
@@ -53,6 +68,6 @@ public final class LyfeCraftingBridge {
     }
 
     private static RecipeInfo toLocal(GeneratedRecipe recipe) {
-        return new RecipeInfo(recipe.resultId(), recipe.tier(), recipe.specificComponents(), recipe.genericComponents());
+        return new RecipeInfo(recipe.resultId(), recipe.tier(), recipe.specificComponents(), recipe.genericComponents(), false);
     }
 }

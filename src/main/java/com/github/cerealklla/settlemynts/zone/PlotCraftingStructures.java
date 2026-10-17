@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.FurnaceBlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 
 /**
@@ -46,6 +47,41 @@ public final class PlotCraftingStructures {
         if (!LyfeCraftingBridge.isLoaded()) {
             return 0;
         }
+        int[] bestTier = {0};
+        forEachBlockEntityInArea(level, area, (pos, be) -> {
+            int tier = LyfeCraftingBridge.craftingStructureTier(be);
+            if (tier > bestTier[0]) {
+                bestTier[0] = tier;
+            }
+        });
+        return bestTier[0];
+    }
+
+    /**
+     * Whether a plain vanilla Furnace is physically present on the plot -- added 2026-10-16, explicit
+     * user request: "recognize the furnace as a valid crafting table" (for {@code
+     * zone.SmeltingRecipes}, ore-to-ingot smelting). Deliberately independent of {@link
+     * LyfeCraftingBridge#isLoaded()} -- a Furnace is pure vanilla, this check (and so smelting-based
+     * auto-crafting) works even on a Lyfe-less server, unlike every other check in this class.
+     */
+    public static boolean hasFurnace(ServerLevel level, UUID plotId) {
+        Optional<Geometry.Polygon> polygon = Settlemynts.resolvePlotPolygon(level, plotId);
+        return polygon.isPresent() && hasFurnace(level, polygon.get());
+    }
+
+    /** Same as {@link #hasFurnace(ServerLevel, UUID)}, for a polygon the caller already has in hand -- avoids its own world scan. */
+    public static boolean hasFurnace(ServerLevel level, Geometry.Polygon area) {
+        boolean[] found = {false};
+        forEachBlockEntityInArea(level, area, (pos, be) -> {
+            if (be instanceof FurnaceBlockEntity) {
+                found[0] = true;
+            }
+        });
+        return found[0];
+    }
+
+    private static void forEachBlockEntityInArea(ServerLevel level, Geometry.Polygon area,
+                                                   java.util.function.BiConsumer<BlockPos, BlockEntity> consumer) {
         int minX = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
         for (Geometry.Polygon.Vertex v : area.vertices()) {
             minX = Math.min(minX, v.x());
@@ -54,7 +90,6 @@ public final class PlotCraftingStructures {
             maxZ = Math.max(maxZ, v.z());
         }
 
-        int bestTier = 0;
         int minChunkX = minX >> 4, maxChunkX = maxX >> 4;
         int minChunkZ = minZ >> 4, maxChunkZ = maxZ >> 4;
         for (int cx = minChunkX; cx <= maxChunkX; cx++) {
@@ -68,13 +103,9 @@ public final class PlotCraftingStructures {
                     if (!area.contains(pos.getX(), pos.getZ())) {
                         continue;
                     }
-                    int tier = LyfeCraftingBridge.craftingStructureTier(entry.getValue());
-                    if (tier > bestTier) {
-                        bestTier = tier;
-                    }
+                    consumer.accept(pos, entry.getValue());
                 }
             }
         }
-        return bestTier;
     }
 }
