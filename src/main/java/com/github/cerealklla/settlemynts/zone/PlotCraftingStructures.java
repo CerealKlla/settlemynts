@@ -11,9 +11,11 @@ import com.github.cerealklla.settlemynts.bridge.LyfeCraftingBridge;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.FurnaceBlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * NPC plot crafting (2026-10-09) -- finds the highest-Tier Lyfe crafting structure physically present
@@ -78,6 +80,61 @@ public final class PlotCraftingStructures {
             }
         });
         return found[0];
+    }
+
+    /**
+     * Whether a plain vanilla Stonecutter is physically present on the plot -- added 2026-10-16,
+     * explicit user request: "can we do the same fix for that which we did for the furnace" (for
+     * {@code zone.StonecuttingRecipes}). Deliberately independent of {@link
+     * LyfeCraftingBridge#isLoaded()}, same reasoning as {@link #hasFurnace}.
+     *
+     * <p><b>Can't reuse {@link #forEachBlockEntityInArea}</b> -- unlike a Furnace, a Stonecutter has
+     * no {@link BlockEntity} at all (confirmed against the decompiled source: it's a stateless block,
+     * nothing to track burn progress or similar), so it's invisible to a chunk's own block-entity map.
+     * This instead does a real bounded {@link net.minecraft.world.level.block.state.BlockState} scan:
+     * for each column in the polygon (capped by {@link #STONECUTTER_SCAN_MAX_COLUMNS}, same bounded-
+     * scan shape {@code farm.FarmerWorkGoal}/{@code lumberyard.LumberjackWorkGoal} already use for
+     * their own per-column work-target scans), checks a vertical band anchored to that column's own
+     * heightmap surface -- wide enough to catch a Stonecutter sitting anywhere in a realistic 1-2
+     * story workshop at that spot, not just a column's exact topmost block (which would miss one
+     * placed indoors under a roof).
+     */
+    private static final int STONECUTTER_SCAN_MAX_COLUMNS = 400;
+    private static final int STONECUTTER_SCAN_BELOW = 6;
+    private static final int STONECUTTER_SCAN_ABOVE = 12;
+
+    public static boolean hasStonecutter(ServerLevel level, UUID plotId) {
+        Optional<Geometry.Polygon> polygon = Settlemynts.resolvePlotPolygon(level, plotId);
+        return polygon.isPresent() && hasStonecutter(level, polygon.get());
+    }
+
+    /** Same as {@link #hasStonecutter(ServerLevel, UUID)}, for a polygon the caller already has in hand -- avoids its own world scan. */
+    public static boolean hasStonecutter(ServerLevel level, Geometry.Polygon area) {
+        int minX = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (Geometry.Polygon.Vertex v : area.vertices()) {
+            minX = Math.min(minX, v.x());
+            minZ = Math.min(minZ, v.z());
+            maxX = Math.max(maxX, v.x());
+            maxZ = Math.max(maxZ, v.z());
+        }
+        int scanned = 0;
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                if (!area.contains(x, z)) {
+                    continue;
+                }
+                if (scanned++ > STONECUTTER_SCAN_MAX_COLUMNS) {
+                    return false;
+                }
+                int topY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                for (int y = topY - STONECUTTER_SCAN_BELOW; y <= topY + STONECUTTER_SCAN_ABOVE; y++) {
+                    if (level.getBlockState(new BlockPos(x, y, z)).is(Blocks.STONECUTTER)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private static void forEachBlockEntityInArea(ServerLevel level, Geometry.Polygon area,

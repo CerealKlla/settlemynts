@@ -34,19 +34,27 @@ public final class LyfeCraftingBridge {
     /**
      * Local mirror of {@code craft.GeneratedRecipe} -- see {@code zone.ShopResource}'s own class doc
      * for why a Yconomics/Lyfe type never appears in a signature outside its bridge. {@code
-     * requiresFurnace} (added 2026-10-16, explicit user request: "recognize the furnace as a valid
-     * crafting table... 1:1 of the vanilla recipe") -- {@code false} for every real Lyfe-sourced
-     * recipe below; {@code true} only for {@code zone.SmeltingRecipes}' own entries, which also
-     * reuses this exact record type as its "recipe" currency even though it has nothing to do with
-     * Lyfe -- see that class's own doc for why gating by this flag instead of {@code tier} was
-     * necessary (a plain vanilla Furnace has no "Lyfe crafting structure tier" of its own at all).
+     * requirement} (added 2026-10-16 as {@code requiresFurnace}, a plain boolean; widened to this enum
+     * the same day once a second vanilla-structure source -- {@code zone.StonecuttingRecipes} -- made
+     * a single boolean too narrow) -- {@code LYFE_STRUCTURE} for every real Lyfe-sourced recipe below;
+     * {@code FURNACE}/{@code STONECUTTER} only for {@code zone.SmeltingRecipes}/{@code
+     * zone.StonecuttingRecipes}' own entries, which also reuse this exact record type as their
+     * "recipe" currency even though neither has anything to do with Lyfe -- see those classes' own
+     * doc for why gating by a plain vanilla structure's presence, not {@code tier}, was necessary (a
+     * Furnace/Stonecutter has no "Lyfe crafting structure tier" of its own at all).
      */
     public record RecipeInfo(Identifier resultId, int tier, Map<Identifier, Integer> specificComponents,
-                              Map<String, Integer> genericComponents, boolean requiresFurnace) {
+                              Map<String, Integer> genericComponents, StructureRequirement requirement) {
 
-        /** Whether a plot with this much Lyfe crafting-structure tier and/or a Furnace can craft this recipe. */
-        public boolean craftableWith(int structureTier, boolean hasFurnace) {
-            return requiresFurnace ? hasFurnace : structureTier >= tier;
+        public enum StructureRequirement { LYFE_STRUCTURE, FURNACE, STONECUTTER }
+
+        /** Whether {@code capability} is enough to craft this recipe. */
+        public boolean craftableWith(com.github.cerealklla.settlemynts.zone.PlotCraftingCapability capability) {
+            return switch (requirement) {
+                case LYFE_STRUCTURE -> capability.lyfeStructureTier() >= tier;
+                case FURNACE -> capability.hasFurnace();
+                case STONECUTTER -> capability.hasStonecutter();
+            };
         }
     }
 
@@ -68,6 +76,6 @@ public final class LyfeCraftingBridge {
     }
 
     private static RecipeInfo toLocal(GeneratedRecipe recipe) {
-        return new RecipeInfo(recipe.resultId(), recipe.tier(), recipe.specificComponents(), recipe.genericComponents(), false);
+        return new RecipeInfo(recipe.resultId(), recipe.tier(), recipe.specificComponents(), recipe.genericComponents(), RecipeInfo.StructureRequirement.LYFE_STRUCTURE);
     }
 }

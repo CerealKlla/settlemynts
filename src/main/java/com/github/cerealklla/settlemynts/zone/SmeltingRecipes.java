@@ -31,9 +31,10 @@ import net.minecraft.world.item.crafting.SmeltingRecipe;
  * way Lyfe's four custom crafting blocks do. Reuses {@link LyfeCraftingBridge.RecipeInfo} anyway as
  * the shared "recipe" currency both {@code CraftingExecutor} and {@code PlannedInventoryClearing}
  * already consume -- that record is just plain data (resultId/tier/components), nothing about it
- * actually requires Lyfe to be loaded, and {@code requiresFurnace} (added alongside this class) is
- * what tells the gating logic to check {@link PlotCraftingStructures#hasFurnace} instead of a
- * Lyfe-structure tier for these specific entries.
+ * actually requires Lyfe to be loaded, and its {@code requirement} field (added alongside this
+ * class as {@code requiresFurnace}, widened to a real enum once {@code StonecuttingRecipes} needed a
+ * second non-Lyfe source) is what tells the gating logic to check {@link
+ * PlotCraftingStructures#hasFurnace} instead of a Lyfe-structure tier for these specific entries.
  *
  * <p><b>Real simplification, explicitly asked for</b>: vanilla's actual furnace mechanic burns fuel
  * at its own rate (one coal smelts 8 items, one plank/stick smelts a fraction of one, lava buckets
@@ -78,7 +79,8 @@ public final class SmeltingRecipes {
             Map<Identifier, Integer> components = inputId.equals(WOOD_FUEL_ITEM_ID)
                     ? Map.of(inputId, 1) // Shouldn't happen in practice (no vanilla smelting input is a log), but avoid a degenerate 1-entry map collapsing the fuel cost.
                     : Map.of(inputId, 1, WOOD_FUEL_ITEM_ID, 1);
-            return Optional.of(new LyfeCraftingBridge.RecipeInfo(resultId, 0, components, Map.of(), true));
+            return Optional.of(new LyfeCraftingBridge.RecipeInfo(resultId, 0, components, Map.of(),
+                    LyfeCraftingBridge.RecipeInfo.StructureRequirement.FURNACE));
         }
         return Optional.empty();
     }
