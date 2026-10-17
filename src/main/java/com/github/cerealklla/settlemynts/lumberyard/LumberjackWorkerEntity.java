@@ -68,20 +68,35 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
 
     /** Same resolution chain as {@code resident.ResidentVillagerEntity#resolvePatrolArea}, but the real plot polygon, not the buffer. */
     public Optional<Geometry.Polygon> resolvePatrolArea(ServerLevel level) {
+        return resolvePlotRecord(level).flatMap(plot ->
+                Cartography.getEntity(level, new EntityId(plot.cartographyrPlotEntityId()))
+                        .map(GeographicEntity::geometry)
+                        .filter(Geometry.Polygon.class::isInstance)
+                        .map(Geometry.Polygon.class::cast));
+    }
+
+    /**
+     * Whether this plot's own Zone Type genuinely is Lumberyard, as opposed to a different Zone Type
+     * (e.g. Private Residence) that merely hired this worker via "Change Job" -- added 2026-10-16,
+     * explicit user spec: "private residence farmers and lumberjacks are only supposed to harvest and
+     * re-plant existing plants, not plant wholly new ones." {@link LumberjackWorkGoal#findTarget} only
+     * looks for a brand-new planting spot when this is {@code true}; a hired Lumberjack on any other
+     * Zone Type only ever harvests whole real trees (the one spot a sapling can then regrow at).
+     */
+    public boolean isNativeLumberyardZone(ServerLevel level) {
+        return resolvePlotRecord(level)
+                .map(plot -> plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.LUMBERYARD_ZONE_TYPE_ID))
+                .orElse(false);
+    }
+
+    private Optional<PlotRecord> resolvePlotRecord(ServerLevel level) {
         if (settlementCoreId == null || plotId == null) {
             return Optional.empty();
         }
         if (!(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
             return Optional.empty();
         }
-        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
-        if (plot == null) {
-            return Optional.empty();
-        }
-        return Cartography.getEntity(level, new EntityId(plot.cartographyrPlotEntityId()))
-                .map(GeographicEntity::geometry)
-                .filter(Geometry.Polygon.class::isInstance)
-                .map(Geometry.Polygon.class::cast);
+        return core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst();
     }
 
     public static AttributeSupplier.Builder createAttributes() {

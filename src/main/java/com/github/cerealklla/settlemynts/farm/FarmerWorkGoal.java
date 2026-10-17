@@ -177,6 +177,12 @@ public class FarmerWorkGoal extends Goal {
             maxZ = Math.max(maxZ, v.z());
         }
         CropChoice crop = FarmCropSpecies.chooseFor(level, boundingBoxCenter(minX, minZ, maxX, maxZ));
+        // "private residence farmers and lumberjacks are only supposed to harvest and re-plant
+        // existing plants, not plant wholly new ones" (explicit user spec, 2026-10-16) -- a hired
+        // Farmer on any Zone Type other than its own native Farm never tills new ground at all; a
+        // harvested crop already replants itself in place (see #harvest), so simply never searching
+        // for a firstPlantCandidate here is sufficient and correct on its own, no extra memory needed.
+        boolean nativeZone = worker.isNativeFarmZone(level);
 
         BlockPos firstPlantCandidate = null;
         int scanned = 0;
@@ -204,7 +210,7 @@ public class FarmerWorkGoal extends Goal {
                     }
                 }
 
-                if (firstPlantCandidate == null && (x - minX) % ROW_SPACING == 0
+                if (nativeZone && firstPlantCandidate == null && (x - minX) % ROW_SPACING == 0
                         && TILLABLE_SOIL.contains(topState.getBlock())
                         && level.getBlockState(topSolid.above()).canBeReplaced()
                         && !isAvoided(level, topSolid)) {

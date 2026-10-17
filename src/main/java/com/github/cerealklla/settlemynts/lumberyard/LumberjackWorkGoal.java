@@ -101,6 +101,16 @@ public class LumberjackWorkGoal extends Goal {
     private int pursueTicks;
     private final List<AvoidedTarget> recentlyAvoided = new ArrayList<>();
 
+    // "private residence farmers and lumberjacks are only supposed to harvest and re-plant existing
+    // plants, not plant wholly new ones" (explicit user spec, 2026-10-16) -- on a plot whose own Zone
+    // Type isn't genuinely Lumberyard (a hired "Change Job" worker, e.g. on Private Residence), a
+    // chopped tree's own base is remembered here (short-lived, in-memory only, same volatility class
+    // as recentlyAvoided -- consistent with this class's existing "no persisted memory" design) so
+    // findTarget can replant exactly where that tree stood without ever searching for brand-new bare
+    // ground elsewhere in the plot. Unused (always null) on a native Lumberyard zone, which keeps its
+    // existing broader "plant anywhere spaced out" behavior unchanged.
+    private BlockPos lastHarvestedTreeBase;
+
     private record AvoidedTarget(BlockPos pos, long expiresAtGameTime) {
     }
 
@@ -181,8 +191,12 @@ public class LumberjackWorkGoal extends Goal {
         }
         if (pendingIsHarvest) {
             harvest(level, pendingTarget);
+            if (pendingHarvestIdentity != null) {
+                lastHarvestedTreeBase = pendingHarvestIdentity;
+            }
         } else {
             plant(level, pendingTarget);
+            lastHarvestedTreeBase = null; // Used (or no longer valid) either way -- don't keep offering it as a candidate.
         }
         pendingTarget = null;
         pendingHarvestIdentity = null;
@@ -220,6 +234,7 @@ public class LumberjackWorkGoal extends Goal {
         }
 
         int spacing = MIN_SAPLING_SPACING_BLOCKS + worker.getRandom().nextInt(MAX_SAPLING_SPACING_BLOCKS - MIN_SAPLING_SPACING_BLOCKS + 1);
+        boolean nativeZone = worker.isNativeLumberyardZone(level);
         int scanned = 0;
         BlockPos firstPlantCandidate = null;
         for (int x = minX; x <= maxX; x++) {
@@ -263,7 +278,11 @@ public class LumberjackWorkGoal extends Goal {
                 if (firstPlantCandidate == null && PLANTABLE_SOIL.contains(topState.getBlock())
                         && level.getBlockState(topSolid.above()).canBeReplaced()
                         && !hasNearbyTreeOrSapling(level, area, x, topSolid.getY(), z, spacing)
-                        && !isAvoided(level, topSolid.above())) {
+                        && !isAvoided(level, topSolid.above())
+                        // On a non-native Zone Type, only ever replant exactly where this same worker
+                        // just chopped a real tree -- never expand into brand-new bare ground. See
+                        // lastHarvestedTreeBase's own field doc.
+                        && (nativeZone || topSolid.above().equals(lastHarvestedTreeBase))) {
                     firstPlantCandidate = topSolid.above();
                 }
             }

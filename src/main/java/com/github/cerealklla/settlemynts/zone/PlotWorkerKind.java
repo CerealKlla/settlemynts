@@ -30,8 +30,12 @@ public final class PlotWorkerKind {
 
     public enum Kind { NONE, RESIDENT, FARMER, LUMBERJACK, MINER }
 
-    private static final Identifier FARM_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "farm");
-    private static final Identifier LUMBERYARD_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "lumberyard");
+    // Widened to public 2026-10-16 so FarmerWorkerEntity/LumberjackWorkerEntity can tell whether
+    // they're on their own native Zone Type (full job: till/plant new ground too) or merely hired
+    // via "Change Job" onto a different Zone Type like Private Residence (harvest/replant only --
+    // see FarmerWorkGoal/LumberjackWorkGoal's own doc).
+    public static final Identifier FARM_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "farm");
+    public static final Identifier LUMBERYARD_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "lumberyard");
     private static final Identifier MINESHAFT_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "mineshaft");
 
     private PlotWorkerKind() {
