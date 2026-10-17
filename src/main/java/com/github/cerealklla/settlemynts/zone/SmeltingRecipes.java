@@ -1,5 +1,7 @@
 package com.github.cerealklla.settlemynts.zone;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -42,9 +44,21 @@ import net.minecraft.world.item.crafting.SmeltingRecipe;
  * fuel-value table and a very different consumption shape than this engine's flat "consume these N
  * items, produce M" model supports anywhere else. The user's own spec collapses this to a flat 1:1
  * approximation instead ("1 ore + 1 wood = 1 ingot"), so every recipe here always costs exactly 1 ore
- * (whatever the real smelting recipe's own input item is) + 1 {@link Items#OAK_LOG} (the fixed
- * fuel-stand-in -- same "pick one representative item" precedent {@code
- * blueprynts.bridge.ShopSeedCatalogs}' {@code GenericResource.WOOD} already uses for "any log").
+ * (whatever the real smelting recipe's own input item is) plus 1 real fuel item.
+ *
+ * <p><b>Alternate-fuel recipes, added 2026-10-16</b> (explicit follow-up: "create alternate recipes
+ * for all 'cooked' things to use all fuel sources except lava buckets") -- {@link #getAll} returns
+ * one {@code RecipeInfo} per real vanilla fuel item from the level's own {@link
+ * net.minecraft.world.level.block.entity.FuelValues#vanillaBurnTimes authoritative fuel list}
+ * ({@code level.fuelValues().fuelItems()} -- the same source a real furnace itself consults, so this
+ * never drifts out of sync with a datapack changing what burns), explicitly excluding {@link
+ * Items#LAVA_BUCKET} per the user's own wording, instead of being pinned to a single hardcoded
+ * {@code Items#OAK_LOG} stand-in. Callers that only need "is this craftable at all, with whatever
+ * fuel is actually on hand" (e.g. {@code PlannedInventoryClearing}) pick whichever alternate their
+ * own stock/cost model prefers; nothing here decides that itself. When a recipe's real smelting
+ * input happens to also be a valid fuel (e.g. smelting a Log into Charcoal -- logs are themselves
+ * furnace fuel), the input and fuel entries collapse into one {@code {item: 2}} component instead of
+ * silently losing the fuel's own cost to the map's key collision.
  *
  * <p>Only {@code RecipeType.SMELTING} (a plain Furnace) -- Blast Furnace ({@code BLASTING}) and
  * Smoker ({@code SMOKING}) are separate vanilla recipe types, deliberately out of scope here, per the
@@ -52,16 +66,14 @@ import net.minecraft.world.item.crafting.SmeltingRecipe;
  */
 public final class SmeltingRecipes {
 
-    private static final Identifier WOOD_FUEL_ITEM_ID = BuiltInRegistries.ITEM.getKey(Items.OAK_LOG);
-
     private SmeltingRecipes() {
     }
 
-    /** The 1:1 smelting-derived recipe for {@code resultId} (an ingot or other furnace output), if any real vanilla Furnace recipe produces it. */
-    public static Optional<LyfeCraftingBridge.RecipeInfo> get(ServerLevel level, Identifier resultId) {
+    /** One alternate {@code RecipeInfo} per real vanilla furnace fuel (lava bucket excluded) for {@code resultId}, or empty if no real vanilla Furnace recipe produces it. */
+    public static List<LyfeCraftingBridge.RecipeInfo> getAll(ServerLevel level, Identifier resultId) {
         Item resultItem = BuiltInRegistries.ITEM.getOptional(resultId).orElse(null);
         if (resultItem == null) {
-            return Optional.empty();
+            return List.of();
         }
         for (RecipeHolder<?> holder : level.getServer().getRecipeManager().getRecipes()) {
             if (!(holder.value() instanceof SmeltingRecipe recipe)) {
@@ -76,12 +88,20 @@ public final class SmeltingRecipes {
                 continue;
             }
             Identifier inputId = BuiltInRegistries.ITEM.getKey(firstInput.get().value());
-            Map<Identifier, Integer> components = inputId.equals(WOOD_FUEL_ITEM_ID)
-                    ? Map.of(inputId, 1) // Shouldn't happen in practice (no vanilla smelting input is a log), but avoid a degenerate 1-entry map collapsing the fuel cost.
-                    : Map.of(inputId, 1, WOOD_FUEL_ITEM_ID, 1);
-            return Optional.of(new LyfeCraftingBridge.RecipeInfo(resultId, 0, components, Map.of(),
-                    LyfeCraftingBridge.RecipeInfo.StructureRequirement.FURNACE));
+            List<LyfeCraftingBridge.RecipeInfo> alternates = new ArrayList<>();
+            for (Item fuelItem : level.fuelValues().fuelItems()) {
+                if (fuelItem == Items.LAVA_BUCKET) {
+                    continue;
+                }
+                Identifier fuelId = BuiltInRegistries.ITEM.getKey(fuelItem);
+                Map<Identifier, Integer> components = fuelId.equals(inputId)
+                        ? Map.of(inputId, 2)
+                        : Map.of(inputId, 1, fuelId, 1);
+                alternates.add(new LyfeCraftingBridge.RecipeInfo(resultId, 0, components, Map.of(),
+                        LyfeCraftingBridge.RecipeInfo.StructureRequirement.FURNACE));
+            }
+            return alternates;
         }
-        return Optional.empty();
+        return List.of();
     }
 }

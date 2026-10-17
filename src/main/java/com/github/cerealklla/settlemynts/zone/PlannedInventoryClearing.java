@@ -152,21 +152,33 @@ public final class PlannedInventoryClearing {
             if (target.isTag()) {
                 continue; // A crafting recipe's output is always a concrete item.
             }
-            Optional<LyfeCraftingBridge.RecipeInfo> recipeOpt = resolveRecipe(level, target.resourceKey());
-            if (recipeOpt.isEmpty()) {
+            List<LyfeCraftingBridge.RecipeInfo> candidates = resolveRecipes(level, target.resourceKey());
+            if (candidates.isEmpty()) {
                 continue;
             }
             if (capability == null) {
                 capability = PlotCraftingCapability.resolve(level, polygon);
             }
-            LyfeCraftingBridge.RecipeInfo recipe = recipeOpt.get();
-            if (!recipe.craftableWith(capability)) {
+            PlotCraftingCapability finalCapability = capability;
+            List<LyfeCraftingBridge.RecipeInfo> usable = candidates.stream()
+                    .filter(r -> r.craftableWith(finalCapability))
+                    .toList();
+            if (usable.isEmpty()) {
                 continue; // No sufficiently-tiered crafting structure (or Furnace/Stonecutter) present on this plot.
             }
             for (int i = 0; i < MAX_CRAFTS_PER_PLOT_PER_TARGET; i++) {
                 Map<Identifier, Integer> available = Settlemynts.scanItemStock(boxes);
                 int currentStock = available.getOrDefault(target.resourceKey(), 0);
-                if (currentStock >= target.targetCount() || !CraftingExecutor.canCraftOne(available, recipe)) {
+                if (currentStock >= target.targetCount()) {
+                    break;
+                }
+                // Picks whichever alternate (e.g. furnace fuel) is actually currently stocked, re-checked
+                // every craft -- so running out of one fuel mid-run falls through to the next alternate
+                // instead of stalling the whole target.
+                LyfeCraftingBridge.RecipeInfo recipe = usable.stream()
+                        .filter(r -> CraftingExecutor.canCraftOne(available, r))
+                        .findFirst().orElse(null);
+                if (recipe == null) {
                     break;
                 }
                 CraftingExecutor.craftOne(boxes, recipe);
@@ -196,18 +208,30 @@ public final class PlannedInventoryClearing {
      * Central recipe-source resolution -- {@link SmeltingRecipes}/{@link StonecuttingRecipes} (plain
      * vanilla, no Lyfe needed) first, then {@link LyfeCraftingBridge} (tool/weapon/armor/food, if
      * loaded) -- see {@code SmeltingRecipes}' own doc for why these are genuinely separate sources
-     * rather than one merged into the other.
+     * rather than one merged into the other. Returns every known alternate recipe for {@code id}
+     * (plural since {@link SmeltingRecipes} now returns one per real vanilla furnace fuel, 2026-10-16)
+     * -- callers that only need "any one recipe" (e.g. the existence check below) can just take the
+     * first entry; callers that need to choose the cheapest/currently-stocked fuel should not.
      */
-    private static Optional<LyfeCraftingBridge.RecipeInfo> resolveRecipe(ServerLevel level, Identifier id) {
-        Optional<LyfeCraftingBridge.RecipeInfo> smelting = SmeltingRecipes.get(level, id);
-        if (smelting.isPresent()) {
+    private static List<LyfeCraftingBridge.RecipeInfo> resolveRecipes(ServerLevel level, Identifier id) {
+        List<LyfeCraftingBridge.RecipeInfo> smelting = SmeltingRecipes.getAll(level, id);
+        if (!smelting.isEmpty()) {
             return smelting;
         }
         Optional<LyfeCraftingBridge.RecipeInfo> stonecutting = StonecuttingRecipes.get(level, id);
         if (stonecutting.isPresent()) {
-            return stonecutting;
+            return List.of(stonecutting.get());
         }
-        return LyfeCraftingBridge.isLoaded() ? LyfeCraftingBridge.getRecipe(id) : Optional.empty();
+        if (LyfeCraftingBridge.isLoaded()) {
+            return LyfeCraftingBridge.getRecipe(id).map(List::of).orElse(List.of());
+        }
+        return List.of();
+    }
+
+    /** Convenience wrapper over {@link #resolveRecipes} for call sites that only need to know whether {@code id} has any known recipe at all, not which one. */
+    private static Optional<LyfeCraftingBridge.RecipeInfo> resolveRecipe(ServerLevel level, Identifier id) {
+        List<LyfeCraftingBridge.RecipeInfo> all = resolveRecipes(level, id);
+        return all.isEmpty() ? Optional.empty() : Optional.of(all.get(0));
     }
 
     private static void settleResource(ServerLevel level, List<Participant> participants, ResourceKey key) {
@@ -426,22 +450,46 @@ public final class PlannedInventoryClearing {
         }
         long directCost = cheapestSellerPrice(level, participants, buyer, key);
 
-        Optional<LyfeCraftingBridge.RecipeInfo> recipe = key.isTag() ? Optional.empty() : resolveRecipe(level, key.id());
-        boolean canCraft = recipe.isPresent() && recipe.get().craftableWith(capability);
-        long craftCost = -1;
-        if (canCraft) {
-            Set<Identifier> nextVisiting = withAdded(visiting, key.id());
-            craftCost = estimateCraftCost(level, participants, buyer, recipe.get(), capability, nextVisiting);
-        }
+        Optional<CraftOption> craftOption = key.isTag() ? Optional.empty()
+                : cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting);
 
-        boolean useCraft = canCraft && craftCost >= 0 && (directCost < 0 || craftCost <= directCost);
+        boolean useCraft = craftOption.isPresent() && (directCost < 0 || craftOption.get().cost() <= directCost);
         if (useCraft) {
-            return executeCraftOne(level, participants, buyer, recipe.get(), capability, withAdded(visiting, key.id()));
+            return executeCraftOne(level, participants, buyer, craftOption.get().recipe(), capability, withAdded(visiting, key.id()));
         }
         if (directCost >= 0) {
             return executeDirectBuyOne(level, participants, buyer, key);
         }
         return false;
+    }
+
+    private record CraftOption(LyfeCraftingBridge.RecipeInfo recipe, long cost) {
+    }
+
+    /**
+     * The cheapest craftable alternate recipe for {@code id} (e.g. whichever furnace fuel is cheapest
+     * to obtain), or empty if {@code id} has no recipe at all, none are craftable with {@code
+     * capability}, or every alternate's ingredients are themselves unobtainable. {@code visiting} must
+     * NOT already contain {@code id} -- callers pass their own current visiting set, this method adds
+     * {@code id} itself before recursing into {@link #estimateCraftCost}.
+     */
+    private static Optional<CraftOption> cheapestCraftOption(ServerLevel level, List<Participant> participants, Participant buyer,
+                                                               Identifier id, PlotCraftingCapability capability, Set<Identifier> visiting) {
+        if (visiting.contains(id)) {
+            return Optional.empty();
+        }
+        Set<Identifier> nextVisiting = withAdded(visiting, id);
+        CraftOption best = null;
+        for (LyfeCraftingBridge.RecipeInfo candidate : resolveRecipes(level, id)) {
+            if (!candidate.craftableWith(capability)) {
+                continue;
+            }
+            long cost = estimateCraftCost(level, participants, buyer, candidate, capability, nextVisiting);
+            if (cost >= 0 && (best == null || cost < best.cost())) {
+                best = new CraftOption(candidate, cost);
+            }
+        }
+        return Optional.ofNullable(best);
     }
 
     /** Non-mutating: the recursive total cost to obtain every ingredient for one craft of {@code recipe}, or {@code -1} if any piece is unobtainable. */
@@ -476,10 +524,10 @@ public final class PlannedInventoryClearing {
                                                 ResourceKey key, PlotCraftingCapability capability, Set<Identifier> visiting) {
         long direct = cheapestSellerPrice(level, participants, buyer, key);
         long craft = -1;
-        if (!key.isTag() && !visiting.contains(key.id())) {
-            Optional<LyfeCraftingBridge.RecipeInfo> recipe = resolveRecipe(level, key.id());
-            if (recipe.isPresent() && recipe.get().craftableWith(capability)) {
-                craft = estimateCraftCost(level, participants, buyer, recipe.get(), capability, withAdded(visiting, key.id()));
+        if (!key.isTag()) {
+            Optional<CraftOption> option = cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting);
+            if (option.isPresent()) {
+                craft = option.get().cost();
             }
         }
         if (direct < 0) {
