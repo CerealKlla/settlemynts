@@ -67,11 +67,14 @@ public class SettlemyntsModClient {
             "key.settlemynts.open_npc_menu", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G, KeyMapping.Category.MISC);
 
     // "Auto-Drop" (2026-10-17) -- sweeps main-inventory items matching a plot's own existing box
-    // stock into those boxes. "V" is free across the whole suite as of this writing (G/open_npc_menu
-    // here, N/Coryspondance mailbox, J/Myssions quest log, K/M/O/Lyfe) -- same easy-to-rebind
-    // placeholder as every other keybind in this project.
+    // stock into those boxes. Originally "V"; moved to "R" the same day after a real player report
+    // -- "V" is Simple Voice Chat's own default "Voice Chat Menu" key (confirmed by decompiling its
+    // KeyEvents.class, not guessed), a real collision this grep-only-the-suite's-own-mods check
+    // missed. "R" confirmed free against vanilla (including its F3-combo debug keys), every other
+    // suite mod's keybinds, and SVC's own remaining keybinds -- same easy-to-rebind placeholder as
+    // every other keybind in this project.
     public static final KeyMapping AUTO_DROP = new KeyMapping(
-            "key.settlemynts.auto_drop", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V, KeyMapping.Category.MISC);
+            "key.settlemynts.auto_drop", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_R, KeyMapping.Category.MISC);
 
     @SubscribeEvent
     static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {

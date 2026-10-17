@@ -387,9 +387,16 @@ own actual remaining room -- the one place in this mod needing a real capacity c
 build`/`test` green, whole-suite (11 mods) rebuild green, `runServer` AND `runClient` boot-smoke-tested
 clean. **Not yet live-tested.**
 
-**Auto-Dropping, 2026-10-17** (see [context/decisions.md](context/decisions.md),
-[context/classes/AutoDropper.md](context/classes/AutoDropper.md)) -- new "V" keybind: standing on a
+**Auto-Dropping, 2026-10-17, Build 144** (see [context/decisions.md](context/decisions.md),
+[context/classes/AutoDropper.md](context/classes/AutoDropper.md)) -- new keybind: standing on a
 plot you own, sweeps every main-inventory item (not hotbar/armor/offhand) that the plot's own boxes
 already stock into those boxes, via the existing `zone.ContainerDeposit`. Coin Purse excluded
 explicitly via a new `bridge.YconomicsShopBridge#isCoinPurse`. `./gradlew build`/`test` green.
-**Not yet live-tested or deployed.**
+
+**Two real live-test bugs fixed the same day, Build 145** -- a player reported items landing in
+boxes that never stocked them (the original check only looked at the plot's *aggregate* stock, not
+which specific box actually had the item; fixed with a new `AutoDropper#boxesContaining` per-item
+filter) and that the keybind (originally "V") collided with Simple Voice Chat's own default "Voice
+Chat Menu" key, confirmed by decompiling SVC's `KeyEvents.class` -- moved to "R" instead of
+rebinding SVC's key, since Auto-Drop is the brand-new side with no existing player config to
+preserve. `./gradlew build`/`test` green.
