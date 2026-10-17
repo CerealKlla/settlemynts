@@ -181,7 +181,7 @@ public final class PlannedInventoryClearing {
                 if (recipe == null) {
                     break;
                 }
-                CraftingExecutor.craftOne(boxes, recipe);
+                CraftingExecutor.craftOne(boxes, recipe, finalCapability);
                 crafted++;
             }
         }
@@ -660,7 +660,7 @@ public final class PlannedInventoryClearing {
         if (!CraftingExecutor.canCraftOne(finalAvailable, recipe)) {
             return false; // Shouldn't normally happen given the top-ups above -- defensive guard.
         }
-        CraftingExecutor.craftOne(buyer.boxes(), recipe);
+        CraftingExecutor.craftOne(buyer.boxes(), recipe, capability);
         SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} crafted 1x {} (structure tier {})",
                 buyer.plot().plotId(), recipe.resultId(), capability.lyfeStructureTier());
         ShopWishlistCache.invalidate(buyer.plot().plotId());

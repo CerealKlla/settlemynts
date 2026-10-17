@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import com.github.cerealklla.lyfe.api.Lyfe;
+import com.github.cerealklla.lyfe.cook.CookingListener;
 import com.github.cerealklla.lyfe.cook.CookingStructureBlockEntity;
 import com.github.cerealklla.lyfe.cook.GeneratedFoodRecipe;
 import com.github.cerealklla.lyfe.cook.ServerFoodRecipeStore;
@@ -13,6 +14,7 @@ import com.github.cerealklla.lyfe.craft.GeneratedRecipe;
 import com.github.cerealklla.lyfe.craft.ServerRecipeStore;
 
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.fml.ModList;
 
@@ -87,6 +89,22 @@ public final class LyfeCraftingBridge {
      */
     public static Optional<RecipeInfo> getFoodRecipe(Identifier resultId) {
         return ServerFoodRecipeStore.get(resultId).map(LyfeCraftingBridge::toLocal);
+    }
+
+    /**
+     * Bakes real icons/nutrition/a quality-prefixed custom name onto {@code result} -- the same
+     * {@code cook.CookingListener#bakeIcons} call a player's own "Cook" button makes -- so an
+     * NPC-crafted dish is a genuine valued item in Lyfe's cooking system instead of a plain vanilla
+     * stack with vanilla's own flat nutrition. Added 2026-10-17: real report, screenshot showing a
+     * plain "Cooked Porkchop" with no food-value prefix -- {@code zone.CraftingExecutor#craftOne} was
+     * depositing a bare {@code new ItemStack(item)} for every recipe source including food, since
+     * baking was never wired up when {@link #getFoodRecipe} was added. No Cook-skill bonus is applied
+     * (there's no player here) -- same "NPC-crafted output skips the player-skill-flavored bonus"
+     * precedent {@link #craftingStructureTier} already set for Quality on tools/armor.
+     */
+    public static void bakeFoodIcons(ItemStack result, int structureTier, int componentsUsed) {
+        double icons = CookingListener.computeIcons(structureTier, 0, componentsUsed);
+        CookingListener.bakeIcons(result, icons, structureTier);
     }
 
     public static List<Identifier> componentGroupMembers(String groupName) {

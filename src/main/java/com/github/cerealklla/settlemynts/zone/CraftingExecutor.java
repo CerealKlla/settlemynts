@@ -51,8 +51,19 @@ public final class CraftingExecutor {
      * what's needed from each member before moving to the next -- mirrors {@code
      * CraftingStructureMenu}'s own first-member-first algorithm exactly, for fidelity with how a
      * player's own crafting already consumes these groups.
+     *
+     * <p><b>{@code capability} added 2026-10-17</b> for {@link
+     * LyfeCraftingBridge.RecipeInfo.StructureRequirement#COOKING_STRUCTURE} recipes specifically --
+     * real report: an NPC-cooked dish was a plain vanilla stack with vanilla's own flat nutrition
+     * (e.g. a bare "Cooked Porkchop"), not a real Lyfe-valued one. The output now gets the same
+     * {@code cook.CookingListener#bakeIcons} treatment {@code cook.CookingStructureMenu}'s own "Cook"
+     * button gives a player-crafted dish (icons/nutrition/the "[icons] (T\<tier\>) - name" custom name),
+     * via {@link LyfeCraftingBridge#bakeFoodIcons} -- using the plot's real, physically-present
+     * cooking-structure tier (not the recipe's own minimum required tier), same fidelity a player
+     * cooking at that exact structure would get. No Cook-skill bonus, same as the existing "no Quality
+     * bonus for NPC-crafted tools/armor" precedent (no player here to have a skill level).
      */
-    public static void craftOne(List<Container> boxes, LyfeCraftingBridge.RecipeInfo recipe) {
+    public static void craftOne(List<Container> boxes, LyfeCraftingBridge.RecipeInfo recipe, PlotCraftingCapability capability) {
         for (Map.Entry<Identifier, Integer> entry : recipe.specificComponents().entrySet()) {
             ContainerWithdraw.drain(boxes, ShopResource.ofItem(entry.getKey()), entry.getValue());
         }
@@ -66,6 +77,10 @@ public final class CraftingExecutor {
                 remaining -= taken.stream().mapToInt(ItemStack::getCount).sum();
             }
         }
-        ContainerDeposit.depositIntoAny(boxes, new ItemStack(BuiltInRegistries.ITEM.getValue(recipe.resultId()), 1));
+        ItemStack result = new ItemStack(BuiltInRegistries.ITEM.getValue(recipe.resultId()), 1);
+        if (recipe.requirement() == LyfeCraftingBridge.RecipeInfo.StructureRequirement.COOKING_STRUCTURE) {
+            LyfeCraftingBridge.bakeFoodIcons(result, capability.cookingStructureTier(), recipe.specificComponents().size());
+        }
+        ContainerDeposit.depositIntoAny(boxes, result);
     }
 }
