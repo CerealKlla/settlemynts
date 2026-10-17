@@ -31,6 +31,11 @@ public final class YconomicsShopBridge {
         return ModList.get().isLoaded("yconomics");
     }
 
+    /** Added 2026-10-17 for Auto-Dropping ({@code zone.AutoDropper}) -- a Coin Purse should never be swept into a plot's boxes along with everything else. Only ever called behind {@link #isAvailable()}. */
+    public static boolean isCoinPurse(net.minecraft.world.item.ItemStack stack) {
+        return stack.is(com.github.cerealklla.yconomics.registration.ModItems.COIN_PURSE.get());
+    }
+
     /**
      * Local mirror of Yconomics' {@code shop.ShopListing} -- see {@link ShopResource}'s own class doc
      * for why. {@code buyPricePerUnit} (added 2026-10-08) is always {@code

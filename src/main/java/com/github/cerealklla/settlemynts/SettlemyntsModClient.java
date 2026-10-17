@@ -66,9 +66,17 @@ public class SettlemyntsModClient {
     public static final KeyMapping OPEN_NPC_MENU = new KeyMapping(
             "key.settlemynts.open_npc_menu", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_G, KeyMapping.Category.MISC);
 
+    // "Auto-Drop" (2026-10-17) -- sweeps main-inventory items matching a plot's own existing box
+    // stock into those boxes. "V" is free across the whole suite as of this writing (G/open_npc_menu
+    // here, N/Coryspondance mailbox, J/Myssions quest log, K/M/O/Lyfe) -- same easy-to-rebind
+    // placeholder as every other keybind in this project.
+    public static final KeyMapping AUTO_DROP = new KeyMapping(
+            "key.settlemynts.auto_drop", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V, KeyMapping.Category.MISC);
+
     @SubscribeEvent
     static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(OPEN_NPC_MENU);
+        event.register(AUTO_DROP);
     }
 
     @SubscribeEvent
@@ -201,6 +209,13 @@ public class SettlemyntsModClient {
                         send(new com.github.cerealklla.settlemynts.plotsign.RequestNpcMenuPayload(npcAnchor));
                     }
                 });
+            }
+        }
+
+        // "Auto-Drop" (2026-10-17) -- no screen to open, just fires the request straight to the server.
+        while (AUTO_DROP.consumeClick()) {
+            if (Minecraft.getInstance().screen == null) {
+                send(new com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload());
             }
         }
 

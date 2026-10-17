@@ -386,3 +386,10 @@ plots' real Shop food listings, paid from the Guardhouse plot's own boxes, cappe
 own actual remaining room -- the one place in this mod needing a real capacity cap on a buy. `./gradlew
 build`/`test` green, whole-suite (11 mods) rebuild green, `runServer` AND `runClient` boot-smoke-tested
 clean. **Not yet live-tested.**
+
+**Auto-Dropping, 2026-10-17** (see [context/decisions.md](context/decisions.md),
+[context/classes/AutoDropper.md](context/classes/AutoDropper.md)) -- new "V" keybind: standing on a
+plot you own, sweeps every main-inventory item (not hotbar/armor/offhand) that the plot's own boxes
+already stock into those boxes, via the existing `zone.ContainerDeposit`. Coin Purse excluded
+explicitly via a new `bridge.YconomicsShopBridge#isCoinPurse`. `./gradlew build`/`test` green.
+**Not yet live-tested or deployed.**

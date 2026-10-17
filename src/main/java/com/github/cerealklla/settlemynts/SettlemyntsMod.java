@@ -681,6 +681,18 @@ public class SettlemyntsMod {
         registrar.playToServer(com.github.cerealklla.settlemynts.guardhouse.SetPreferredFoodPayload.TYPE,
                 com.github.cerealklla.settlemynts.guardhouse.SetPreferredFoodPayload.STREAM_CODEC,
                 (payload, context) -> setPreferredFood(payload, context));
+
+        // "Auto-Drop" keybind (2026-10-17) -- see zone.AutoDropper's own doc.
+        registrar.playToServer(com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload.TYPE,
+                com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload.STREAM_CODEC,
+                (payload, context) -> requestAutoDrop(payload, context));
+    }
+
+    private static void requestAutoDrop(com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        com.github.cerealklla.settlemynts.zone.AutoDropper.autoDrop(player, serverLevel);
     }
 
     /**
