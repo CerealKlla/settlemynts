@@ -228,12 +228,14 @@ public final class PlannedInventoryClearing {
                 return List.of(lyfe.get());
             }
             // Lyfe's cooking overhaul strips the real vanilla SmeltingRecipe for every cooked-food item
-            // and replaces it with its own ServerFoodRecipeStore entry (see LyfeCraftingBridge#getFoodRecipe's
-            // own doc) -- without this fallback, SmeltingRecipes.getAll (which only reads the live vanilla
-            // RecipeManager) finds nothing at all for those items on a Lyfe-loaded server.
-            Optional<LyfeCraftingBridge.RecipeInfo> food = LyfeCraftingBridge.getFoodRecipe(id);
-            if (food.isPresent()) {
-                return List.of(food.get());
+            // and replaces it with its own ServerFoodRecipeStore entry (see
+            // LyfeCraftingBridge#getFoodRecipeAlternates' own doc) -- without this fallback,
+            // SmeltingRecipes.getAll (which only reads the live vanilla RecipeManager) finds nothing at
+            // all for those items on a Lyfe-loaded server. Plural, same as the Furnace-fuel alternates
+            // above -- one per real vanilla fuel item.
+            List<LyfeCraftingBridge.RecipeInfo> food = LyfeCraftingBridge.getFoodRecipeAlternates(level, id);
+            if (!food.isEmpty()) {
+                return food;
             }
         }
         return List.of();

@@ -79,7 +79,7 @@ public final class CraftingExecutor {
         }
         ItemStack result = new ItemStack(BuiltInRegistries.ITEM.getValue(recipe.resultId()), 1);
         if (recipe.requirement() == LyfeCraftingBridge.RecipeInfo.StructureRequirement.COOKING_STRUCTURE) {
-            LyfeCraftingBridge.bakeFoodIcons(result, capability.cookingStructureTier(), recipe.specificComponents().size());
+            LyfeCraftingBridge.bakeFoodIcons(result, capability.cookingStructureTier(), recipe.foodSlotsUsed());
         }
         ContainerDeposit.depositIntoAny(boxes, result);
     }

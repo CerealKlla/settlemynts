@@ -59,7 +59,7 @@ public final class StonecuttingRecipes {
             }
             Identifier inputId = BuiltInRegistries.ITEM.getKey(firstInput.get().value());
             return Optional.of(new LyfeCraftingBridge.RecipeInfo(resultId, 0, Map.of(inputId, 1), Map.of(),
-                    LyfeCraftingBridge.RecipeInfo.StructureRequirement.STONECUTTER));
+                    LyfeCraftingBridge.RecipeInfo.StructureRequirement.STONECUTTER, 0));
         }
         return Optional.empty();
     }

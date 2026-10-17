@@ -98,7 +98,7 @@ public final class SmeltingRecipes {
                         ? Map.of(inputId, 2)
                         : Map.of(inputId, 1, fuelId, 1);
                 alternates.add(new LyfeCraftingBridge.RecipeInfo(resultId, 0, components, Map.of(),
-                        LyfeCraftingBridge.RecipeInfo.StructureRequirement.FURNACE));
+                        LyfeCraftingBridge.RecipeInfo.StructureRequirement.FURNACE, 0));
             }
             return alternates;
         }
