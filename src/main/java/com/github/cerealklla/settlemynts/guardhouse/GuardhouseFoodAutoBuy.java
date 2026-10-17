@@ -28,10 +28,13 @@ import net.minecraft.world.item.Items;
  * -- only {@code bridge.YconomicsShopBridge#getListings} is used, purely to read real sell prices),
  * rather than inventing a second payment mechanism.
  *
- * <p>Buys from any OTHER plot in the same settlement with a real Shop listing for a plain item (tag/
- * exact-name listings are skipped -- a flagged v1 simplification, not an oversight; plain-item
- * listings are the overwhelming common case everywhere else in this mod) whose {@link
- * DataComponents#FOOD} component is present, one listing at a time, capped by whichever is smallest
+ * <p>Buys from any OTHER plot in the same settlement with a real Shop listing for a concrete item
+ * (a tag-only listing is skipped -- {@code listing.resource().itemId().isEmpty()} below -- since a
+ * tag has no single real item to check {@link DataComponents#FOOD} against; an exact-name/quality
+ * listing like Lyfe's "[8.25] T3 - Cooked Fish" is NOT skipped -- it's matched by its real underlying
+ * item id the same as a plain listing, confirmed 2026-10-17, since the only gate here is a real
+ * {@link FoodProperties} component) whose {@link DataComponents#FOOD} component is present, one
+ * listing at a time, capped by whichever is smallest
  * of: the remaining nutrition-value deficit, the seller's real stock, the Guardhouse's own
  * Gold-Nugget balance (drawn from the Guardhouse PLOT's own regular boxes via {@link
  * Settlemynts#resolvePlotBoxes} -- NOT the Food Store container itself, which only ever holds food),

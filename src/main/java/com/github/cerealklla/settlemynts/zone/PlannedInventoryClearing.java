@@ -223,7 +223,18 @@ public final class PlannedInventoryClearing {
             return List.of(stonecutting.get());
         }
         if (LyfeCraftingBridge.isLoaded()) {
-            return LyfeCraftingBridge.getRecipe(id).map(List::of).orElse(List.of());
+            Optional<LyfeCraftingBridge.RecipeInfo> lyfe = LyfeCraftingBridge.getRecipe(id);
+            if (lyfe.isPresent()) {
+                return List.of(lyfe.get());
+            }
+            // Lyfe's cooking overhaul strips the real vanilla SmeltingRecipe for every cooked-food item
+            // and replaces it with its own ServerFoodRecipeStore entry (see LyfeCraftingBridge#getFoodRecipe's
+            // own doc) -- without this fallback, SmeltingRecipes.getAll (which only reads the live vanilla
+            // RecipeManager) finds nothing at all for those items on a Lyfe-loaded server.
+            Optional<LyfeCraftingBridge.RecipeInfo> food = LyfeCraftingBridge.getFoodRecipe(id);
+            if (food.isPresent()) {
+                return List.of(food.get());
+            }
         }
         return List.of();
     }

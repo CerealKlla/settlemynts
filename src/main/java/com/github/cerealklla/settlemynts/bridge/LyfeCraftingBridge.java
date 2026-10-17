@@ -5,6 +5,9 @@ import java.util.Map;
 import java.util.Optional;
 
 import com.github.cerealklla.lyfe.api.Lyfe;
+import com.github.cerealklla.lyfe.cook.CookingStructureBlockEntity;
+import com.github.cerealklla.lyfe.cook.GeneratedFoodRecipe;
+import com.github.cerealklla.lyfe.cook.ServerFoodRecipeStore;
 import com.github.cerealklla.lyfe.craft.CraftingStructureBlockEntity;
 import com.github.cerealklla.lyfe.craft.GeneratedRecipe;
 import com.github.cerealklla.lyfe.craft.ServerRecipeStore;
@@ -36,22 +39,27 @@ public final class LyfeCraftingBridge {
      * for why a Yconomics/Lyfe type never appears in a signature outside its bridge. {@code
      * requirement} (added 2026-10-16 as {@code requiresFurnace}, a plain boolean; widened to this enum
      * the same day once a second vanilla-structure source -- {@code zone.StonecuttingRecipes} -- made
-     * a single boolean too narrow) -- {@code LYFE_STRUCTURE} for every real Lyfe-sourced recipe below;
-     * {@code FURNACE}/{@code STONECUTTER} only for {@code zone.SmeltingRecipes}/{@code
-     * zone.StonecuttingRecipes}' own entries, which also reuse this exact record type as their
-     * "recipe" currency even though neither has anything to do with Lyfe -- see those classes' own
-     * doc for why gating by a plain vanilla structure's presence, not {@code tier}, was necessary (a
-     * Furnace/Stonecutter has no "Lyfe crafting structure tier" of its own at all).
+     * a single boolean too narrow) -- {@code LYFE_STRUCTURE} for every real Lyfe tool/weapon/armor
+     * recipe below; {@code COOKING_STRUCTURE} for a Lyfe {@code cook.GeneratedFoodRecipe} (gated by
+     * its own separate tier ladder -- a Cooking Station/Grill/Stove/Oven/Chef Set is a structurally
+     * distinct block entity from a Lyfe crafting structure, see {@code
+     * zone.PlotCraftingStructures#maxCookingStructureTier}); {@code FURNACE}/{@code STONECUTTER} only
+     * for {@code zone.SmeltingRecipes}/{@code zone.StonecuttingRecipes}' own entries, which also reuse
+     * this exact record type as their "recipe" currency even though neither has anything to do with
+     * Lyfe -- see those classes' own doc for why gating by a plain vanilla structure's presence, not
+     * {@code tier}, was necessary (a Furnace/Stonecutter has no "Lyfe crafting structure tier" of its
+     * own at all).
      */
     public record RecipeInfo(Identifier resultId, int tier, Map<Identifier, Integer> specificComponents,
                               Map<String, Integer> genericComponents, StructureRequirement requirement) {
 
-        public enum StructureRequirement { LYFE_STRUCTURE, FURNACE, STONECUTTER }
+        public enum StructureRequirement { LYFE_STRUCTURE, COOKING_STRUCTURE, FURNACE, STONECUTTER }
 
         /** Whether {@code capability} is enough to craft this recipe. */
         public boolean craftableWith(com.github.cerealklla.settlemynts.zone.PlotCraftingCapability capability) {
             return switch (requirement) {
                 case LYFE_STRUCTURE -> capability.lyfeStructureTier() >= tier;
+                case COOKING_STRUCTURE -> capability.cookingStructureTier() >= tier;
                 case FURNACE -> capability.hasFurnace();
                 case STONECUTTER -> capability.hasStonecutter();
             };
@@ -66,6 +74,21 @@ public final class LyfeCraftingBridge {
         return ServerRecipeStore.all().values().stream().map(LyfeCraftingBridge::toLocal).toList();
     }
 
+    /**
+     * The Lyfe-generated cooking recipe for {@code resultId} (a cooked-food item), if any -- separate
+     * from {@link #getRecipe} since Lyfe's cooking overhaul (2026-10-03) keeps food recipes in its own
+     * {@code cook.ServerFoodRecipeStore}, distinct from the tool/weapon/armor {@code
+     * craft.ServerRecipeStore}. Added 2026-10-17: Lyfe's {@code VanillaFoodRecipeStripper} deletes the
+     * real vanilla {@link net.minecraft.world.item.crafting.SmeltingRecipe}s for every Track A cooked
+     * food (cooked beef/porkchop/chicken/mutton/rabbit/cod/salmon, baked potato, ...) and replaces them
+     * with its own generated recipes here -- without this, {@code zone.SmeltingRecipes} (which only
+     * ever reads the live vanilla {@code RecipeManager}) finds nothing at all for those items on a
+     * Lyfe-loaded server, even with a real Furnace or Cooking Station present.
+     */
+    public static Optional<RecipeInfo> getFoodRecipe(Identifier resultId) {
+        return ServerFoodRecipeStore.get(resultId).map(LyfeCraftingBridge::toLocal);
+    }
+
     public static List<Identifier> componentGroupMembers(String groupName) {
         return Lyfe.componentGroupMembers(groupName);
     }
@@ -75,7 +98,16 @@ public final class LyfeCraftingBridge {
         return be instanceof CraftingStructureBlockEntity structure ? structure.tier() : 0;
     }
 
+    /** {@code 0} if {@code be} isn't a Lyfe cooking structure (or isn't loaded), else its real tier. */
+    public static int cookingStructureTier(BlockEntity be) {
+        return be instanceof CookingStructureBlockEntity structure ? structure.tier() : 0;
+    }
+
     private static RecipeInfo toLocal(GeneratedRecipe recipe) {
         return new RecipeInfo(recipe.resultId(), recipe.tier(), recipe.specificComponents(), recipe.genericComponents(), RecipeInfo.StructureRequirement.LYFE_STRUCTURE);
+    }
+
+    private static RecipeInfo toLocal(GeneratedFoodRecipe recipe) {
+        return new RecipeInfo(recipe.resultId(), recipe.tier(), recipe.components(), Map.of(), RecipeInfo.StructureRequirement.COOKING_STRUCTURE);
     }
 }

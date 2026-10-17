@@ -18,11 +18,13 @@ import net.minecraft.server.level.ServerLevel;
  * (Stonecutter) made that shape genuinely awkward to extend, and a future third one would only make
  * it worse. One object threaded everywhere instead; adding a new structure type later is just one
  * more field here plus one more {@code LyfeCraftingBridge.RecipeInfo.StructureRequirement} case,
- * no signature changes anywhere else.
+ * no signature changes anywhere else -- proven out again 2026-10-17 adding {@code
+ * cookingStructureTier} (a Lyfe Cooking Station/Grill/Stove/Oven/Chef Set, structurally distinct
+ * from a Lyfe crafting structure) for Lyfe's cooking recipes.
  */
-public record PlotCraftingCapability(int lyfeStructureTier, boolean hasFurnace, boolean hasStonecutter) {
+public record PlotCraftingCapability(int lyfeStructureTier, int cookingStructureTier, boolean hasFurnace, boolean hasStonecutter) {
 
-    public static final PlotCraftingCapability NONE = new PlotCraftingCapability(0, false, false);
+    public static final PlotCraftingCapability NONE = new PlotCraftingCapability(0, 0, false, false);
 
     public static PlotCraftingCapability resolve(ServerLevel level, UUID plotId) {
         Optional<Geometry.Polygon> polygon = Settlemynts.resolvePlotPolygon(level, plotId);
@@ -33,6 +35,7 @@ public record PlotCraftingCapability(int lyfeStructureTier, boolean hasFurnace, 
     public static PlotCraftingCapability resolve(ServerLevel level, Geometry.Polygon area) {
         return new PlotCraftingCapability(
                 PlotCraftingStructures.maxCraftingStructureTier(level, area),
+                PlotCraftingStructures.maxCookingStructureTier(level, area),
                 PlotCraftingStructures.hasFurnace(level, area),
                 PlotCraftingStructures.hasStonecutter(level, area));
     }

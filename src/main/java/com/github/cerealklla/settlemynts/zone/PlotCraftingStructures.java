@@ -60,6 +60,39 @@ public final class PlotCraftingStructures {
     }
 
     /**
+     * Same as {@link #maxCraftingStructureTier}, but for a Lyfe Cooking Station/Grill/Stove/Oven/Chef
+     * Set ({@code cook.CookingStructureBlockEntity}) instead of a crafting structure -- added
+     * 2026-10-17, real report: a Restaurant plot's Cooking Station was invisible to the auto-crafting
+     * engine entirely, since it's a structurally distinct block entity from {@code
+     * craft.CraftingStructureBlockEntity} (mirrors it, but isn't a subtype of it).
+     */
+    public static int maxCookingStructureTier(ServerLevel level, UUID plotId) {
+        if (!LyfeCraftingBridge.isLoaded()) {
+            return 0;
+        }
+        Optional<Geometry.Polygon> polygon = Settlemynts.resolvePlotPolygon(level, plotId);
+        if (polygon.isEmpty()) {
+            return 0;
+        }
+        return maxCookingStructureTier(level, polygon.get());
+    }
+
+    /** Same as {@link #maxCookingStructureTier(ServerLevel, UUID)}, for a polygon the caller already has in hand -- avoids its own world scan. */
+    public static int maxCookingStructureTier(ServerLevel level, Geometry.Polygon area) {
+        if (!LyfeCraftingBridge.isLoaded()) {
+            return 0;
+        }
+        int[] bestTier = {0};
+        forEachBlockEntityInArea(level, area, (pos, be) -> {
+            int tier = LyfeCraftingBridge.cookingStructureTier(be);
+            if (tier > bestTier[0]) {
+                bestTier[0] = tier;
+            }
+        });
+        return bestTier[0];
+    }
+
+    /**
      * Whether a plain vanilla Furnace is physically present on the plot -- added 2026-10-16, explicit
      * user request: "recognize the furnace as a valid crafting table" (for {@code
      * zone.SmeltingRecipes}, ore-to-ingot smelting). Deliberately independent of {@link
