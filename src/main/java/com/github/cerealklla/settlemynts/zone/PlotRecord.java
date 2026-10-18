@@ -188,6 +188,18 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
         return hiredNpc.job();
     }
 
+    /**
+     * Reassigns this plot's Owner after the fact (added 2026-10-17 for {@code debug.DebugCommands}'
+     * admin-only {@code /settlemynts setplotowner} -- every other owner assignment only ever happens
+     * once, at Finalize). {@code Optional.empty()} makes it NPC-owned again, same meaning as a plot
+     * that was never assigned one. Callers are responsible for re-syncing anything that was computed
+     * FROM the old owner (Protectyons permissions, etc.) -- this record itself has no side effects.
+     */
+    public PlotRecord withOwner(Optional<UUID> owner) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
+    }
+
     /** Stamps in a freshly-registered Shop id -- see this record's own class doc on when this happens. */
     public PlotRecord withShopId(UUID shopId) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,

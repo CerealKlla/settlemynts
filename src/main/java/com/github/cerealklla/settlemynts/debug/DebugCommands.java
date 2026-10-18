@@ -94,7 +94,18 @@ public final class DebugCommands {
                         .then(Commands.argument("placeId", com.mojang.brigadier.arguments.LongArgumentType.longArg())
                                 .executes(ctx -> entityInfo(ctx.getSource(), com.mojang.brigadier.arguments.LongArgumentType.getLong(ctx, "placeId")))))
                 .then(Commands.literal("plot")
-                        .then(Commands.literal("bill").then(billPlotId))));
+                        .then(Commands.literal("bill").then(billPlotId)))
+                .then(Commands.literal("setplotowner")
+                        // ADMIN ONLY -- unlike every other command in this class (see class doc,
+                        // deliberately ungated), this one mutates live plot ownership + re-syncs
+                        // Protectyons block-edit permissions from it, so it's gated to
+                        // LEVEL_GAMEMASTERS (op level 2 -- same convention Yconomics' own
+                        // PriceCommands already uses for an admin-only command). RCON's own console
+                        // source always passes a permission check, so this covers "rcon/admin only"
+                        // either way -- explicit user request, 2026-10-17.
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .then(Commands.argument("owner", StringArgumentType.word())
+                                .executes(ctx -> setPlotOwner(ctx.getSource(), StringArgumentType.getString(ctx, "owner"))))));
     }
 
     /**
@@ -444,6 +455,75 @@ public final class DebugCommands {
                 java.util.Map.of(goldNugget, qty), periodDays);
         source.sendSuccess(() -> Component.literal("Registered rent bill " + billId + " for plot " + plotId
                 + " (" + qty + " gold nugget(s) every " + periodDays + " day(s))."), true);
+        return 1;
+    }
+
+    /**
+     * ADMIN ONLY (LEVEL_GAMEMASTERS, or RCON) -- added 2026-10-17 per explicit user request, after a real
+     * bug ({@code zone.ShopSeeding}'s free-wood catalog fix, same date) left a plot that needed its
+     * Owner reset by hand. Resolves the target plot as whichever finalized plot the command's own
+     * player-entity is currently standing inside (same "nearest core, then contains-check" shape
+     * {@link #plotInfo}/{@link #resyncProtection} already use) -- there's no other existing way to
+     * address a plot by id from a command, and "stand in it" is simplest for an admin fixing a
+     * specific plot live. {@code owner} is either an online player's exact name, or the literal
+     * {@code clear}/{@code npc} to make the plot NPC-owned again (same meaning as a plot that never
+     * had one) -- an offline owner isn't resolvable, same limitation Finalize's own Owner field has.
+     *
+     * <p>Re-syncs Protectyons' block-edit permissions from the new owner (same computation Finalize
+     * itself uses, {@code PlotPermissions#computeProtectionPermittedPlayers}) so build access
+     * actually follows the change. Deliberately does NOT retroactively create or cancel a recurring
+     * rent bill -- that's a separate system ({@code bridge.YconomicsBillBridge}) with its own real
+     * box state to resolve, out of scope for a simple ownership correction; said so explicitly in the
+     * success message so an admin doesn't assume one was set up.
+     */
+    private static int setPlotOwner(CommandSourceStack source, String ownerArg) {
+        if (!(source.getEntity() instanceof net.minecraft.world.entity.player.Player player) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world (stand inside the target plot)."));
+            return 0;
+        }
+        AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+        BlockPos pos = player.blockPosition();
+        GhostTownHallCoreEntity foundCore = null;
+        PlotRecord foundPlot = null;
+        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+            Optional<PlotRecord> plot = com.github.cerealklla.settlemynts.zone.PlotGeometry.findContainingPlot(level, core, pos.getX(), pos.getZ());
+            if (plot.isPresent()) {
+                foundCore = core;
+                foundPlot = plot.get();
+                break;
+            }
+        }
+        if (foundPlot == null) {
+            source.sendFailure(Component.literal("You're not standing inside any finalized plot."));
+            return 0;
+        }
+
+        Optional<UUID> newOwner;
+        if (ownerArg.equalsIgnoreCase("clear") || ownerArg.equalsIgnoreCase("npc")) {
+            newOwner = Optional.empty();
+        } else {
+            net.minecraft.server.level.ServerPlayer target = level.getServer().getPlayerList().getPlayerByName(ownerArg);
+            if (target == null) {
+                source.sendFailure(Component.literal("No online player named \"" + ownerArg
+                        + "\" (an offline owner isn't resolvable -- same limitation as Finalize's own Owner field). Use \"clear\" to make it NPC-owned."));
+                return 0;
+            }
+            newOwner = Optional.of(target.getUUID());
+        }
+
+        PlotRecord updated = foundPlot.withOwner(newOwner);
+        foundCore.updatePlot(updated);
+
+        if (ModList.get().isLoaded("protectyons")) {
+            java.util.Set<UUID> permitted = com.github.cerealklla.settlemynts.zone.PlotPermissions.computeProtectionPermittedPlayers(updated, foundCore);
+            com.github.cerealklla.settlemynts.api.Settlemynts.resolvePolygonDirect(level, updated).ifPresent(polygon ->
+                    com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.registerPlot(level, updated.plotId(), polygon, permitted));
+        }
+
+        String label = newOwner.isPresent() ? ownerArg : "NPC-owned (no owner)";
+        source.sendSuccess(() -> Component.literal("Plot \"" + updated.name() + "\" owner set to " + label
+                + ". (This does not create/cancel a recurring rent bill -- that's unaffected.)"), true);
         return 1;
     }
 

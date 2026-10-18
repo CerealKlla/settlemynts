@@ -128,7 +128,7 @@ public final class ShopSeeding {
         }
         PlotRecord seeded = plot.withShopId(sharedShopId);
         owner.updatePlot(seeded);
-        applyCatalogFull(level, owner, seeded, catalog.get(), plotAnchor, 1);
+        applyCatalogFull(level, owner, seeded, catalog.get(), plotAnchor, 1, true);
         // Owner-agnostic default seeding for a tiered catalog (2026-10-10) -- see applyTieredDefaults'
         // own doc. applyCatalogFull above already re-reads the plot fresh via its own owner.updatePlot
         // calls, but this call needs the latest Planned Inventory state, so re-resolve rather than
@@ -152,7 +152,7 @@ public final class ShopSeeding {
         Optional<ShopSeedCatalog> catalog = ShopSeedCatalogRegistry.get(plot.zoneTypeId());
         if (catalog.isPresent()) {
             int tier = resolveTier(level, plot);
-            applyCatalogFull(level, owner, plot, catalog.get(), plotAnchor, tier);
+            applyCatalogFull(level, owner, plot, catalog.get(), plotAnchor, tier, true);
             PlotRecord afterCatalog = owner.getPlots().stream().filter(p -> p.plotId().equals(plot.plotId())).findFirst().orElse(plot);
             applyTieredDefaults(level, owner, afterCatalog, catalog.get(), plotAnchor, tier);
         }
@@ -189,9 +189,26 @@ public final class ShopSeeding {
         // same reasoning #seedNewPlotSharingShop/#restockNaturalShop already apply for a natural
         // settlement's shared Shop, just never extended to this, the lazy per-open catch-up path
         // for an NPC-owned plot inside a player-founded settlement.
+        //
+        // Real bug fixed 2026-10-17 ("I just made [a Lumberyard] and he has a full stack of cherry
+        // wood in it, and that doesn't grow here"): the 2026-10-13 fix above reused applyCatalogFull
+        // wholesale for this case, which ALSO unconditionally deposits real stock for every
+        // resource-backed seed (every wood species' logs/planks, for Lumberyard) -- not just the
+        // auto-listing that fix actually needed. That directly contradicts the explicit design rule
+        // for these catalogs (see bridge.ShopSeedCatalogs' own class doc, 2026-10-06 correction:
+        // "I said gold and research notes/recipes get restocked overnight, nothing else... the plot
+        // would have to buy from other plots/settlements if it needed such resources") -- it was only
+        // ever meant to apply to a GENUINELY natural (NPC) village's shared shop, which has no other
+        // possible source of goods at all. An unowned plot *inside a player-founded settlement* is
+        // not that case -- any Town Planner can still open Manage Shop for it (see
+        // PlotPermissions#canManage's own "Owner unset" rule) and is expected to earn real stock
+        // through play, same as an owned plot. applyCatalogFull's new last parameter now controls
+        // the stock-deposit step independently of the listing step, keyed off which kind of owner
+        // this actually is rather than just "is a player assigned to this specific plot."
+        boolean naturalVillage = owner instanceof NaturalSettlementPlotOwner;
         if (plot.owner().isEmpty()) {
             UUID plotId = plot.plotId();
-            applyCatalogFull(level, owner, plot, catalog.get(), plotAnchor, tier);
+            applyCatalogFull(level, owner, plot, catalog.get(), plotAnchor, tier, naturalVillage);
             plot = owner.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(plot);
         } else {
             applyCatalog(level, plot, catalog.get(), plotAnchor, tier);
@@ -293,15 +310,25 @@ public final class ShopSeeding {
     }
 
     /**
-     * The no-owner equivalent of {@link #applyCatalog} -- deposits stock AND creates/refreshes a real
-     * listing for *every* catalog entry, resource-backed or stack-backed alike, since a natural
-     * settlement's shared Shop has no owner to ever perform the explicit "Save Changes"
-     * {@link #applyCatalog} now requires. Always (re)sets each listing's price to the catalog's own
-     * value via {@code YconomicsShopBridge#setListingPrice} -- safe here specifically because nobody
-     * can ever customize an NPC-owned shop's price away from the catalog default in the first place,
-     * unlike the player-owned case {@link #applyCatalog} guards against overwriting.
+     * The no-owner equivalent of {@link #applyCatalog} -- creates/refreshes a real listing for
+     * *every* catalog entry, resource-backed or stack-backed alike, since there's no owner to ever
+     * perform the explicit "Save Changes" {@link #applyCatalog} now requires. Always (re)sets each
+     * listing's price to the catalog's own value via {@code YconomicsShopBridge#setListingPrice} --
+     * safe here specifically because nobody can ever customize an NPC-owned shop's price away from
+     * the catalog default in the first place, unlike the player-owned case {@link #applyCatalog}
+     * guards against overwriting.
+     *
+     * <p><b>{@code depositResourceBackedStock}</b> (added 2026-10-17, see this method's own call
+     * sites for the real bug this fixes) -- whether a resource-backed seed (plain physical goods:
+     * wood, crops, ore...) also gets its stock deposited for free, on top of being listed. {@code
+     * true} for a genuinely natural (NPC) village's shared shop, which has no other possible source
+     * of goods at all; {@code false} for an unowned plot inside a player-founded settlement, which
+     * is expected to earn its own stock through play like any other plot -- only differs from {@link
+     * #applyCatalog} in that it also auto-lists, since nobody can click "Save Changes" for it. A
+     * stack-backed seed (Research/Recipe Notes) always deposits regardless of this flag -- those
+     * have no other possible source either way, same as {@link #applyCatalog}'s own rule.
      */
-    private static void applyCatalogFull(ServerLevel level, PlotOwner owner, PlotRecord plot, ShopSeedCatalog catalog, BlockPos plotAnchor, int tier) {
+    private static void applyCatalogFull(ServerLevel level, PlotOwner owner, PlotRecord plot, ShopSeedCatalog catalog, BlockPos plotAnchor, int tier, boolean depositResourceBackedStock) {
         if (plot.shopId().isEmpty()) {
             return;
         }
@@ -322,6 +349,10 @@ public final class ShopSeeding {
                 YconomicsShopBridge.setListingPrice(level, shopId, seed.listingResource(), effectivePrice(level, seed));
             }
             if (plotBoxes.isEmpty()) {
+                continue;
+            }
+            boolean resourceBacked = seed.stacksToDeposit().isEmpty();
+            if (resourceBacked && !depositResourceBackedStock) {
                 continue;
             }
             int currentStock = countStock(plotBoxes, seed.listingResource());
