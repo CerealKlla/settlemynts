@@ -466,13 +466,24 @@ public final class PlannedInventoryClearing {
             if (target == null) {
                 continue;
             }
-            int currentStock = ContainerWithdraw.countAvailable(buyer.boxes(), key.toShopResource());
-            int deficit = target.targetCount() - currentStock;
-            if (deficit <= 0) {
+            int startingStock = ContainerWithdraw.countAvailable(buyer.boxes(), key.toShopResource());
+            if (startingStock >= target.targetCount()) {
                 continue;
             }
             PlotCraftingCapability capability = PlotCraftingCapability.resolve(level, buyer.plot().plotId());
-            for (int i = 0; i < deficit; i++) {
+            // Re-checks real stock after every unit obtained (2026-10-18 fix) instead of looping a
+            // fixed "deficit" count -- see craft.MiscRecipes' own doc: a direct buy always nets
+            // exactly 1, but a self-craft of a multi-output recipe (Leaf Litter -> 10 Charcoal) nets
+            // recipe.outputCount() at once, so a fixed-count loop would keep calling fulfillOneUnit
+            // once per unit of ORIGINAL deficit even after a single craft already covered it several
+            // times over -- wastefully over-consuming ingredients for units nobody actually needed.
+            // Capped at MAX_CRAFTS_PER_PLOT_PER_TARGET as a safety bound against looping forever if
+            // fulfillOneUnit ever "succeeds" without actually moving stock toward target.
+            for (int i = 0; i < MAX_CRAFTS_PER_PLOT_PER_TARGET; i++) {
+                int currentStock = ContainerWithdraw.countAvailable(buyer.boxes(), key.toShopResource());
+                if (currentStock >= target.targetCount()) {
+                    break;
+                }
                 if (!fulfillOneUnit(level, participants, buyer, key, capability, new LinkedHashSet<>())) {
                     break; // Can't make further progress on this resource for this buyer this round.
                 }
@@ -534,7 +545,20 @@ public final class PlannedInventoryClearing {
         return Optional.ofNullable(best);
     }
 
-    /** Non-mutating: the recursive total cost to obtain every ingredient for one craft of {@code recipe}, or {@code -1} if any piece is unobtainable. */
+    /**
+     * Non-mutating: the recursive cost to obtain every ingredient for one craft of {@code recipe},
+     * amortized down to the cost of just ONE unit of its actual output -- {@code -1} if any
+     * ingredient is unobtainable. Every real equipment/smelting/stonecutting/cooking recipe has
+     * {@code outputCount() == 1} (division is a no-op there, unchanged behavior); {@code
+     * craft.MiscRecipes}' own fixed, multi-output entries (Leaf Litter -> 10 Charcoal, added
+     * 2026-10-18) need this -- without it, this method's return value (compared directly against a
+     * real PER-UNIT seller price everywhere it's used, see {@link #fulfillOneUnit}/{@link
+     * #cheapestCostForOneUnit}) would read as "one Charcoal costs as much as 64 Leaf Litter," instead
+     * of correctly as "one Charcoal costs 1/10th that" -- silently making an objectively cheap
+     * self-craft look far more expensive than buying, every time. Rounds UP (never down) so a
+     * per-unit cost is never under-stated to the point a buy could wrongly look relatively pricier
+     * than it really is.
+     */
     private static long estimateCraftCost(ServerLevel level, List<Participant> participants, Participant buyer,
                                            LyfeCraftingBridge.RecipeInfo recipe, PlotCraftingCapability capability, Set<Identifier> visiting) {
         long total = 0;
@@ -558,7 +582,8 @@ public final class PlannedInventoryClearing {
             }
             total += cheapestMemberUnitCost * entry.getValue();
         }
-        return total;
+        int outputCount = Math.max(1, recipe.outputCount());
+        return (total + outputCount - 1) / outputCount;
     }
 
     /** Non-mutating: the cheaper of direct-buy or recursive self-craft for one unit of {@code key}, or {@code -1} if neither is achievable. */

@@ -77,7 +77,12 @@ public final class CraftingExecutor {
                 remaining -= taken.stream().mapToInt(ItemStack::getCount).sum();
             }
         }
-        ItemStack result = new ItemStack(BuiltInRegistries.ITEM.getValue(recipe.resultId()), 1);
+        // outputCount is 1 for every real equipment/smelting/stonecutting/cooking recipe (unchanged
+        // behavior); only craft.MiscRecipes' fixed, non-equipment conversions (e.g. Leaf Litter ->
+        // Charcoal, added 2026-10-18) ever set it higher -- was hardcoded to 1 here before, which
+        // would have silently under-produced (consuming the full 64 Leaf Litter but depositing only
+        // 1 Charcoal instead of 10) the moment that recipe shipped, caught before release.
+        ItemStack result = new ItemStack(BuiltInRegistries.ITEM.getValue(recipe.resultId()), recipe.outputCount());
         if (recipe.requirement() == LyfeCraftingBridge.RecipeInfo.StructureRequirement.COOKING_STRUCTURE) {
             LyfeCraftingBridge.bakeFoodIcons(result, capability.cookingStructureTier(), recipe.foodSlotsUsed());
         }

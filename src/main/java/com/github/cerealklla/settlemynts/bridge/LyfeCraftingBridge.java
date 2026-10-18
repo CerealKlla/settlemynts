@@ -69,9 +69,21 @@ public final class LyfeCraftingBridge {
      */
     public record RecipeInfo(Identifier resultId, int tier, Map<Identifier, Integer> specificComponents,
                               Map<String, Integer> genericComponents, StructureRequirement requirement,
-                              int foodSlotsUsed) {
+                              int foodSlotsUsed, int outputCount) {
 
         public enum StructureRequirement { LYFE_STRUCTURE, COOKING_STRUCTURE, FURNACE, STONECUTTER }
+
+        /**
+         * Convenience constructor for every source that produces exactly 1 unit of {@code resultId}
+         * per craft (smelting, stonecutting, cooking, and every real Lyfe equipment recipe except
+         * {@code craft.MiscRecipes}' own fixed, multi-output entries, added 2026-10-18) -- keeps
+         * {@code SmeltingRecipes}/{@code StonecuttingRecipes}/{@link #getFoodRecipeAlternates}
+         * unchanged instead of threading a literal "1" through each one.
+         */
+        public RecipeInfo(Identifier resultId, int tier, Map<Identifier, Integer> specificComponents,
+                           Map<String, Integer> genericComponents, StructureRequirement requirement, int foodSlotsUsed) {
+            this(resultId, tier, specificComponents, genericComponents, requirement, foodSlotsUsed, 1);
+        }
 
         /** Whether {@code capability} is enough to craft this recipe. */
         public boolean craftableWith(com.github.cerealklla.settlemynts.zone.PlotCraftingCapability capability) {
@@ -170,6 +182,6 @@ public final class LyfeCraftingBridge {
 
     private static RecipeInfo toLocal(GeneratedRecipe recipe) {
         return new RecipeInfo(recipe.resultId(), recipe.tier(), recipe.specificComponents(), recipe.genericComponents(),
-                RecipeInfo.StructureRequirement.LYFE_STRUCTURE, 0);
+                RecipeInfo.StructureRequirement.LYFE_STRUCTURE, 0, recipe.outputCount());
     }
 }
