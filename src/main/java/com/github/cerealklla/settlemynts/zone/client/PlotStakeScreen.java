@@ -38,6 +38,16 @@ public final class PlotStakeScreen extends Screen {
     private EditBox ownerBox;
     private Button zoneTypeButton;
     private Button finalizeButton;
+    // Real report, 2026-10-17: "Setting the owner before finalizing a plot isn't remembering the
+    // user and is leaving it npc." Root cause -- the Owner box sits ABOVE the Zone Type cycle button
+    // in this screen's own layout (a player naturally types Owner before picking the final Zone
+    // Type), but updateOwnerBoxForSelectedType blanks the box outright the instant the cycle passes
+    // through ANY npcOwnedOnly type (e.g. Guardhouse), with nothing restoring it once the cycle moves
+    // on to a type that does support an Owner -- so clicking past Guardhouse en route to the actually
+    // wanted type silently threw away whatever name was typed. Remembers the last real (non-blank)
+    // value typed before it gets cleared, restored the next time the box becomes editable again
+    // (only if the player hasn't since typed something else over the cleared blank).
+    private String rememberedOwnerText = "";
 
     public PlotStakeScreen(OpenPlotStakeScreenPayload payload) {
         super(Component.literal("Plot"));
@@ -115,9 +125,15 @@ public final class PlotStakeScreen extends Screen {
         boolean npcOwnedOnly = !zoneTypes.isEmpty() && zoneTypes.get(selectedZoneTypeIndex).npcOwnedOnly();
         ownerBox.setEditable(!npcOwnedOnly);
         if (npcOwnedOnly) {
+            if (!ownerBox.getValue().isBlank()) {
+                rememberedOwnerText = ownerBox.getValue();
+            }
             ownerBox.setValue("");
             ownerBox.setHint(Component.literal("NPC-owned only"));
         } else {
+            if (ownerBox.getValue().isBlank() && !rememberedOwnerText.isBlank()) {
+                ownerBox.setValue(rememberedOwnerText);
+            }
             ownerBox.setHint(Component.literal("Owner (blank = NPC)"));
         }
     }
