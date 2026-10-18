@@ -85,13 +85,20 @@ public final class GuardKitStandPreferredInventory {
         core.updatePlot(plot.withPlannedInventory(updated));
     }
 
-    /** The same 6 potential equip slots {@code GuardEntity#equipFromLoadoutUsingBoxes} draws from -- mirrors that selection exactly so "spares" always matches what a spawn actually consumes. */
+    /**
+     * The 5 fixed armor/offhand slots plus EVERY non-empty hotbar weapon candidate, not just the
+     * first -- fixed 2026-10-18 alongside the real bug this fed into ({@code
+     * GuardEntity#withdrawAndEquipFirstAvailable}'s own doc): a guard can equip ANY of its Kyt's
+     * hotbar weapons depending on which one is actually in stock when it spawns/tops up, so "keep
+     * spares on hand" needs to cover all of them -- tracking spares for only the first (e.g. a Bow)
+     * would leave a settlement never restocking its spare Swords at all, even though a guard happily
+     * falls back to one the moment the Bow runs out.
+     */
     private static List<ItemStack> equippedItems(LoadoutRecord record) {
         List<ItemStack> items = new ArrayList<>(List.of(record.helmet(), record.chestplate(), record.leggings(), record.boots(), record.offhand()));
         for (ItemStack stack : record.hotbar()) {
             if (!stack.isEmpty()) {
                 items.add(stack);
-                break;
             }
         }
         return items;

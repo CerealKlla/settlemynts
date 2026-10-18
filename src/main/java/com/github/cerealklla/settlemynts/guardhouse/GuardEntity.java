@@ -415,9 +415,11 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
      * {@link ContainerWithdraw#drain} (best-effort, matched by plain item id -- {@link
      * ShopResource#ofItem} ignores durability/enchantments, since no real gear-Tier item catalog
      * exists anywhere in this suite to match more precisely against) -- a slot with no matching item
-     * in the boxes simply spawns unequipped, not a hard "needs the full kit" gate. Mainhand is the
-     * first non-empty hotbar stack in {@code record}, same heuristic {@link #equipFromLoadout} uses,
-     * just resolved against box stock instead of equipped unconditionally.
+     * in the boxes simply spawns unequipped, not a hard "needs the full kit" gate. Mainhand tries
+     * every non-empty hotbar stack in {@code record}, in order, stopping at the first one actually
+     * available in the boxes -- see {@link #withdrawAndEquipFirstAvailable}'s own doc for the real
+     * bug this fixes (a Kyt with a Bow in hand-slot 1 and a Sword in hand-slot 2 would never equip
+     * the Sword even with plenty in stock, if the Bow alone was simply out of stock).
      */
     public void equipFromLoadoutUsingBoxes(LoadoutRecord record, List<Container> plotBoxes) {
         withdrawAndEquip(plotBoxes, record.helmet(), EquipmentSlot.HEAD);
@@ -425,12 +427,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         withdrawAndEquip(plotBoxes, record.leggings(), EquipmentSlot.LEGS);
         withdrawAndEquip(plotBoxes, record.boots(), EquipmentSlot.FEET);
         withdrawAndEquip(plotBoxes, record.offhand(), EquipmentSlot.OFFHAND);
-        for (ItemStack stack : record.hotbar()) {
-            if (!stack.isEmpty()) {
-                withdrawAndEquip(plotBoxes, stack, EquipmentSlot.MAINHAND);
-                break;
-            }
-        }
+        withdrawAndEquipFirstAvailable(plotBoxes, record, EquipmentSlot.MAINHAND);
         for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
                 EquipmentSlot.FEET, EquipmentSlot.OFFHAND, EquipmentSlot.MAINHAND)) {
             setDropChance(slot, 0.0F);
@@ -439,14 +436,37 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         setCanPickUpLoot(false);
     }
 
-    private void withdrawAndEquip(List<Container> plotBoxes, ItemStack template, EquipmentSlot slot) {
+    private boolean withdrawAndEquip(List<Container> plotBoxes, ItemStack template, EquipmentSlot slot) {
         if (template.isEmpty()) {
-            return;
+            return false;
         }
         Identifier itemId = BuiltInRegistries.ITEM.getKey(template.getItem());
         List<ItemStack> taken = ContainerWithdraw.drain(plotBoxes, ShopResource.ofItem(itemId), 1);
-        if (!taken.isEmpty()) {
-            setItemSlot(slot, taken.get(0));
+        if (taken.isEmpty()) {
+            return false;
+        }
+        setItemSlot(slot, taken.get(0));
+        return true;
+    }
+
+    /**
+     * Real report, 2026-10-18 ("The Kyt has both a bow and a sword; there are no bows available but
+     * there are swords and no guards seem to be taking the swords, fresh or already alive"): both
+     * {@link #equipFromLoadoutUsingBoxes}/{@link #equipMissingFromLoadoutUsingBoxes} used to just
+     * grab {@code record.hotbar()}'s FIRST non-empty stack as "the" mainhand candidate and attempt
+     * that one alone -- correct as a simple "what does this Kyt author consider their weapon"
+     * heuristic for an unconditional equip ({@link #equipFromLoadout}, which has no concept of
+     * "unavailable" since it never checks box stock), but wrong once box availability enters the
+     * picture: if that one candidate (the Bow, in hand-slot 1) happens to be out of stock, the old
+     * code gave up on mainhand ENTIRELY rather than trying the next hotbar candidate (the Sword, in
+     * hand-slot 2) -- even with the boxes genuinely full of swords. Now tries every non-empty hotbar
+     * stack in order, stopping at the first one {@link #withdrawAndEquip} actually finds in stock.
+     */
+    private void withdrawAndEquipFirstAvailable(List<Container> plotBoxes, LoadoutRecord record, EquipmentSlot slot) {
+        for (ItemStack candidate : record.hotbar()) {
+            if (!candidate.isEmpty() && withdrawAndEquip(plotBoxes, candidate, slot)) {
+                return;
+            }
         }
     }
 
@@ -466,11 +486,8 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         withdrawAndEquipIfMissing(plotBoxes, record.leggings(), EquipmentSlot.LEGS);
         withdrawAndEquipIfMissing(plotBoxes, record.boots(), EquipmentSlot.FEET);
         withdrawAndEquipIfMissing(plotBoxes, record.offhand(), EquipmentSlot.OFFHAND);
-        for (ItemStack stack : record.hotbar()) {
-            if (!stack.isEmpty()) {
-                withdrawAndEquipIfMissing(plotBoxes, stack, EquipmentSlot.MAINHAND);
-                break;
-            }
+        if (getItemBySlot(EquipmentSlot.MAINHAND).isEmpty()) {
+            withdrawAndEquipFirstAvailable(plotBoxes, record, EquipmentSlot.MAINHAND);
         }
     }
 
