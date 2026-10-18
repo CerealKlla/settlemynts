@@ -48,6 +48,11 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
     public LumberjackWorkerEntity(EntityType<? extends Villager> type, Level level) {
         super(type, level);
         skipDropExperience();
+        // Real report, 2026-10-17: "NPCs keep getting stuck up in trees" -- neither vanilla's Mob nor
+        // AbstractVillager sets a PathType.LEAVES malus, so a tree's leaf canopy reads as ordinary
+        // walkable ground; a Lumberjack working directly at trees is especially prone to routing up
+        // into one. See guardhouse.GuardEntity's own identical fix for the full writeup.
+        this.setPathfindingMalus(net.minecraft.world.level.pathfinder.PathType.LEAVES, -1.0F);
     }
 
     /** Called once by {@link LumberjackSpawnTicker} right after construction. */

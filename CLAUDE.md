@@ -419,6 +419,15 @@ merged pair's stock is counted once, not twice -- fixes every box consumer in th
 build` green, whole-suite (12 mods) rebuild + `runServer` boot-smoke-test clean. **Not yet
 re-confirmed live.**
 
+**Ledger item names, and NPC leaf-avoidance pathfinding, 2026-10-17** (see
+[context/decisions.md](context/decisions.md)) -- two real reports. Planned Inventory's inter-plot
+trade ledger lines used to interpolate a raw registry id instead of the item's real display name
+(new `PlannedInventoryClearing.ResourceKey#displayName`); every custom ground NPC (Guard, Lumberjack,
+Farmer, Miner, Resident) now sets a strongly negative `PathType.LEAVES` pathfinding malus in its
+constructor, since neither vanilla's `Mob` nor `AbstractVillager` ever avoids tree canopies by
+default -- fixes NPCs getting stuck up in trees. `./gradlew build` green, whole-suite (12 mods)
+rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested.**
+
 **`Client*Request*` bridge classes rebuilt atop Nuclyus's shared `ClientRequestSlot`, 2026-10-17**
 (see Nuclyus's own CLAUDE.md/decisions.md) -- `founding.ClientFoundingRequests`,
 `plotsign.ClientPlotSignRequests`, and `guardhouse.ClientGuardhouseRequests` each replace their own

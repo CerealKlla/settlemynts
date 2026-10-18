@@ -124,6 +124,15 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         // this, pathfinding never even considers a closed wooden door passable, regardless of
         // whether OpenDoorGoal exists.
         this.getNavigation().setCanOpenDoors(true);
+        // Real report, 2026-10-17: "NPCs keep getting stuck up in trees." Confirmed against the
+        // decompiled source -- neither vanilla's own Mob nor AbstractVillager ever sets a
+        // PathType.LEAVES malus at all (only FIRE/FIRE_IN_NEIGHBOR), so a tree's leaf canopy reads as
+        // perfectly ordinary walkable ground to the pathfinder, same as flat terrain -- nothing stops
+        // a guard patrolling wide ground from routing up a trunk into one, where the 3D maze of
+        // solid-for-standing leaf blocks is easy to get lost/stuck in. A strongly negative malus
+        // (BLOCKED-equivalent, matching AbstractVillager's own FIRE treatment) makes the pathfinder
+        // route around a tree instead of through its canopy.
+        this.setPathfindingMalus(net.minecraft.world.level.pathfinder.PathType.LEAVES, -1.0F);
     }
 
     /** Called once by {@link GuardSpawnTicker} right after construction -- which plot's "Town Proper" buffer this guard patrols (see {@link #resolvePatrolArea}). */

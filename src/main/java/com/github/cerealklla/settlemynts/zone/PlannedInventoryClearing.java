@@ -196,6 +196,35 @@ public final class PlannedInventoryClearing {
         ShopResource toShopResource() {
             return isTag ? ShopResource.ofTag(TagKey.create(net.minecraft.core.registries.Registries.ITEM, id)) : ShopResource.ofItem(id);
         }
+
+        /**
+         * Real report, 2026-10-17: "the ledger should use the language name, not the dev name for
+         * items" -- every ledger-line call site below used to interpolate {@code key.id()} directly
+         * (a raw {@code namespace:path} registry id), same bug class {@code RentLedgerListener
+         * #formatCost} already avoids for rent entries. For a concrete item, resolves the real vanilla
+         * display name ({@code ItemStack#getHoverName}); for a tag (no single item to name), falls
+         * back to a friendly-ified version of the tag's own path (underscores to spaces, each word
+         * capitalized) since no item-backed name applies.
+         */
+        String displayName() {
+            if (!isTag) {
+                return BuiltInRegistries.ITEM.getOptional(id)
+                        .map(item -> item.getDefaultInstance().getHoverName().getString())
+                        .orElse(id.getPath());
+            }
+            String[] words = id.getPath().split("_");
+            StringBuilder sb = new StringBuilder();
+            for (String word : words) {
+                if (word.isEmpty()) {
+                    continue;
+                }
+                if (!sb.isEmpty()) {
+                    sb.append(' ');
+                }
+                sb.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+            }
+            return sb.toString();
+        }
     }
 
     private record Buyer(Participant participant, int remainingDeficit) {
@@ -328,9 +357,9 @@ public final class PlannedInventoryClearing {
                 SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} bought {}x {} from plot {} for {} nuggets",
                         buyer.participant().plot().plotId(), split.totalUnits(), key.id(), seller.participant().plot().plotId(), split.totalCost());
                 appendLedger(level, buyer.participant().plot(),
-                        "Bought " + split.totalUnits() + "x " + key.id() + " from neighboring plot for " + split.totalCost() + " nuggets");
+                        "Bought " + split.totalUnits() + "x " + key.displayName() + " from neighboring plot for " + split.totalCost() + " nuggets");
                 appendLedger(level, seller.participant().plot(),
-                        "Sold " + split.totalUnits() + "x " + key.id() + " to neighboring plot for " + split.totalCost() + " nuggets");
+                        "Sold " + split.totalUnits() + "x " + key.displayName() + " to neighboring plot for " + split.totalCost() + " nuggets");
                 ShopWishlistCache.invalidate(buyer.participant().plot().plotId());
                 ShopWishlistCache.invalidate(seller.participant().plot().plotId());
             }
@@ -613,8 +642,8 @@ public final class PlannedInventoryClearing {
             }
             SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} direct-bought 1x {} from plot {} for {} nuggets (craftable resource)",
                     buyer.plot().plotId(), key.id(), seller.plot().plotId(), realPrice.get());
-            appendLedger(level, buyer.plot(), "Bought 1x " + key.id() + " from neighboring plot for " + realPrice.get() + " nuggets");
-            appendLedger(level, seller.plot(), "Sold 1x " + key.id() + " to neighboring plot for " + realPrice.get() + " nuggets");
+            appendLedger(level, buyer.plot(), "Bought 1x " + key.displayName() + " from neighboring plot for " + realPrice.get() + " nuggets");
+            appendLedger(level, seller.plot(), "Sold 1x " + key.displayName() + " to neighboring plot for " + realPrice.get() + " nuggets");
             ShopWishlistCache.invalidate(buyer.plot().plotId());
             ShopWishlistCache.invalidate(seller.plot().plotId());
             return true;

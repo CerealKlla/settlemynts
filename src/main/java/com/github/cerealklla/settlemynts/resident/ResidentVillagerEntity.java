@@ -73,6 +73,9 @@ public class ResidentVillagerEntity extends Villager implements com.github.cerea
     public ResidentVillagerEntity(EntityType<? extends Villager> type, Level level) {
         super(type, level);
         skipDropExperience();
+        // Real report, 2026-10-17: "NPCs keep getting stuck up in trees" -- see
+        // guardhouse.GuardEntity's own identical fix for the full writeup.
+        this.setPathfindingMalus(net.minecraft.world.level.pathfinder.PathType.LEAVES, -1.0F);
     }
 
     /** Called once by {@link ResidentSpawnTicker} right after construction -- which plot's "Town Proper" buffer this resident patrols (see {@link #resolvePatrolArea}). */
