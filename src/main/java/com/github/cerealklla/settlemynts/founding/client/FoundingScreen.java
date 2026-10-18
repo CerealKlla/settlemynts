@@ -8,6 +8,7 @@ import com.github.cerealklla.settlemynts.founding.OpenFoundingScreenPayload;
 import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
 import com.github.cerealklla.settlemynts.founding.SetBoundaryVisiblePayload;
 import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
+import com.github.cerealklla.settlemynts.founding.SetTaxRatePayload;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -44,9 +45,11 @@ public final class FoundingScreen extends Screen {
     private boolean showPlotPerimeters;
     private boolean showRoadwayStakes;
     private boolean boundaryVisible;
+    private final int initialTaxPerTransaction;
 
     private EditBox nameBox;
     private EditBox grantBox;
+    private EditBox taxBox;
     private Button boundaryToggleButton;
     private int plannerListY;
 
@@ -61,6 +64,7 @@ public final class FoundingScreen extends Screen {
         this.showPlotPerimeters = payload.showPlotPerimeters();
         this.hasTownHallPlot = payload.hasTownHallPlot();
         this.showRoadwayStakes = payload.showRoadwayStakes();
+        this.initialTaxPerTransaction = payload.taxPerTransaction();
     }
 
     @Override
@@ -108,6 +112,18 @@ public final class FoundingScreen extends Screen {
             addRenderableWidget(Button.builder(Component.literal("Defense Spending..."), b -> openDefenseSpending())
                     .bounds(centerX - 100, y, 245, 20).build());
             y += 30;
+
+            // Settlement sales tax (explicit user spec, 2026-10-17: "Taxes are applied any time an
+            // item is sold within the settlement... paid by the Seller... a flat amount, defaulted
+            // to 1 nugget per transaction... paid directly to the Town Hall"). Same inline
+            // EditBox+button shape as the Name field above, not a submenu -- a single number needs
+            // no dedicated screen the way Defense Spending's live Guardhouse list does.
+            taxBox = addRenderableWidget(new EditBox(font, centerX - 100, y, 150, 20, Component.literal("Tax per sale")));
+            taxBox.setMaxLength(9);
+            taxBox.setValue(Integer.toString(initialTaxPerTransaction));
+            addRenderableWidget(Button.builder(Component.literal("Set Tax"), b -> setTax())
+                    .bounds(centerX + 55, y, 90, 20).build());
+            y += 30;
         }
 
         if (viewerIsFounder) {
@@ -142,6 +158,19 @@ public final class FoundingScreen extends Screen {
 
     private void setName() {
         send(new SetSettlementNamePayload(coreEntityId, nameBox.getValue()));
+    }
+
+    private void setTax() {
+        if (taxBox == null) {
+            return;
+        }
+        try {
+            int value = Integer.parseInt(taxBox.getValue().trim());
+            send(new SetTaxRatePayload(coreEntityId, Math.max(0, value)));
+        } catch (NumberFormatException ignored) {
+            // Non-numeric input -- same silent-ignore shape as grantPlanner's blank-check, server
+            // never receives an invalid value since nothing is sent at all.
+        }
     }
 
     private void getStake() {

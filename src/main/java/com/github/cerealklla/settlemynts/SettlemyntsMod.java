@@ -41,6 +41,7 @@ import com.github.cerealklla.settlemynts.founding.RemoveStakePayload;
 import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
 import com.github.cerealklla.settlemynts.founding.SetBoundaryVisiblePayload;
 import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
+import com.github.cerealklla.settlemynts.founding.SetTaxRatePayload;
 import com.github.cerealklla.settlemynts.founding.SetStakeAbsolutePayload;
 import com.github.cerealklla.settlemynts.registration.ModBlockEntities;
 import com.github.cerealklla.settlemynts.registration.ModBlocks;
@@ -266,6 +267,15 @@ public class SettlemyntsMod {
                             && player.level().getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core
                             && core.isTownPlanner(player.getUUID())) {
                         core.setSettlementName(payload.name());
+                    }
+                });
+
+        registrar.playToServer(SetTaxRatePayload.TYPE, SetTaxRatePayload.STREAM_CODEC,
+                (payload, context) -> {
+                    if (context.player() instanceof ServerPlayer player
+                            && player.level().getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core
+                            && core.isTownPlanner(player.getUUID())) {
+                        core.setTaxPerTransaction(payload.taxPerTransaction());
                     }
                 });
 
@@ -1109,6 +1119,59 @@ public class SettlemyntsMod {
     }
 
     /** "Buy N" click on the real Shop screen -- charges the buyer only for whatever was actually filled. */
+    /**
+     * The flat per-transaction settlement sales tax to apply to a sale worth {@code transactionValue}
+     * (explicit user spec, 2026-10-17: "Taxes are applied any time an item is sold within the
+     * settlement... a flat amount, defaulted to 1 nugget per transaction"), clamped to never exceed
+     * the transaction's own value. 0 if {@code owner} isn't a real player-founded settlement (a
+     * natural village has no Town Hall to pay) or that settlement has no Town Hall plot yet.
+     *
+     * <p><b>"Guardhouses do not pay taxes when buying or selling" holds with no special-case code
+     * anywhere</b> -- a Guardhouse plot can never have a Shop at all ({@link #buyFromShop}/{@link
+     * #sellToShop} both already refuse one with "This plot doesn't have a Shop."), so a Guardhouse
+     * is never the taxed seller side of either handler; and a Guardhouse's own NPC-driven food
+     * purchases ({@code guardhouse.GuardhouseFoodAutoBuy}) go through a completely separate {@code
+     * BillTransferEngine}-based path that never calls this method or {@link #depositSalesTax} at
+     * all. Don't "fix" either of those paths to also collect tax later -- the exemption is
+     * intentional, not a gap.
+     */
+    private static int resolveSalesTax(com.github.cerealklla.settlemynts.zone.PlotOwner owner, int transactionValue) {
+        if (!(owner instanceof GhostTownHallCoreEntity core) || transactionValue <= 0 || core.townHallPlot().isEmpty()) {
+            return 0;
+        }
+        return Math.min(Math.max(0, core.taxPerTransaction()), transactionValue);
+    }
+
+    /**
+     * Deposits an already-resolved (see {@link #resolveSalesTax}) tax {@code amount} into {@code
+     * core}'s Town Hall plot boxes, with a ledger entry on the Town Hall's own side and (when {@code
+     * sellerPlot} is non-null, i.e. the seller was a Shop plot rather than a player) a matching
+     * paid-out entry on the seller's side too -- same two-sided ledger shape {@code
+     * guardhouse.DefenseSpendingTransfer} already uses for its own Town-Hall-to-plot gold transfer.
+     * No-op if {@code amount <= 0}.
+     */
+    private static void depositSalesTax(ServerLevel level, GhostTownHallCoreEntity core, PlotRecord sellerPlot, int amount, String sellerLabel) {
+        if (amount <= 0) {
+            return;
+        }
+        PlotRecord townHall = core.townHallPlot().orElse(null);
+        if (townHall == null) {
+            return;
+        }
+        java.util.List<net.minecraft.world.Container> townHallBoxes =
+                com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, townHall.plotId());
+        com.github.cerealklla.settlemynts.zone.ContainerDeposit.depositIntoAny(townHallBoxes,
+                new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.GOLD_NUGGET, amount));
+        if (ModList.get().isLoaded("blueprynts")) {
+            com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(level, townHall,
+                    "Sales Tax +" + amount + " from " + sellerLabel);
+            if (sellerPlot != null) {
+                com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(level, sellerPlot,
+                        "Sales Tax -" + amount + " to Town Hall");
+            }
+        }
+    }
+
     private static void buyFromShop(com.github.cerealklla.settlemynts.plotsign.BuyFromShopPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
@@ -1190,6 +1253,22 @@ public class SettlemyntsMod {
             net.minecraft.world.item.ItemStack reward = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.GOLD_NUGGET, rebate);
             if (!player.getInventory().add(reward)) {
                 player.drop(reward, false);
+            }
+        }
+        // Settlement sales tax (explicit user spec, 2026-10-17) -- the Shop itself is the Seller in
+        // this transaction, so the tax comes straight out of its own boxes (which just received
+        // nuggetsCharged above) and moves to the Town Hall, before the gold-total UI refresh below
+        // so it reflects the post-tax amount immediately. See #resolveSalesTax's own doc for why
+        // Guardhouses are naturally exempt with no special-casing needed here.
+        if (resolvedBuy.get().owner() instanceof GhostTownHallCoreEntity taxCore) {
+            int tax = resolveSalesTax(taxCore, result.nuggetsCharged());
+            if (tax > 0) {
+                com.github.cerealklla.settlemynts.zone.ShopResource goldNuggets = com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(
+                        net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET));
+                java.util.List<net.minecraft.world.item.ItemStack> withdrawnTax =
+                        com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(boxes, goldNuggets, tax);
+                int actuallyTaxed = withdrawnTax.stream().mapToInt(net.minecraft.world.item.ItemStack::getCount).sum();
+                depositSalesTax(serverLevel, taxCore, resolvedBuy.get().plot(), actuallyTaxed, player.getGameProfile().name());
             }
         }
         player.sendSystemMessage(Component.literal("Bought " + filled + " for " + result.nuggetsCharged() + " nuggets."));
@@ -1317,6 +1396,16 @@ public class SettlemyntsMod {
             double fraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player);
             int effectivePayoutPerUnit = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveSellPayout(result.sellPricePerUnit(), fraction);
             nuggetsOwed = effectivePayoutPerUnit * result.itemsSold();
+        }
+        // Settlement sales tax (explicit user spec, 2026-10-17) -- the player is the Seller in this
+        // transaction, withheld straight out of their payout before it's ever minted/handed over (no
+        // withdrawal needed, unlike buyFromShop's case, since this gold was never given to anyone yet).
+        if (resolvedSell.get().owner() instanceof GhostTownHallCoreEntity taxCore) {
+            int tax = resolveSalesTax(taxCore, nuggetsOwed);
+            if (tax > 0) {
+                nuggetsOwed -= tax;
+                depositSalesTax(serverLevel, taxCore, null, tax, player.getGameProfile().name());
+            }
         }
         net.minecraft.world.item.ItemStack payment = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.GOLD_NUGGET, nuggetsOwed);
         if (!player.getInventory().add(payment)) {

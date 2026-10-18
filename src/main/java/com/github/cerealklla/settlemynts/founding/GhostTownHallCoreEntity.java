@@ -108,6 +108,13 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
     // visibility gating (see roadway.RoadwayStakeEntity), not existence.
     private boolean showRoadwayStakes;
 
+    // Settlement sales tax (explicit user spec, 2026-10-17: "Taxes are applied any time an item is
+    // sold within the settlement... paid by the Seller... a flat amount, defaulted to 1 nugget per
+    // transaction... paid directly to the Town Hall"). See SettlemyntsMod#buyFromShop/#sellToShop
+    // for where this is actually collected, and #collectSalesTax's own doc for why Guardhouses never
+    // pay it without any special-case code here.
+    private int taxPerTransaction = 1;
+
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
         this.noPhysics = true; // Sits exactly where it's created -- no falling/pushing.
@@ -262,6 +269,14 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         this.showRoadwayStakes = showRoadwayStakes;
     }
 
+    public int taxPerTransaction() {
+        return taxPerTransaction;
+    }
+
+    public void setTaxPerTransaction(int taxPerTransaction) {
+        this.taxPerTransaction = Math.max(0, taxPerTransaction);
+    }
+
     public boolean isFounder(UUID playerId) {
         return founderId != null && founderId.equals(playerId);
     }
@@ -345,7 +360,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         }
         if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer && level() instanceof ServerLevel serverLevel) {
             PacketDistributor.sendToPlayer(serverPlayer, new OpenFoundingScreenPayload(
-                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters, finalized && findTownHallPlot(serverLevel).isPresent(), showRoadwayStakes));
+                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters, finalized && findTownHallPlot(serverLevel).isPresent(), showRoadwayStakes, taxPerTransaction));
         }
         return InteractionResult.SUCCESS;
     }
@@ -379,6 +394,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         activePerimeterPlanner = input.read("ActivePerimeterPlanner", UUIDUtil.CODEC).orElse(null);
         showPlotPerimeters = input.getBooleanOr("ShowPlotPerimeters", false);
         showRoadwayStakes = input.getBooleanOr("ShowRoadwayStakes", false);
+        taxPerTransaction = Math.max(0, input.getIntOr("TaxPerTransaction", 1));
         plots.clear();
         plots.addAll(input.read("Plots", Codec.list(PlotRecord.CODEC)).orElse(List.of()));
     }
@@ -395,6 +411,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         output.storeNullable("ActivePerimeterPlanner", UUIDUtil.CODEC, activePerimeterPlanner);
         output.putBoolean("ShowPlotPerimeters", showPlotPerimeters);
         output.putBoolean("ShowRoadwayStakes", showRoadwayStakes);
+        output.putInt("TaxPerTransaction", taxPerTransaction);
         output.store("Plots", Codec.list(PlotRecord.CODEC), List.copyOf(plots));
     }
 }
