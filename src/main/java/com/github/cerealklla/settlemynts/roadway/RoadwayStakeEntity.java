@@ -84,6 +84,24 @@ public class RoadwayStakeEntity extends Display.BlockDisplay implements StakeNod
     // with no "only the child owns this" asymmetry left over from the old model.
     private List<ConnectionSnapshot> connectionSnapshots = List.of();
 
+    // Guard patrol routing (added 2026-10-18, GuardPatrolAreaGoal) -- the real game time this stake
+    // was last physically reached by a patrolling guard (spawn-default 0L reads as "never visited,"
+    // which correctly sorts as the oldest/most-eligible candidate). Persisted so a settlement's
+    // patrol coverage stays meaningful across a server restart instead of resetting every stake to
+    // equally-unvisited.
+    private long lastVisitedGameTime;
+
+    // A guard currently en-route to this stake as its FINAL destination claims it here (not
+    // persisted -- a claim only matters for the lifetime of one guard's single patrol leg, and a
+    // restart naturally clearing every claim is harmless, not a bug to work around). Prevents two
+    // guards in the same settlement from independently picking the same stale stake as their target
+    // at once. {@link #claimedAtGameTime} backs a short self-healing TTL ({@link
+    // #CLAIM_TTL_TICKS}) in case a guard's own cleanup (see {@code GuardEntity#die}) can't run --
+    // e.g. its own chunk and this stake's chunk are no longer both loaded at the moment of death.
+    private UUID claimedByGuardId;
+    private long claimedAtGameTime;
+    private static final long CLAIM_TTL_TICKS = 20L * 60 * 3; // 3 minutes
+
     public record ConnectionSnapshot(UUID otherStakeId, List<RoadwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId,
                                       List<net.minecraft.core.BlockPos> roadCells, List<RoadwayPaver.StepRecord> stepCells) {
         // roadCells defaults to empty for any connection saved before 2026-10-09 (the Tier-visual
@@ -207,6 +225,32 @@ public class RoadwayStakeEntity extends Display.BlockDisplay implements StakeNod
             sb.append(ids.get(i));
         }
         return sb.toString();
+    }
+
+    /** Real game time this stake was last reached by a patrolling guard -- {@code 0L} means never. */
+    public long lastVisitedGameTime() {
+        return lastVisitedGameTime;
+    }
+
+    /** Called by {@code GuardPatrolAreaGoal} the instant a guard's walked route actually reaches this stake (both intermediate hops and the final destination). */
+    public void markVisited(long nowGameTime) {
+        lastVisitedGameTime = nowGameTime;
+    }
+
+    /** True if another guard currently has this stake claimed as its final destination and that claim hasn't expired (see {@link #CLAIM_TTL_TICKS}). */
+    public boolean isClaimed(long nowGameTime) {
+        return claimedByGuardId != null && (nowGameTime - claimedAtGameTime) < CLAIM_TTL_TICKS;
+    }
+
+    /** Reserves this stake as {@code guardId}'s final destination -- see {@code GuardPatrolAreaGoal#pickRecencyWeightedTarget}. */
+    public void claim(UUID guardId, long nowGameTime) {
+        claimedByGuardId = guardId;
+        claimedAtGameTime = nowGameTime;
+    }
+
+    /** Releases this stake's claim, if any -- called on real arrival, and from {@code GuardEntity#die} if the claiming guard dies en route. */
+    public void clearClaim() {
+        claimedByGuardId = null;
     }
 
     public static List<RoadwayStakeEntity> findByOwnerCore(ServerLevel level, UUID coreId) {
@@ -393,6 +437,7 @@ public class RoadwayStakeEntity extends Display.BlockDisplay implements StakeNod
         ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
         entityData.set(DATA_CONNECTIONS, input.getStringOr("Connections", ""));
         connectionSnapshots = input.read("ConnectionSnapshots", Codec.list(ConnectionSnapshot.CODEC)).orElse(List.of());
+        lastVisitedGameTime = input.getLongOr("LastVisitedGameTime", 0L);
     }
 
     @Override
@@ -401,5 +446,6 @@ public class RoadwayStakeEntity extends Display.BlockDisplay implements StakeNod
         output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
         output.putString("Connections", entityData.get(DATA_CONNECTIONS));
         output.store("ConnectionSnapshots", Codec.list(ConnectionSnapshot.CODEC), connectionSnapshots);
+        output.putLong("LastVisitedGameTime", lastVisitedGameTime);
     }
 }

@@ -454,3 +454,18 @@ boot-smoke-test clean. **Not yet live-tested.**
 hand-rolled volatile-field-plus-request/takePending pairs with `nuclyus.request.ClientRequestSlot`
 instances; every public `request*`/`takePending*` method signature is unchanged. `./gradlew build`
 green, whole-suite (12 mods) rebuild green, `runServer` boot-smoke-tested clean.
+
+**Guard patrol routing reworked: recency-weighted coverage replaces distance-based picking,
+2026-10-18** (see [context/decisions.md](context/decisions.md),
+[context/classes/GuardPatrol.md](context/classes/GuardPatrol.md)) -- real observation, not a
+performance concern: "big portions of sprawling towns virtually never patrolled." Every
+`RoadwayStakeEntity` now tracks a persisted `lastVisitedGameTime`, stamped on arrival at every stake
+a guard's route actually reaches (intermediate hops included); target selection ranks every
+eligible, currently-unclaimed stake oldest-visited-first and picks with rank-based decay weighting
+(`0.5^rank`, a smooth curve, not the initially-proposed "60% to the single oldest" binary split),
+replacing the old flat 50-block distance floor entirely. A non-persisted claim/reservation
+(`RoadwayStakeEntity#claim`/`#isClaimed`/`#clearClaim`, 3-minute self-healing TTL) stops multiple
+guards from independently piling onto the same stale stake, released on arrival, goal interruption,
+or guard death en route (new release call in `GuardEntity#die`, since `Goal#stop()` can't be relied
+on for a dead entity). `./gradlew build`/`test` green, whole-suite (12 mods) rebuild + `runServer`
+boot-smoke-test clean. **Not yet live-tested.**

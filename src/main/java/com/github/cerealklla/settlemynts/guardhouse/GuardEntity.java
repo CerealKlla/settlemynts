@@ -114,6 +114,11 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
     private UUID plotId;
     private UUID assignedStandId;
     private net.minecraft.core.BlockPos homePos;
+    // Patrol routing (2026-10-18) -- which RoadwayStakeEntity (if any) this guard currently has
+    // claimed as its final patrol destination, see GuardPatrolAreaGoal's own doc. Not persisted --
+    // a claim only matters for the lifetime of one in-progress patrol leg, and every claim across
+    // the whole settlement naturally clearing on a restart is harmless.
+    private UUID claimedPatrolStakeId;
 
     public GuardEntity(EntityType<? extends GuardEntity> type, Level level) {
         super(type, level);
@@ -149,6 +154,11 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
     /** Called once by {@link GuardSpawnTicker} right after construction -- this guard's own spawn point (its assigned stand's position), used only to suppress the underground-correction safety net near home. See that field's own doc. */
     public void setHomePos(net.minecraft.core.BlockPos homePos) {
         this.homePos = homePos;
+    }
+
+    /** Set by {@code GuardPatrolAreaGoal} while this guard has a {@link RoadwayStakeEntity} claimed as its final patrol destination -- {@code null} otherwise. Read by {@link #die} to release the claim if this guard dies en route. */
+    public void setClaimedPatrolStakeId(UUID claimedPatrolStakeId) {
+        this.claimedPatrolStakeId = claimedPatrolStakeId;
     }
 
     /** This guard's owning settlement -- used by {@code GuardPatrolAreaGoal} to find the WHOLE settlement's road network, not just this guard's own plot. */
@@ -298,6 +308,14 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
     @Override
     public void die(net.minecraft.world.damagesource.DamageSource damageSource) {
         super.die(damageSource);
+        // Patrol routing (2026-10-18): release a claimed final-destination RoadwayStakeEntity right
+        // now rather than letting it sit reserved for the rest of its self-healing TTL -- see
+        // GuardPatrolAreaGoal's own doc for why Goal#stop() can't be relied on here (a dead entity
+        // generally stops ticking before the goal selector would ever call it).
+        if (claimedPatrolStakeId != null && level() instanceof ServerLevel claimLevel
+                && claimLevel.getEntity(claimedPatrolStakeId) instanceof com.github.cerealklla.settlemynts.roadway.RoadwayStakeEntity claimedStake) {
+            claimedStake.clearClaim();
+        }
         if (plotId == null || assignedStandId == null || !(level() instanceof ServerLevel serverLevel)) {
             return;
         }

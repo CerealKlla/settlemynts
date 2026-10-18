@@ -1,15 +1,9 @@
 package com.github.cerealklla.settlemynts.guardhouse;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Deque;
+import java.util.Comparator;
 import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 import com.github.cerealklla.cartographyr.geo.Geometry;
@@ -25,31 +19,43 @@ import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Patrols the settlement's own road network (added 2026-10-06, explicit user request: "I'd like
- * the guards to walk along the roads when patrolling the settlement"). {@link #pickFarRoadTarget}
+ * the guards to walk along the roads when patrolling the settlement"). {@link #pickRecencyWeightedTarget}
  * walks the WHOLE settlement's {@link RoadwayStakeEntity} graph (not just this guard's own plot)
- * and picks a **random** stake that's at least {@link #MIN_FAR_DISTANCE_BLOCKS} away as the final
- * destination -- per the user's own follow-up spec: "Guards should pick a road stake within the
- * settlement which is quite far as it's nextFinalDestination, and then plot a path between it's
- * current position to that place, and then follow that path. Once it arrives at the
- * nextFinalDestination, pick a new one and repeat."
+ * and picks a final destination weighted toward whichever eligible stake has gone longest without a
+ * guard actually reaching it, then {@link #findStakePath} finds the real route there along the
+ * graph's own connections. Each hop is issued as its own short {@code moveTo} call in turn (see
+ * {@link #canContinueToUse}, which advances {@link #waypointIndex} once a hop is reached) -- so the
+ * guard's actual walked route visibly follows stake to connected stake, matching how the road was
+ * physically built. Falls back to a single direct hop if the destination stake is disconnected from
+ * the guard's entry point (a malformed or still-being-built network), and to the original
+ * plot-wander behavior if no roads/stakes exist at all for this settlement.
  *
- * <p><b>Reworked 2026-10-09 -- real report: "guards aren't properly selecting a far away target
- * and then building a path from where they are to that location going from connected road stake to
- * connected road stakes."</b> The previous version handed the whole long-distance order to vanilla's
- * own {@code PathNavigation#moveTo} as a single call, trusting its A* to roughly hug the paved
- * blocks -- it doesn't reliably do that over long distances, and nothing about it actually walks
- * the stake graph's own connections. {@link #findStakePath} now runs a real breadth-first search
- * over the graph (each {@link RoadwayStakeEntity#getConnectionIds()} edge, unweighted -- the graph
- * is small and connections are already roughly uniform in length) from the nearest stake to the
- * guard's current position to the chosen far destination stake, producing an ordered hop list. Each
- * hop is issued as its own short {@code moveTo} call in turn (see {@link #canContinueToUse}, which
- * now advances {@link #waypointIndex} once a hop is reached rather than only ever tracking one
- * single final destination) -- so the guard's actual walked route now visibly follows stake to
- * connected stake, matching how the road was physically built, instead of vanilla's pathfinder
- * picking its own shortcut across open ground between two distant points. Falls back to a single
- * direct hop if the destination stake is disconnected from the guard's entry point (a malformed or
- * still-being-built network), and to the original plot-wander behavior if no roads/stakes exist at
- * all for this settlement.
+ * <p><b>Reworked 2026-10-18 -- real observation, not a performance concern: "big portions of
+ * sprawling towns virtually never patrolled."</b> The previous version (picking a uniformly random
+ * stake past a flat 50-block distance floor) gave no guarantee every stake ever actually got a
+ * turn -- a large network could keep re-rolling the same handful of "far enough" stakes near the
+ * guard's own plot forever while an equally-valid stake on the far side of the settlement never
+ * came up. Replaced with a real per-stake "last visited" clock ({@link
+ * RoadwayStakeEntity#lastVisitedGameTime}/{@link RoadwayStakeEntity#markVisited}, stamped on
+ * arrival at BOTH the final destination and every intermediate hop passed through along the way --
+ * {@link #canContinueToUse} calls it the moment each waypoint is actually reached, not on a timer)
+ * and a rank-based decay weighting over every eligible stake (oldest-visited first, see {@link
+ * #pickRecencyWeightedTarget}) -- so coverage rotates through the WHOLE graph over repeated cycles
+ * instead of only ever favoring distance. The old flat distance-floor and its closest-to-floor
+ * fallback pool are gone entirely -- recency alone is now the only selection signal, and every
+ * eligible stake (including nearby ones) is always a valid candidate, never excluded by distance.
+ *
+ * <p><b>Reservation against herding, same day</b> -- real question raised before building this:
+ * multiple guards in one settlement independently weighting toward the same stale stake would just
+ * pile onto it together. The chosen final destination is {@link RoadwayStakeEntity#claim claimed}
+ * by this guard the instant it's picked (excluded from other guards' own selection pool via {@link
+ * RoadwayStakeEntity#isClaimed} until released), and released the instant this guard actually
+ * arrives there (see {@link #canContinueToUse}) or dies en route (see {@code GuardEntity#die}).
+ * {@code RoadwayStakeEntity}'s own claim TTL backs a self-healing expiry in case neither ever runs
+ * -- e.g. the stake's own chunk isn't loaded at the exact moment of death. A claim deliberately
+ * does NOT stamp
+ * {@code lastVisitedGameTime} -- only a genuine arrival does, so a guard dying en route never
+ * falsely marks a stake as patrolled.
  *
  * <p>Only a stake {@link PlotGeometry#isWithinAnyTownProper} says is inside AT LEAST ONE of the
  * settlement's plots' own "Town Proper" buffers is eligible as a final DESTINATION -- per the
@@ -58,22 +64,10 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * town itself." Intermediate hops along the way are not filtered by this -- the path just follows
  * whatever route the graph actually has between the entry point and the eligible destination.
  *
- * <p><b>Reworked three times before that, same day (2026-10-06)</b>: v1 picked a uniformly random
- * connection anywhere in the settlement and a random point along its centerline (abandoned -- could
- * send a guard cutting cross-country toward an unrelated part of the network instead of following a
- * road). v2 picked the nearest stake more than 5 blocks away as a series of short hops (abandoned
- * for one long committed walk to a far destination instead, re-picked only on arrival). v3 picked
- * the single FARTHEST eligible stake every time (abandoned the same day -- real feedback: "I didn't
- * say 'farthest' on purpose; it'll just result in them only walking down the same path back and
- * forth. a round/square settlement would only have the diagonal path actually patrolled" -- the
- * farthest point from any given spot is deterministic, so a guard would always beeline the same
- * extreme corner-to-corner route and never cover any of the network's other branches). Picking
- * randomly among every stake past the distance floor instead gives route variety across the whole
- * graph over repeated cycles.
- *
- * <p>If no roads exist yet for this settlement (or no stake is currently eligible), falls back to
- * the original v1 behavior: a random point inside the guard's own plot's "Town Proper" buffer (see
- * {@link GuardEntity#resolvePatrolArea}), so a guard isn't simply frozen before any roads are built.
+ * <p>If no roads exist yet for this settlement (or no stake is currently eligible -- e.g. every
+ * stake is presently claimed by some other guard), falls back to the original v1 behavior: a
+ * random point inside the guard's own plot's "Town Proper" buffer (see {@link
+ * GuardEntity#resolvePatrolArea}), so a guard isn't simply frozen.
  *
  * <p><b>Correction</b> (unchanged from the original plot-wander behavior): if the guard is
  * currently outside its own plot's polygon when the fallback path is used, the next pick is
@@ -89,6 +83,14 @@ public class GuardPatrolAreaGoal extends Goal {
 
     private static final int MAX_SAMPLE_ATTEMPTS = 10;
 
+    // Rank-based decay for recency-weighted target selection -- rank 0 (the single oldest-visited
+    // eligible stake) gets weight 1.0, rank 1 gets 0.5, rank 2 gets 0.25, and so on, normalized into
+    // a probability distribution. Smoothly favors staleness across the WHOLE ranked list rather than
+    // a hard cutoff (explicit correction from an earlier "60% to the single oldest, the rest split
+    // evenly" proposal -- "I mean to have a decay curve, not only the oldest is 60% with the rest
+    // even"). One tunable constant; retune after watching real patrol coverage play out live.
+    private static final double RECENCY_WEIGHT_DECAY = 0.5;
+
     private final GuardEntity guard;
     private final double speedModifier;
     // The current committed hop target -- non-null for as long as this goal should keep running (see
@@ -96,8 +98,10 @@ public class GuardPatrolAreaGoal extends Goal {
     // whole route finished, or because a higher-priority goal like combat interrupted it).
     private BlockPos nextFinalDestination;
     // The full ordered sequence of hops (stake-to-connected-stake) from the entry point to the final
-    // destination, resolved once in start() -- empty for the single-hop plot-wander fallback.
-    private List<BlockPos> currentRoute = List.of();
+    // destination, resolved once in start() -- empty for the single-hop plot-wander fallback. Kept
+    // as real stake references (not just positions) so arrival can stamp each one's own
+    // lastVisitedGameTime, not merely drive toward a bare coordinate.
+    private List<RoadwayStakeEntity> currentRoute = List.of();
     private int waypointIndex;
 
     public GuardPatrolAreaGoal(GuardEntity guard, double speedModifier) {
@@ -128,13 +132,25 @@ public class GuardPatrolAreaGoal extends Goal {
         if (!arrived) {
             return true;
         }
+        if (guard.level() instanceof ServerLevel level) {
+            // Re-resolved by UUID rather than trusting the stored reference -- the stake's chunk may
+            // have unloaded and reloaded (a fresh deserialized instance) sometime during this
+            // possibly-long walk, and a write to a stale detached reference would silently never
+            // persist.
+            UUID reachedId = currentRoute.get(waypointIndex).getUUID();
+            if (level.getEntity(reachedId) instanceof RoadwayStakeEntity reached) {
+                reached.markVisited(level.getGameTime());
+            }
+        }
         if (waypointIndex + 1 < currentRoute.size()) {
             waypointIndex++;
-            nextFinalDestination = currentRoute.get(waypointIndex);
+            RoadwayStakeEntity next = currentRoute.get(waypointIndex);
+            nextFinalDestination = stakeSurfacePos(next);
             guard.getNavigation().moveTo(
                     nextFinalDestination.getX() + 0.5, nextFinalDestination.getY(), nextFinalDestination.getZ() + 0.5, speedModifier);
             return true;
         }
+        releaseClaim(); // final destination just reached -- see start()'s own claim
         return false; // whole route (or single-hop fallback) complete
     }
 
@@ -146,18 +162,23 @@ public class GuardPatrolAreaGoal extends Goal {
         // Temporary diagnostic (2026-10-10, see diagnostics.LagDiagnostics' own doc) -- remove once
         // the real lag cause is confirmed.
         long diagStart = System.nanoTime();
-        List<BlockPos> route = buildRoadRoute(level);
+        List<RoadwayStakeEntity> route = buildRoadRoute(level);
         long diagElapsedMs = (System.nanoTime() - diagStart) / 1_000_000L;
         if (diagElapsedMs >= 5) {
             com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info("[LagDiagnostics] GuardPatrolAreaGoal.buildRoadRoute took {}ms", diagElapsedMs);
         }
+        BlockPos fallbackTarget = null;
         if (route.isEmpty()) {
-            BlockPos fallback = guard.resolvePatrolArea(level).map(area -> pickTarget(level, area)).orElse(null);
-            route = fallback == null ? List.of() : List.of(fallback);
+            fallbackTarget = guard.resolvePatrolArea(level).map(area -> pickTarget(level, area)).orElse(null);
         }
         currentRoute = route;
         waypointIndex = 0;
-        nextFinalDestination = route.isEmpty() ? null : route.get(0);
+        if (!route.isEmpty()) {
+            guard.setClaimedPatrolStakeId(route.get(route.size() - 1).getUUID());
+            nextFinalDestination = stakeSurfacePos(route.get(0));
+        } else {
+            nextFinalDestination = fallbackTarget;
+        }
         if (nextFinalDestination != null) {
             guard.getNavigation().moveTo(
                     nextFinalDestination.getX() + 0.5, nextFinalDestination.getY(), nextFinalDestination.getZ() + 0.5, speedModifier);
@@ -166,23 +187,37 @@ public class GuardPatrolAreaGoal extends Goal {
 
     @Override
     public void stop() {
+        // Interrupted mid-route (e.g. combat) -- release the final-destination claim rather than
+        // leaving it reserved until its TTL expires; a genuine arrival already released it itself in
+        // canContinueToUse before this runs.
+        releaseClaim();
         nextFinalDestination = null;
         currentRoute = List.of();
         waypointIndex = 0;
     }
 
-    // "Quite far" -- deliberately a flat distance floor, not "farthest available" (see class doc:
-    // picking the single farthest stake every time always finds the same extreme point, so a guard
-    // would only ever walk that one corner-to-corner diagonal and never the rest of the network).
-    private static final double MIN_FAR_DISTANCE_BLOCKS = 50.0;
+    private void releaseClaim() {
+        if (!currentRoute.isEmpty() && guard.level() instanceof ServerLevel level) {
+            RoadwayStakeEntity destination = currentRoute.get(currentRoute.size() - 1);
+            if (level.getEntity(destination.getUUID()) instanceof RoadwayStakeEntity resolved) {
+                resolved.clearClaim();
+            }
+        }
+        guard.setClaimedPatrolStakeId(null);
+    }
+
+    private static BlockPos stakeSurfacePos(RoadwayStakeEntity stake) {
+        return new BlockPos(Mth.floor(stake.getX()), Mth.floor(stake.getY()), Mth.floor(stake.getZ()));
+    }
 
     /**
-     * Picks a far, eligible destination stake, finds the nearest stake to the guard's current
-     * position as the entry point onto the road graph, and returns the real BFS hop path between
-     * them (ground-surface positions, entry point excluded since the guard is already there) --
-     * empty if this settlement has no roads/stakes at all, or no eligible destination exists.
+     * Picks a recency-weighted eligible destination stake, finds the nearest stake to the guard's
+     * current position as the entry point onto the road graph, and returns the real BFS hop path
+     * between them (the entry point itself excluded, since the guard is already there) -- empty if
+     * this settlement has no roads/stakes at all, or no eligible destination exists right now
+     * (including "every eligible stake is currently claimed by another guard").
      */
-    private List<BlockPos> buildRoadRoute(ServerLevel level) {
+    private List<RoadwayStakeEntity> buildRoadRoute(ServerLevel level) {
         UUID settlementCoreId = guard.getSettlementCoreId();
         if (settlementCoreId == null || !(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
             return List.of();
@@ -191,7 +226,7 @@ public class GuardPatrolAreaGoal extends Goal {
         if (stakes.isEmpty()) {
             return List.of();
         }
-        RoadwayStakeEntity destination = pickFarRoadTarget(level, core, stakes);
+        RoadwayStakeEntity destination = pickRecencyWeightedTarget(level, core, stakes);
         if (destination == null) {
             return List.of();
         }
@@ -201,36 +236,46 @@ public class GuardPatrolAreaGoal extends Goal {
         }
         List<RoadwayStakeEntity> path = findStakePath(stakes, entry, destination);
         List<RoadwayStakeEntity> hops = path.size() >= 2 ? path.subList(1, path.size()) : List.of(destination);
-        List<BlockPos> route = new ArrayList<>(hops.size());
-        for (RoadwayStakeEntity stake : hops) {
-            route.add(surfacePos(level, Mth.floor(stake.getX()), Mth.floor(stake.getZ())));
-        }
-        return route;
+        destination.claim(guard.getUUID(), level.getGameTime());
+        return hops;
     }
 
-    private RoadwayStakeEntity pickFarRoadTarget(ServerLevel level, GhostTownHallCoreEntity core, List<RoadwayStakeEntity> stakes) {
+    /**
+     * Ranks every eligible, currently-unclaimed stake oldest-visited-first and picks one with
+     * rank-based decay weighting ({@link #RECENCY_WEIGHT_DECAY}^rank) -- see this class's own doc
+     * for why this replaced the old flat-distance-floor random pick.
+     */
+    private RoadwayStakeEntity pickRecencyWeightedTarget(ServerLevel level, GhostTownHallCoreEntity core, List<RoadwayStakeEntity> stakes) {
         List<RoadwayStakeEntity> eligible = new ArrayList<>();
-        // Second-choice pool for when the settlement just isn't big enough to have anything past
-        // MIN_FAR_DISTANCE_BLOCKS yet -- the stake whose distance comes CLOSEST to that floor,
-        // rather than giving up on road-patrolling entirely and falling back to plot-wandering.
-        RoadwayStakeEntity closestToFloor = null;
-        double closestToFloorDiff = Double.MAX_VALUE;
+        long now = level.getGameTime();
         for (RoadwayStakeEntity stake : stakes) {
-            double dist = Math.sqrt(guard.distanceToSqr(stake));
+            if (stake.isClaimed(now)) {
+                continue;
+            }
             if (!PlotGeometry.isWithinAnyTownProper(level, core, Mth.floor(stake.getX()), Mth.floor(stake.getZ()))) {
                 continue;
             }
-            if (dist > MIN_FAR_DISTANCE_BLOCKS) {
-                eligible.add(stake);
-                continue;
-            }
-            double diff = Math.abs(MIN_FAR_DISTANCE_BLOCKS - dist);
-            if (diff < closestToFloorDiff) {
-                closestToFloor = stake;
-                closestToFloorDiff = diff;
+            eligible.add(stake);
+        }
+        if (eligible.isEmpty()) {
+            return null;
+        }
+        eligible.sort(Comparator.comparingLong(RoadwayStakeEntity::lastVisitedGameTime));
+        double[] weights = new double[eligible.size()];
+        double totalWeight = 0.0;
+        for (int i = 0; i < eligible.size(); i++) {
+            weights[i] = Math.pow(RECENCY_WEIGHT_DECAY, i);
+            totalWeight += weights[i];
+        }
+        double roll = guard.getRandom().nextDouble() * totalWeight;
+        double cumulative = 0.0;
+        for (int i = 0; i < eligible.size(); i++) {
+            cumulative += weights[i];
+            if (roll < cumulative) {
+                return eligible.get(i);
             }
         }
-        return eligible.isEmpty() ? closestToFloor : eligible.get(guard.getRandom().nextInt(eligible.size()));
+        return eligible.get(eligible.size() - 1); // floating-point fallback, should be unreachable
     }
 
     private RoadwayStakeEntity nearestStake(List<RoadwayStakeEntity> stakes) {
