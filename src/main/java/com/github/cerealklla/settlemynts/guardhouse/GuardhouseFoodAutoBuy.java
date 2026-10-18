@@ -30,11 +30,13 @@ import net.minecraft.world.item.Items;
  *
  * <p>Buys from any OTHER plot in the same settlement with a real Shop listing for a concrete item
  * (a tag-only listing is skipped -- {@code listing.resource().itemId().isEmpty()} below -- since a
- * tag has no single real item to check {@link DataComponents#FOOD} against; an exact-name/quality
- * listing like Lyfe's "[8.25] T3 - Cooked Fish" is NOT skipped -- it's matched by its real underlying
- * item id the same as a plain listing, confirmed 2026-10-17, since the only gate here is a real
- * {@link FoodProperties} component) whose {@link DataComponents#FOOD} component is present, one
- * listing at a time, capped by whichever is smallest
+ * tag has no single real item to check {@link DataComponents#FOOD} against). The real {@link
+ * FoodProperties} check is read off a genuine sample stack pulled from the seller's own boxes
+ * (real report, 2026-10-17: a bare reconstructed stack of the item type alone has no FOOD component
+ * at all for Lyfe's own crafted/quality-scaled dishes, whose real nutrition is baked onto each
+ * individual stack at crafting time, not registered statically on the base item -- every such
+ * listing, the overwhelming majority of what a real food shop sells, was silently skipped outright
+ * until this was fixed), one listing at a time, capped by whichever is smallest
  * of: the remaining nutrition-value deficit, the seller's real stock, the Guardhouse's own
  * Gold-Nugget balance (drawn from the Guardhouse PLOT's own regular boxes via {@link
  * Settlemynts#resolvePlotBoxes} -- NOT the Food Store container itself, which only ever holds food),
@@ -92,11 +94,22 @@ public final class GuardhouseFoodAutoBuy {
         if (listing.resource().itemId().isEmpty() || listing.pricePerUnit() <= 0) {
             return deficit;
         }
-        Item item = BuiltInRegistries.ITEM.getOptional(listing.resource().itemId().get()).orElse(null);
-        if (item == null) {
+        // Real report, 2026-10-17: "I don't see guardhouses buying food that I have listed for sale
+        // on my private residence plot." Root cause: this used to build a bare `new ItemStack(item)`
+        // from just the registered item type to read its FoodProperties -- correct for a plain
+        // vanilla food item, but Lyfe's own crafted/quality-scaled dishes (cook.CookingListener
+        // #bakeIcons) never register a static FoodProperties on the base item at all; the real
+        // nutrition is baked onto each individual crafted stack as a per-stack component override at
+        // crafting time. A bare reconstructed stack of such an item has no FOOD component whatsoever,
+        // so every one of these listings -- the overwhelming majority of what a real player-run food
+        // shop actually sells -- was silently skipped outright. Fixed by reading a real sample stack
+        // out of the seller's own boxes instead of reconstructing a blank one.
+        ItemStack sample = findSample(sellerBoxes, listing.resource());
+        if (sample.isEmpty()) {
             return deficit;
         }
-        FoodProperties food = new ItemStack(item).get(DataComponents.FOOD);
+        Item item = sample.getItem();
+        FoodProperties food = sample.get(DataComponents.FOOD);
         if (food == null || food.nutrition() <= 0) {
             return deficit;
         }
@@ -124,6 +137,19 @@ public final class GuardhouseFoodAutoBuy {
             ContainerDeposit.depositIntoAny(List.of(foodContainer), stack);
         }
         return deficit - actuallyBought * perItemValue;
+    }
+
+    /** First real stack in {@code boxes} matching {@code resource} -- used so a per-stack component (like Lyfe's baked crafted-food nutrition) is read from an actual stack, never a blank reconstruction. */
+    private static ItemStack findSample(List<Container> boxes, ShopResource resource) {
+        for (Container box : boxes) {
+            for (int slot = 0; slot < box.getContainerSize(); slot++) {
+                ItemStack stack = box.getItem(slot);
+                if (!stack.isEmpty() && resource.matches(stack)) {
+                    return stack;
+                }
+            }
+        }
+        return ItemStack.EMPTY;
     }
 
     private static int roomForItem(Container container, Item item) {

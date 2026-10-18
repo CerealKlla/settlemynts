@@ -439,6 +439,15 @@ real resolved display name against its base item's default instead of only check
 green in both repos, whole-suite (12 mods) rebuild + `runServer` boot-smoke-test clean. **Not yet
 live-tested.**
 
+**Guardhouse food auto-buy now actually sees Lyfe's crafted food listings, 2026-10-17** (see
+[context/decisions.md](context/decisions.md)) -- real report (confirmed by the user that their
+"Preferred Food" threshold really was set): the nutrition check built a blank `new ItemStack(item)`
+to read `FoodProperties`, but Lyfe's crafted dishes bake real nutrition onto each stack individually
+at crafting time rather than registering it statically -- the blank stack always had no FOOD
+component, silently skipping almost every real food listing. Now reads a real sample stack out of
+the seller's own boxes instead. `./gradlew build` green, whole-suite (12 mods) rebuild + `runServer`
+boot-smoke-test clean. **Not yet live-tested.**
+
 **`Client*Request*` bridge classes rebuilt atop Nuclyus's shared `ClientRequestSlot`, 2026-10-17**
 (see Nuclyus's own CLAUDE.md/decisions.md) -- `founding.ClientFoundingRequests`,
 `plotsign.ClientPlotSignRequests`, and `guardhouse.ClientGuardhouseRequests` each replace their own
