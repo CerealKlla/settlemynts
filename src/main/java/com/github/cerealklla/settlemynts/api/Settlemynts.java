@@ -398,12 +398,12 @@ public final class Settlemynts {
      * re-derived from {@code plotId}.
      */
     public static YconomicsShopBridge.SellResult sellToSettlementShop(ServerLevel level, UUID plotId, UUID shopId, ShopResource resource,
-                                                                       Identifier itemId, int quantity) {
+                                                                       List<ItemStack> soldStacks) {
         if (!YconomicsShopBridge.isAvailable()) {
             return new YconomicsShopBridge.SellResult(0, 0, 0);
         }
         List<Container> plotBoxes = resolvePlotBoxes(level, plotId);
-        return YconomicsShopBridge.sell(level, shopId, resource, itemId, quantity, plotBoxes, plotBoxes);
+        return YconomicsShopBridge.sell(level, shopId, resource, soldStacks, plotBoxes, plotBoxes);
     }
 
     /**
@@ -448,9 +448,18 @@ public final class Settlemynts {
     /**
      * Same box-scanning pass as {@link #scanItemStock}, but grouped by exact Shop-listable variant
      * (2026-10-10, for per-quality Shop listings, e.g. Lyfe's crafted food) rather than plain item id
-     * -- a stack carrying a custom display name (Lyfe's baked {@code "[3.75] (T5) - Bread"}) gets its
-     * own {@code ShopResource.ofExactItem} key instead of being lumped into every other stack of the
-     * same base item; a stack with no custom name groups by plain item id exactly as before. {@code
+     * -- a stack whose real display name differs from its base item's own default name (Lyfe's baked
+     * {@code "[3.75] (T5) - Bread"}, or Lyfe's own Research Notes, dynamically named per recipe
+     * target/tier) gets its own {@code ShopResource.ofExactItem} key instead of being lumped into
+     * every other stack of the same base item; a stack whose display name matches the default groups
+     * by plain item id exactly as before. Real report, 2026-10-17: the original version of this check
+     * only tested for vanilla's own {@code DataComponents#CUSTOM_NAME} (an explicit stored override,
+     * e.g. an anvil rename), which Research Notes never sets -- its distinguishing name comes from a
+     * dynamic {@code Item#getName(ItemStack)} override instead, so every Research Note regardless of
+     * target/tier was silently lumped into one generic, indistinguishable "Research Notes" listing.
+     * Comparing the real resolved hover name against a fresh default-component stack's own name
+     * catches both mechanisms uniformly, without needing to know which one a given item actually
+     * uses. {@code
      * sample} is one real stack of that exact variant (for reading e.g. Lyfe's baked icons value when
      * computing a suggested price) -- always present since a key only ever exists because at least
      * one matching stack was found. Used only by {@code client.ManageShopScreen}'s row-building and
@@ -469,8 +478,10 @@ public final class Settlemynts {
                     continue;
                 }
                 Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
-                ShopResource key = stack.has(net.minecraft.core.component.DataComponents.CUSTOM_NAME)
-                        ? ShopResource.ofExactItem(id, stack.getHoverName().getString())
+                String hoverName = stack.getHoverName().getString();
+                String defaultName = new ItemStack(stack.getItem()).getHoverName().getString();
+                ShopResource key = !hoverName.equals(defaultName)
+                        ? ShopResource.ofExactItem(id, hoverName)
                         : ShopResource.ofItem(id);
                 VariantStock existing = result.get(key);
                 result.put(key, existing == null

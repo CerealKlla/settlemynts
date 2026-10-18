@@ -1260,32 +1260,41 @@ public class SettlemyntsMod {
                 : payload.customName().isPresent()
                     ? com.github.cerealklla.settlemynts.zone.ShopResource.ofExactItem(payload.resourceKey(), payload.customName().get())
                     : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
+        // Real report, 2026-10-17: a sold item could silently arrive in the shop's box with its real
+        // identity stripped (a Research Note losing which recipe target it taught, reading as a
+        // blank, unrecognizable default note) -- root cause was api.Yconomics#sellToShop's old
+        // plain-id+quantity deposit, which reconstructs a brand-new blank stack from just the
+        // registered item type, discarding every component. Fixed at the source (see that method's
+        // own doc) by passing the real matched stacks through end to end instead of a bare id+count --
+        // this loop now collects real ItemStack copies (preserving components) alongside the slot
+        // indices, capped at the requested quantity.
         net.minecraft.world.entity.player.Inventory inventory = player.getInventory();
-        net.minecraft.resources.Identifier itemId = null;
-        int available = 0;
+        int remainingWanted = payload.quantity();
         java.util.List<Integer> matchingSlots = new java.util.ArrayList<>();
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+        java.util.List<net.minecraft.world.item.ItemStack> soldStacks = new java.util.ArrayList<>();
+        for (int slot = 0; slot < inventory.getContainerSize() && remainingWanted > 0; slot++) {
             net.minecraft.world.item.ItemStack stack = inventory.getItem(slot);
             if (stack.isEmpty() || !resource.matches(stack)) {
                 continue;
             }
-            if (itemId == null) {
-                itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
-            }
-            available += stack.getCount();
+            int take = Math.min(stack.getCount(), remainingWanted);
+            soldStacks.add(stack.copyWithCount(take));
             matchingSlots.add(slot);
+            remainingWanted -= take;
         }
-        if (itemId == null || available <= 0) {
+        if (soldStacks.isEmpty()) {
             player.sendSystemMessage(Component.literal("You don't have any of that to sell."));
             return;
         }
-        int quantity = Math.min(payload.quantity(), available);
         com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.SellResult result =
-                com.github.cerealklla.settlemynts.api.Settlemynts.sellToSettlementShop(serverLevel, plotId, shopId.get(), resource, itemId, quantity);
+                com.github.cerealklla.settlemynts.api.Settlemynts.sellToSettlementShop(serverLevel, plotId, shopId.get(), resource, soldStacks);
         if (result.itemsSold() <= 0) {
             player.sendSystemMessage(Component.literal("The shop can't afford to buy that right now."));
             return;
         }
+        // All-or-nothing on the Yconomics side (see that method's own doc) -- itemsSold() is always
+        // either 0 or exactly sum(soldStacks counts), so removing that many in the same slot order
+        // soldStacks was built from stays consistent with whichever exact stacks were just deposited.
         int remaining = result.itemsSold();
         for (int slot : matchingSlots) {
             if (remaining <= 0) {

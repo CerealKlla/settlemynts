@@ -12,6 +12,7 @@ import com.github.cerealklla.yconomics.shop.ShopListing;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.fml.ModList;
 
 /**
@@ -85,13 +86,15 @@ public final class YconomicsShopBridge {
     }
 
     /**
-     * "Sell N" -- the reverse of {@link #purchase}, added 2026-10-08. {@code itemId} is the concrete
-     * item actually being sold (resolved by the caller from the seller's held stack, since
-     * {@code resource} can be tag-based).
+     * "Sell N" -- the reverse of {@link #purchase}, added 2026-10-08. {@code soldStacks} are the
+     * real, exact stacks being sold (resolved by the caller from the seller's held stacks, since
+     * {@code resource} can be tag-based) -- passed through as real stacks, not a bare id+quantity, so
+     * a component-carrying item's real identity survives the deposit (2026-10-17, see {@code
+     * api.Yconomics#sellToShop}'s own doc for the real bug this fixes).
      */
-    public static SellResult sell(ServerLevel level, UUID shopId, ShopResource resource, net.minecraft.resources.Identifier itemId,
-                                   int quantity, List<Container> stockBoxes, List<Container> paymentBoxes) {
-        Yconomics.SellResult result = Yconomics.sellToShop(level, shopId, toYconomics(resource), itemId, quantity, stockBoxes, paymentBoxes);
+    public static SellResult sell(ServerLevel level, UUID shopId, ShopResource resource, List<ItemStack> soldStacks,
+                                   List<Container> stockBoxes, List<Container> paymentBoxes) {
+        Yconomics.SellResult result = Yconomics.sellToShop(level, shopId, toYconomics(resource), soldStacks, stockBoxes, paymentBoxes);
         return new SellResult(result.itemsSold(), result.nuggetsReceived(), result.sellPricePerUnit());
     }
 

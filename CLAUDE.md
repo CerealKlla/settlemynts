@@ -428,6 +428,17 @@ constructor, since neither vanilla's `Mob` nor `AbstractVillager` ever avoids tr
 default -- fixes NPCs getting stuck up in trees. `./gradlew build` green, whole-suite (12 mods)
 rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested.**
 
+**Selling a Research Note (or any component-named item) to a Shop now preserves it, 2026-10-17**
+(see [context/decisions.md](context/decisions.md)) -- real report: a sold Research Note "didn't
+arrive" in the shop's box, and generic listings showed every Research Note under one indistinguishable
+name. Two real bugs: the sell handler now passes real `ItemStack`s (preserving components) all the
+way through to Yconomics instead of a bare id+quantity (see that repo's own `BillTransferEngine
+#depositStacks` fix); and `scanItemStockByVariant`'s exact-listing check now compares the stack's
+real resolved display name against its base item's default instead of only checking for vanilla's
+`CUSTOM_NAME` component, which Research Notes' own dynamic naming never sets. `./gradlew build`
+green in both repos, whole-suite (12 mods) rebuild + `runServer` boot-smoke-test clean. **Not yet
+live-tested.**
+
 **`Client*Request*` bridge classes rebuilt atop Nuclyus's shared `ClientRequestSlot`, 2026-10-17**
 (see Nuclyus's own CLAUDE.md/decisions.md) -- `founding.ClientFoundingRequests`,
 `plotsign.ClientPlotSignRequests`, and `guardhouse.ClientGuardhouseRequests` each replace their own
