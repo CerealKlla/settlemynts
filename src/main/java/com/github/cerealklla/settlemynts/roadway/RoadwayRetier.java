@@ -36,17 +36,35 @@ public final class RoadwayRetier {
         int cellsRepainted = 0;
         for (RoadwayStakeEntity stake : RoadwayStakeEntity.findByOwnerCore(level, settlementCoreId)) {
             for (RoadwayStakeEntity.ConnectionSnapshot connection : stake.getConnectionSnapshots()) {
+                // Authoritative path (2026-10-18, see RoadwayPaver.StepRecord's own doc for the real
+                // bug this fixes) -- a step cell's own recorded climb direction, independent of
+                // whatever block is actually sitting there right now. This is the only way to
+                // correctly turn a flat Tier-1/2 riser cell into a real stair the first time a
+                // settlement crosses the Tier-3 threshold, since there was never a stairs block there
+                // to read a FACING off at all.
+                java.util.Set<BlockPos> stepPositions = new java.util.HashSet<>();
+                for (RoadwayPaver.StepRecord step : connection.stepCells()) {
+                    stepPositions.add(step.pos());
+                    BlockState newStairState = RoadwayPaver.stairStateFor(tier, step.climbDirection());
+                    level.setBlock(step.pos(), newStairState != null ? newStairState : roadState, 3);
+                    cellsRepainted++;
+                }
                 for (BlockPos pos : connection.roadCells()) {
+                    if (stepPositions.contains(pos)) {
+                        continue; // Already handled above via its recorded StepRecord.
+                    }
                     BlockState existing = level.getBlockState(pos);
                     if (existing.is(ModBlocks.ROADWAY.get())) {
                         level.setBlock(pos, roadState, 3);
                         cellsRepainted++;
-                    } else if (existing.is(Blocks.STONE_BRICK_STAIRS) || existing.is(Blocks.BRICK_STAIRS)) {
-                        // Slope-step stair cell (2026-10-12) -- not the flat ROADWAY block, so the
-                        // check above misses it; re-select the new tier's own stairs match (keeping
-                        // the existing climb direction/half), falling back to the flat road if the
-                        // new tier has no real stairs match (Tiers 1/2/5 -- see
-                        // RoadwayPaver#stairStateFor's own doc).
+                    } else if (existing.is(Blocks.STONE_BRICK_STAIRS) || existing.is(Blocks.BRICK_STAIRS) || existing.is(Blocks.SMOOTH_QUARTZ_STAIRS)) {
+                        // Backward-compat path for a connection paved before stepCells existed
+                        // (2026-10-12 through 2026-10-17) -- its own step cells already physically
+                        // became a real stairs block at pave time (every tier that bug actually hit,
+                        // 3/4/5, has a real stairs match), so re-selecting the new tier's own stairs
+                        // match off the existing block's FACING (keeping climb direction/half) still
+                        // works correctly here, just never for a step that was flat to begin with --
+                        // see stepCells' own doc for exactly which case this doesn't cover.
                         BlockState newStairState = RoadwayPaver.stairStateFor(tier, existing.getValue(StairBlock.FACING));
                         level.setBlock(pos, newStairState != null ? newStairState.setValue(StairBlock.HALF, existing.getValue(StairBlock.HALF)) : roadState, 3);
                         cellsRepainted++;

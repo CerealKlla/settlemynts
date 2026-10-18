@@ -85,15 +85,21 @@ public class RoadwayStakeEntity extends Display.BlockDisplay implements StakeNod
     private List<ConnectionSnapshot> connectionSnapshots = List.of();
 
     public record ConnectionSnapshot(UUID otherStakeId, List<RoadwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId,
-                                      List<net.minecraft.core.BlockPos> roadCells) {
+                                      List<net.minecraft.core.BlockPos> roadCells, List<RoadwayPaver.StepRecord> stepCells) {
         // roadCells defaults to empty for any connection saved before 2026-10-09 (the Tier-visual
         // feature) -- those simply won't be retroactively re-tiered by RoadwayRetier until the
         // edge is re-paved, a deliberate, accepted gap (see decisions.md) rather than a migration.
+        // stepCells is the same shape of gap, added 2026-10-18 (see RoadwayPaver.StepRecord's own
+        // doc for the real T2->T3 bug this fixes) -- a connection paved before this field existed
+        // falls back to RoadwayRetier's older "read FACING off whatever's already a stairs block"
+        // path, which still works for a step cell that was ALREADY a stairs block (e.g. re-tiering
+        // Tier 3 -> Tier 4), just not for one that never was one in the first place.
         public static final Codec<ConnectionSnapshot> CODEC = RecordCodecBuilder.create(i -> i.group(
                 UUIDUtil.CODEC.fieldOf("other_stake_id").forGetter(ConnectionSnapshot::otherStakeId),
                 Codec.list(RoadwayPaver.SnapshotEntry.CODEC).fieldOf("snapshot").forGetter(ConnectionSnapshot::snapshot),
                 EntityId.CODEC.fieldOf("road_entity_id").forGetter(ConnectionSnapshot::roadEntityId),
-                Codec.list(net.minecraft.core.BlockPos.CODEC).optionalFieldOf("road_cells", List.of()).forGetter(ConnectionSnapshot::roadCells)
+                Codec.list(net.minecraft.core.BlockPos.CODEC).optionalFieldOf("road_cells", List.of()).forGetter(ConnectionSnapshot::roadCells),
+                Codec.list(RoadwayPaver.StepRecord.CODEC).optionalFieldOf("step_cells", List.of()).forGetter(ConnectionSnapshot::stepCells)
         ).apply(i, ConnectionSnapshot::new));
     }
 
@@ -169,15 +175,16 @@ public class RoadwayStakeEntity extends Display.BlockDisplay implements StakeNod
         return null;
     }
 
-    /** Stores (or replaces) this stake's own copy of one connection's restore snapshot, its Cartographyr road entity id, and (2026-10-09) its exact road-surface cell positions for {@code RoadwayRetier} -- see {@link RoadwayPaver#paveEdge}, which calls this on both ends. */
-    public void setSnapshotFor(UUID otherStakeId, List<RoadwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId, List<net.minecraft.core.BlockPos> roadCells) {
+    /** Stores (or replaces) this stake's own copy of one connection's restore snapshot, its Cartographyr road entity id, its exact road-surface cell positions (2026-10-09), and (2026-10-18) which of those cells are slope-steps -- see {@link RoadwayPaver#paveEdge}, which calls this on both ends. */
+    public void setSnapshotFor(UUID otherStakeId, List<RoadwayPaver.SnapshotEntry> snapshot, EntityId roadEntityId,
+                                List<net.minecraft.core.BlockPos> roadCells, List<RoadwayPaver.StepRecord> stepCells) {
         List<ConnectionSnapshot> current = new ArrayList<>();
         for (ConnectionSnapshot entry : connectionSnapshots) {
             if (!entry.otherStakeId().equals(otherStakeId)) {
                 current.add(entry);
             }
         }
-        current.add(new ConnectionSnapshot(otherStakeId, snapshot, roadEntityId, roadCells));
+        current.add(new ConnectionSnapshot(otherStakeId, snapshot, roadEntityId, roadCells, stepCells));
         connectionSnapshots = current;
     }
 

@@ -83,6 +83,28 @@ public final class RoadwayPaver {
         ).apply(i, SnapshotEntry::new));
     }
 
+    /**
+     * One road cell that was paved as a slope-step at pave time -- its climb direction, independent
+     * of whatever block type is actually sitting there right now. Added 2026-10-18, real report:
+     * "When the roads auto-upgraded from T2 -> T3 they did not automatically generate with stairs."
+     * Root cause: {@link RoadwayRetier} could only re-tier a step cell by reading the FACING off an
+     * *already-placed* stairs block -- which works for e.g. a Tier-3-to-Tier-4 upgrade (both have
+     * real stairs), but a cell paved at Tier 1/2 (see {@link #stairStateFor}'s own doc -- no stairs
+     * match at all) was never a stairs block to begin with, just a flat {@code ROADWAY} cube with a
+     * vertical riser. There was nothing for the retier to read a climb direction from, so upgrading
+     * past the Tier-3 threshold for the first time left every slope step flat instead of becoming a
+     * real stair -- the user had to delete and re-place the stakes (forcing a real re-pave) to get
+     * the stairs {@link #paveEdge} would have placed directly at the new Tier. Recording this
+     * directly at pave time, independent of any already-placed block, fixes every upgrade path
+     * (including Tier 1/2 -> 3+) and every downgrade path (3+ -> 1/2 correctly flattens) alike.
+     */
+    public record StepRecord(BlockPos pos, Direction climbDirection) {
+        public static final Codec<StepRecord> CODEC = RecordCodecBuilder.create(i -> i.group(
+                BlockPos.CODEC.fieldOf("pos").forGetter(StepRecord::pos),
+                Direction.CODEC.fieldOf("climb_direction").forGetter(StepRecord::climbDirection)
+        ).apply(i, StepRecord::new));
+    }
+
     /** Puts every captured block back exactly as it was before the edge was paved -- see {@link RoadwayStakeEntity#remove}. */
     public static void restoreEdge(ServerLevel level, List<SnapshotEntry> snapshot) {
         Set<BlockPos> distinctPositions = new HashSet<>();
@@ -267,6 +289,7 @@ public final class RoadwayPaver {
 
         List<SnapshotEntry> snapshot = new ArrayList<>();
         List<BlockPos> roadCells = new ArrayList<>();
+        List<StepRecord> stepCells = new ArrayList<>();
         Set<BlockPos> captured = new HashSet<>();
         // Dedupes which physical (x,z) column each centerline index is allowed to pave (added
         // 2026-10-12, real live report: "for angled roads it seems to be determining that height
@@ -303,12 +326,13 @@ public final class RoadwayPaver {
             // with a vertical riser between it and the previous cross-section. See
             // #stairStateFor's own doc for which tiers actually have a real vanilla stairs match.
             BlockState stepState = null;
+            Direction stepClimbDirection = null;
             if (i > 0 && profile[i] != profile[i - 1]) {
-                Direction travelDirection = directionFromDelta(v.x() - centerline.get(i - 1).x(), v.z() - centerline.get(i - 1).z());
+                stepClimbDirection = directionFromDelta(v.x() - centerline.get(i - 1).x(), v.z() - centerline.get(i - 1).z());
                 if (profile[i] < profile[i - 1]) {
-                    travelDirection = travelDirection.getOpposite(); // Descending -- the riser (and climb direction) point the other way.
+                    stepClimbDirection = stepClimbDirection.getOpposite(); // Descending -- the riser (and climb direction) point the other way.
                 }
-                stepState = stairStateFor(tier, travelDirection);
+                stepState = stairStateFor(tier, stepClimbDirection);
             }
             // Real live report, 2026-10-13 (screenshots, confirmed via direct RCON block/FACING
             // inspection): a stair's own placed Y is its LOW side -- its solid/full-height side
@@ -335,7 +359,11 @@ public final class RoadwayPaver {
                 int targetY = pavedY;
                 int natural = offset == 0 ? naturalY[i] : naturalSurfaceYNear(level, colX, colZ, targetY);
                 paveColumn(level, colX, targetY, colZ, natural, tier, stepState, snapshot, captured);
-                roadCells.add(new BlockPos(colX, targetY, colZ));
+                BlockPos cellPos = new BlockPos(colX, targetY, colZ);
+                roadCells.add(cellPos);
+                if (stepClimbDirection != null) {
+                    stepCells.add(new StepRecord(cellPos, stepClimbDirection));
+                }
                 roadBlocksPlaced++;
             }
         }
@@ -343,8 +371,8 @@ public final class RoadwayPaver {
         var roadEntity = Cartography.createEntity(level, new EntityDefinition(
                 level.dimension(), Classification.CONSTRUCTED, EntityType.ROAD, Layer.ROADWAY_ID,
                 Optional.empty(), new Geometry.Path(centerline, PATH_HALF_WIDTH_BLOCKS), LifecycleState.REALIZED, Optional.empty()));
-        a.setSnapshotFor(b.getUUID(), snapshot, roadEntity.id(), roadCells);
-        b.setSnapshotFor(a.getUUID(), snapshot, roadEntity.id(), roadCells);
+        a.setSnapshotFor(b.getUUID(), snapshot, roadEntity.id(), roadCells, stepCells);
+        b.setSnapshotFor(a.getUUID(), snapshot, roadEntity.id(), roadCells, stepCells);
         RoadwayConnectionMarkerEntity.regenerateAll(level, core.getUUID());
 
         Set<BlockPos> distinctPositions = new HashSet<>();
