@@ -132,29 +132,29 @@ public final class PlannedInventoryClearing {
      * third step by {@code ShopMidnightRestockTicker}, right after {@link #settleGroup} -- so
      * materials that just changed hands via inter-plot trading get turned into finished goods the
      * same night -- and per-shop by {@code ShopCraftingDebounceTicker} after a player Buy/Sell has
-     * gone quiet on that one shop for 10 seconds.
-     */
-    public static void craftFromOwnStockForGroup(ServerLevel level, List<PlotRecord> plots) {
-        for (PlotRecord plot : plots) {
-            craftFromOwnStockForPlot(level, plot);
-        }
-    }
-
-    /**
-     * Same as {@link #craftFromOwnStockForGroup}, but enqueues one job per plot onto {@link
-     * MidnightWorkQueue} instead of looping synchronously -- see that class's own doc for why. Each
-     * plot's own {@code MAX_CRAFTS_PER_PLOT_PER_TARGET}-bounded crafting loop is cheap on its own, but
-     * a settlement with many crafting plots could still add up; spreading by plot costs nothing extra
-     * (crafting order between plots was never meaningful) and keeps this step as tick-safe as {@link
-     * #settleGroup} now is.
+     * gone quiet on that one shop for 10 seconds (that single-shop path still goes through the plain
+     * synchronous {@link #craftFromOwnStock}, not through {@link MidnightWorkQueue} -- it's already
+     * scoped to one plot, not a whole settlement sweep).
+     *
+     * <p>Spreads the work across {@link MidnightWorkQueue} jobs at per-craft-attempt granularity
+     * instead of one big job per plot -- real production incident, 2026-10-21: a plot's own crafting
+     * loop (up to {@link #MAX_CRAFTS_PER_PLOT_PER_TARGET} craft attempts PER target, each rescanning
+     * the plot's full box contents via {@link Settlemynts#scanItemStock}) could itself take long
+     * enough, for a plot with several different craftable targets, to recreate the exact single-tick
+     * freeze the per-resource job splitting above was built to fix -- confirmed live: the watchdog
+     * fired well after {@link #settleGroup}'s own jobs had already finished cleanly in under 7
+     * seconds, meaning this step (or one of the others {@code ShopMidnightRestockTicker} queues right
+     * after it) was the next thing still capable of blocking a whole tick. Each queued job here now
+     * does at most one craft attempt for one target on one plot, re-enqueuing itself for the next
+     * attempt exactly like {@link #attemptOneCraftableUnit} already does for inter-plot trading.
      */
     public static void enqueueCraftFromOwnStockForGroup(ServerLevel level, List<PlotRecord> plots, MidnightWorkQueue queue) {
         for (PlotRecord plot : plots) {
-            queue.enqueue(() -> craftFromOwnStockForPlot(level, plot));
+            queue.enqueue(() -> enqueueCraftFromOwnStockForPlot(level, plot, queue));
         }
     }
 
-    private static void craftFromOwnStockForPlot(ServerLevel level, PlotRecord plot) {
+    private static void enqueueCraftFromOwnStockForPlot(ServerLevel level, PlotRecord plot, MidnightWorkQueue queue) {
         if (plot.shopId().isEmpty() || plot.plannedInventory().isEmpty()) {
             return;
         }
@@ -163,7 +163,62 @@ public final class PlannedInventoryClearing {
             return; // Natural-village plot, or otherwise unresolvable -- no Lyfe structure can exist there anyway.
         }
         List<Container> boxes = Settlemynts.resolveBoxesForPolygon(level, polygon.get());
-        craftFromOwnStock(level, plot, polygon.get(), boxes);
+        if (boxes.isEmpty()) {
+            return;
+        }
+        PlotCraftingCapability capability = null; // Lazily resolved once per plot -- null means "not checked yet."
+        for (PlannedInventoryTarget target : plot.plannedInventory()) {
+            if (target.isTag()) {
+                continue; // A crafting recipe's output is always a concrete item.
+            }
+            List<LyfeCraftingBridge.RecipeInfo> candidates = resolveRecipes(level, target.resourceKey());
+            if (candidates.isEmpty()) {
+                continue;
+            }
+            if (capability == null) {
+                capability = PlotCraftingCapability.resolve(level, polygon.get());
+            }
+            PlotCraftingCapability finalCapability = capability;
+            List<LyfeCraftingBridge.RecipeInfo> usable = candidates.stream()
+                    .filter(r -> r.craftableWith(finalCapability))
+                    .toList();
+            if (usable.isEmpty()) {
+                continue; // No sufficiently-tiered crafting structure (or Furnace/Stonecutter) present on this plot.
+            }
+            queue.enqueue(() -> attemptOneOwnStockCraft(level, plot, boxes, target, usable, finalCapability, queue, 0));
+        }
+    }
+
+    /**
+     * One craft-attempt of {@link #enqueueCraftFromOwnStockForPlot}'s own job chain -- mirrors {@link
+     * #attemptOneCraftableUnit}'s shape exactly (re-check real stock, since a multi-output recipe can
+     * satisfy several units' worth of deficit at once; re-enqueue for the next attempt if progress is
+     * still possible and the target isn't met; bounded by {@link #MAX_CRAFTS_PER_PLOT_PER_TARGET}).
+     */
+    private static void attemptOneOwnStockCraft(ServerLevel level, PlotRecord plot, List<Container> boxes, PlannedInventoryTarget target,
+                                                 List<LyfeCraftingBridge.RecipeInfo> usable, PlotCraftingCapability capability,
+                                                 MidnightWorkQueue queue, int attemptsSoFar) {
+        if (attemptsSoFar >= MAX_CRAFTS_PER_PLOT_PER_TARGET) {
+            return;
+        }
+        Map<Identifier, Integer> available = Settlemynts.scanItemStock(boxes);
+        int currentStock = available.getOrDefault(target.resourceKey(), 0);
+        if (currentStock >= target.targetCount()) {
+            return;
+        }
+        // Picks whichever alternate (e.g. furnace fuel) is actually currently stocked -- see the
+        // original synchronous loop's own doc for why this must be re-checked every craft.
+        LyfeCraftingBridge.RecipeInfo recipe = usable.stream()
+                .filter(r -> CraftingExecutor.canCraftOne(available, r))
+                .findFirst().orElse(null);
+        if (recipe == null) {
+            return;
+        }
+        CraftingExecutor.craftOne(boxes, recipe, capability);
+        SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} crafted 1x {} (structure tier {})",
+                plot.plotId(), recipe.resultId(), capability.lyfeStructureTier());
+        ShopWishlistCache.invalidate(plot.plotId());
+        queue.enqueue(() -> attemptOneOwnStockCraft(level, plot, boxes, target, usable, capability, queue, attemptsSoFar + 1));
     }
 
     /** Single-plot entry point -- see {@link #craftFromOwnStockForGroup}'s own doc for the full story. */
