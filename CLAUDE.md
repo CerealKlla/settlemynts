@@ -523,3 +523,13 @@ column's price line also grew a "wants N" suffix so a player can see which rows 
 sellable at all without guessing. `BUY_X`/`SELL_X`/`PLAYER_INV_X` widened again (230/260/300) to fit
 the longer price line. `./gradlew build` green, whole-suite (13 mods) rebuild + `runServer`
 boot-smoke-test clean. **Not yet live-tested.**
+
+**`npc.NpcHealthBar` now also shows Lyfe's new Mana stat, 2026-10-20** -- Lyfe's large new Mana
+feature (see its own context/design-document.md Section 24) wants an "above NPC heads when not at
+100%" indicator; rather than a second nameplate writer independently calling `setCustomName` on the
+same entity (which would race this one), `NpcHealthBar` now appends Lyfe's own bar text (a new
+`api.Lyfe#manaNameplateLine`, gated behind `ModList.isLoaded("lyfe")`) onto the *same line* as the
+health bar, two spaces apart -- not a second stacked line, since vanilla's own nametag rendering
+has no real support for an embedded newline actually breaking visually onto a second row.
+`./gradlew build` green, whole-suite (13 mods) rebuild + `runServer` boot-smoke-test clean. **Not
+yet live-tested.**
