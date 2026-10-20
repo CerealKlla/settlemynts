@@ -2073,7 +2073,21 @@ public class SettlemyntsMod {
 
         boolean canFireNpc = isOwnerViewing && plot.npcHired();
 
-        boolean canTalk = plot.owner().isEmpty();
+        // Real report, 2026-10-19: "This NPC has a ? on his head but no Talk menu." The public "?"
+        // nameplate (PlotShopProximityTicker#updateWishlistNameplate, driven by anchorHasWishlist)
+        // fires for an unmet Planned Inventory deficit or a pending quest board offer on ANY plot,
+        // ownership included -- it was never actually restricted to NPC-owned plots. "Talk" (the only
+        // way to view/act on either) was hardcoded NPC-owned-only, so a player-owned plot's marker was
+        // a dead end with no way to ever reach it. Widened to match the real trigger instead of a
+        // stale ownership assumption from the original unified-menu design.
+        //
+        // Also folds in anchorHasPersonalQuestBusiness, which the 2026-10-16 NPC Menu overhaul
+        // appears to have silently dropped entirely -- that method's own doc (above) describes
+        // exactly the 2026-10-11 bug this was built to fix ("accepted a quest, board slot cleared,
+        // now there's no way to come back and turn it in"), but nothing in the new unified menu ever
+        // called it; canTalk here checked only plot ownership. Without this, that old regression was
+        // silently reintroduced by the menu rework.
+        boolean canTalk = anchorHasWishlist(level, anchor) || anchorHasPersonalQuestBusiness(player, level, anchor);
 
         return new NpcMenuOptions(canOpenStore, canManageStore, canChangeJob, canFireNpc, canTalk);
     }

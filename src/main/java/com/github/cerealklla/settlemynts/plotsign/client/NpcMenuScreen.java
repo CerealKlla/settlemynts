@@ -63,7 +63,14 @@ public final class NpcMenuScreen extends Screen {
             y += 24;
         }
         if (data.canFireNpc()) {
-            addRenderableWidget(Button.builder(Component.literal("Fire NPC"), b -> fireNpc())
+            // Visually separated, 2026-10-19 (real report: this button landed wherever "Talk"/"Change
+            // Job" would otherwise sit whenever those were absent, styled identically to every routine
+            // commerce button above it -- "I keep accidentally firing them out of muscle memory").
+            // Extra gap plus red label text sets it apart as a distinct, destructive action instead of
+            // just another item in the same uniform list, regardless of which buttons above it are
+            // present on a given NPC.
+            y += 10;
+            addRenderableWidget(Button.builder(Component.literal("Fire NPC").withStyle(net.minecraft.ChatFormatting.RED), b -> fireNpc())
                     .bounds(centerX - 100, y, 200, 20).build());
             y += 24;
         }
