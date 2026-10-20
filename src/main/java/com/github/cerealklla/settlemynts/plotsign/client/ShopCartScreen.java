@@ -35,10 +35,13 @@ public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
     private static final int TOP_Y = 18;
     private static final int ROW_HEIGHT = 18;
     private static final int SHOP_X = 8;
-    private static final int BUY_X = 62;
-    private static final int SELL_X = 98;
-    private static final int PLAYER_INV_X = 138;
-    private static final int SCROLLBAR_X = SHOP_X + 46;
+    // Widened 2026-10-20 -- real report, with a screenshot showing the Shop column's "N in stock
+    // Pg / Sg" price text running directly into the Buy column's icons. Must stay in lockstep with
+    // ShopCartMenu's own identical copies of these constants.
+    private static final int BUY_X = 180;
+    private static final int SELL_X = 210;
+    private static final int PLAYER_INV_X = 250;
+    private static final int SCROLLBAR_X = BUY_X - 16;
 
     public ShopCartScreen(ShopCartMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title, PLAYER_INV_X + 9 * 18 + 10,

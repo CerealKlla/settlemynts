@@ -81,9 +81,13 @@ public class ShopCartMenu extends AbstractContainerMenu {
     private static final int ROW_HEIGHT = 18;
     private static final int TOP_Y = 18;
     private static final int SHOP_X = 8;
-    private static final int BUY_X = 62;
-    private static final int SELL_X = 98;
-    private static final int PLAYER_INV_X = 8;
+    // Widened 2026-10-20 -- real report, with a screenshot showing the Shop column's "N in stock
+    // Pg / Sg" price text running directly into the Buy column's icons. BUY_X/SELL_X/PLAYER_INV_X
+    // must stay in lockstep with ShopCartScreen's own identical copies of these constants (that
+    // class's own doc explains why they're duplicated rather than shared).
+    private static final int BUY_X = 180;
+    private static final int SELL_X = 210;
+    private static final int PLAYER_INV_X = 250;
 
     public static final int VISIBLE_SHOP_ROWS = 8;
     public static final int BUY_SELL_SLOTS = 8;
@@ -164,11 +168,11 @@ public class ShopCartMenu extends AbstractContainerMenu {
         int playerInvY = TOP_Y;
         for (int row = 0; row < 3; row++) {
             for (int col = 0; col < 9; col++) {
-                addSlot(new RealOnlySlot(inventory, col + row * 9 + 9, PLAYER_INV_X + 130 + col * COLUMN_WIDTH, playerInvY + row * ROW_HEIGHT));
+                addSlot(new RealOnlySlot(inventory, col + row * 9 + 9, PLAYER_INV_X + col * COLUMN_WIDTH, playerInvY + row * ROW_HEIGHT));
             }
         }
         for (int col = 0; col < HOTBAR_SIZE; col++) {
-            addSlot(new RealOnlySlot(inventory, col, PLAYER_INV_X + 130 + col * COLUMN_WIDTH, playerInvY + 3 * ROW_HEIGHT + 4));
+            addSlot(new RealOnlySlot(inventory, col, PLAYER_INV_X + col * COLUMN_WIDTH, playerInvY + 3 * ROW_HEIGHT + 4));
         }
     }
 
