@@ -7,6 +7,7 @@ import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.ContainerDeposit;
 import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
+import com.github.cerealklla.settlemynts.zone.MidnightWorkQueue;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 import com.github.cerealklla.settlemynts.zone.ShopResource;
 
@@ -51,40 +52,53 @@ public final class GuardhouseFoodAutoBuy {
     private GuardhouseFoodAutoBuy() {
     }
 
-    public static void buyForSettlement(ServerLevel level, GhostTownHallCoreEntity core) {
+    /**
+     * Enqueues this settlement's food-buying work onto {@link MidnightWorkQueue} instead of running
+     * it all synchronously -- real production incident, 2026-10-21 (see {@code
+     * zone.PlannedInventoryClearing}'s own decisions.md entries for the full three-round writeup of
+     * this exact failure mode elsewhere in the same midnight pipeline): this method's own
+     * (guardhouse x other-plot x listing) nested loop had never been chunked, and while no single
+     * incident was ever pinned on it specifically, it's the same unbounded shape that already caused
+     * three real freezes/crashes elsewhere -- fixed proactively rather than waiting for a fourth. One
+     * job per (guardhouse, seller plot) pair; each job's own inner listing loop is small and bounded
+     * (a single shop's real listing count), so it doesn't need further splitting.
+     */
+    public static void enqueueForSettlement(ServerLevel level, GhostTownHallCoreEntity core, MidnightWorkQueue queue) {
         for (PlotRecord plot : core.getPlots()) {
             if (!plot.zoneTypeId().equals(GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
                 continue;
             }
-            GuardhouseIndex.get(level.getServer()).get(plot.plotId()).ifPresent(pos -> {
+            queue.enqueue(() -> GuardhouseIndex.get(level.getServer()).get(plot.plotId()).ifPresent(pos -> {
                 ServerLevel guardhouseLevel = level.getServer().getLevel(pos.dimension());
                 if (guardhouseLevel != null && guardhouseLevel.getBlockEntity(pos.pos()) instanceof GuardhouseBlockEntity guardhouse) {
-                    buyForPlot(level, core, plot, guardhouse);
+                    enqueueBuyForPlot(level, core, plot, guardhouse, queue);
                 }
-            });
+            }));
         }
     }
 
-    private static void buyForPlot(ServerLevel level, GhostTownHallCoreEntity core, PlotRecord guardhousePlot, GuardhouseBlockEntity guardhouse) {
+    private static void enqueueBuyForPlot(ServerLevel level, GhostTownHallCoreEntity core, PlotRecord guardhousePlot,
+                                           GuardhouseBlockEntity guardhouse, MidnightWorkQueue queue) {
+        List<Container> paymentBoxes = Settlemynts.resolvePlotBoxes(level, guardhousePlot.plotId());
+        for (PlotRecord sellerPlot : core.getPlots()) {
+            if (sellerPlot.plotId().equals(guardhousePlot.plotId()) || sellerPlot.shopId().isEmpty()) {
+                continue;
+            }
+            queue.enqueue(() -> buyFromSellerPlot(level, guardhouse, paymentBoxes, sellerPlot));
+        }
+    }
+
+    private static void buyFromSellerPlot(ServerLevel level, GuardhouseBlockEntity guardhouse, List<Container> paymentBoxes, PlotRecord sellerPlot) {
         int deficit = guardhouse.preferredFoodValue() - guardhouse.totalFoodValue();
         if (deficit <= 0) {
             return;
         }
-        List<Container> paymentBoxes = Settlemynts.resolvePlotBoxes(level, guardhousePlot.plotId());
-        for (PlotRecord sellerPlot : core.getPlots()) {
+        List<Container> sellerBoxes = Settlemynts.resolvePlotBoxes(level, sellerPlot.plotId());
+        for (YconomicsShopBridge.ShopListingView listing : YconomicsShopBridge.getListings(level, sellerPlot.shopId().get())) {
             if (deficit <= 0) {
-                return;
+                break;
             }
-            if (sellerPlot.plotId().equals(guardhousePlot.plotId()) || sellerPlot.shopId().isEmpty()) {
-                continue;
-            }
-            List<Container> sellerBoxes = Settlemynts.resolvePlotBoxes(level, sellerPlot.plotId());
-            for (YconomicsShopBridge.ShopListingView listing : YconomicsShopBridge.getListings(level, sellerPlot.shopId().get())) {
-                if (deficit <= 0) {
-                    break;
-                }
-                deficit = buyOneListing(listing, deficit, sellerBoxes, paymentBoxes, guardhouse.foodContainer());
-            }
+            deficit = buyOneListing(listing, deficit, sellerBoxes, paymentBoxes, guardhouse.foodContainer());
         }
     }
 

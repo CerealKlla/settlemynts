@@ -7,6 +7,7 @@ import com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.ContainerDeposit;
 import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
+import com.github.cerealklla.settlemynts.zone.MidnightWorkQueue;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 import com.github.cerealklla.settlemynts.zone.ShopResource;
 
@@ -42,7 +43,15 @@ public final class DefenseSpendingTransfer {
     private DefenseSpendingTransfer() {
     }
 
-    public static void transferForSettlement(ServerLevel level, GhostTownHallCoreEntity core) {
+    /**
+     * Enqueues one job per Guardhouse instead of transferring to all of them synchronously in one
+     * call -- proactive defense-in-depth, 2026-10-21, alongside the rest of the midnight pipeline's
+     * chunking (see {@code zone.PlannedInventoryClearing}'s decisions.md entries for the three real
+     * incidents that motivated auditing every step of this pipeline). This method's own per-guardhouse
+     * work is small and bounded on its own (no nested per-listing loop like {@link
+     * GuardhouseFoodAutoBuy}), so no further splitting below "one job per guardhouse" is needed.
+     */
+    public static void enqueueForSettlement(ServerLevel level, GhostTownHallCoreEntity core, MidnightWorkQueue queue) {
         PlotRecord townHall = core.townHallPlot().orElse(null);
         if (townHall == null) {
             return;
@@ -55,12 +64,12 @@ public final class DefenseSpendingTransfer {
             if (!plot.zoneTypeId().equals(GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
                 continue;
             }
-            GuardhouseIndex.get(level.getServer()).get(plot.plotId()).ifPresent(pos -> {
+            queue.enqueue(() -> GuardhouseIndex.get(level.getServer()).get(plot.plotId()).ifPresent(pos -> {
                 ServerLevel guardhouseLevel = level.getServer().getLevel(pos.dimension());
                 if (guardhouseLevel != null && guardhouseLevel.getBlockEntity(pos.pos()) instanceof GuardhouseBlockEntity guardhouse) {
                     transferToGuardhouse(level, townHall, townHallBoxes, plot, guardhouse);
                 }
-            });
+            }));
         }
     }
 

@@ -53,53 +53,70 @@ public final class ShopMidnightRestockTicker {
         if (!YconomicsShopBridge.isAvailable()) {
             return;
         }
-        // Collected (not settled per-plot) so PlannedInventoryClearing.settleGroup runs exactly once
-        // per settlement -- PlotConfigSignIndex is a flat server-wide map, not grouped by core.
-        java.util.Set<GhostTownHallCoreEntity> cores = new java.util.HashSet<>();
+        // Real production incident, 2026-10-21: this whole method used to run every one of its steps
+        // fully synchronously the instant a day boundary was detected (the sign/core resolution loop
+        // below included) -- after three separate single-tick freezes were each traced to one
+        // unchunked step deeper in this same pipeline (see PlannedInventoryClearing/
+        // GuardhouseFoodAutoBuy/DefenseSpendingTransfer's own decisions.md entries), every remaining
+        // step here was audited and queued too, proactively, rather than waiting for a fourth
+        // incident to point at whichever one was still unchunked. `pipelinedCoreIds` dedupes so each
+        // settlement's heavy pipeline still runs exactly once even though several signs can resolve
+        // to the same core -- safe with no locking since queued jobs only ever run one at a time, on
+        // this same thread.
+        java.util.Set<UUID> pipelinedCoreIds = new java.util.HashSet<>();
         for (Map.Entry<UUID, GlobalPos> entry : PlotConfigSignIndex.get(server).all().entrySet()) {
             GlobalPos pos = entry.getValue();
             ServerLevel level = server.getLevel(pos.dimension());
             if (level == null) {
                 continue;
             }
-            GhostTownHallCoreEntity core = restockPlot(level, entry.getKey(), pos.pos());
-            if (core != null) {
-                cores.add(core);
-            }
-        }
-        for (GhostTownHallCoreEntity core : cores) {
-            if (core.level() instanceof ServerLevel level) {
-                // "Defense Spending" (explicit user spec, 2026-10-16) -- transfers gold from the Town
-                // Hall's own boxes into each Guardhouse's boxes BEFORE the Planned-Inventory settlement
-                // and food auto-buy below run, so gold moved this same tick is already spendable the
-                // same night, not just starting the next one. See DefenseSpendingTransfer's own doc.
-                // Queued (not called directly) so it still runs strictly before the settleGroup jobs
-                // enqueued right after it -- MidnightWorkQueue is FIFO, so queue order is run order.
-                workQueue.enqueue(() -> com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingTransfer.transferForSettlement(level, core));
-                PlannedInventoryClearing.settleGroup(level, core.getPlots(), workQueue);
-                // Explicit third step (2026-10-10 redesign): turn whatever just changed hands above
-                // into finished goods, for this same settlement only -- see that method's own doc.
-                PlannedInventoryClearing.enqueueCraftFromOwnStockForGroup(level, core.getPlots(), workQueue);
-                // "Preferred Food" (explicit user spec, 2026-10-16) -- buys any Guardhouse-typed
-                // plot's food store up toward its own threshold, same day-boundary as everything
-                // above. See GuardhouseFoodAutoBuy's own doc for the full mechanism.
-                workQueue.enqueue(() -> com.github.cerealklla.settlemynts.guardhouse.GuardhouseFoodAutoBuy.buyForSettlement(level, core));
-                // Fourth step, same day (explicit follow-up: "that way npc villages could
-                // automatically list food separated by value") -- auto-list whatever crafted-food
-                // quality variants just got produced above, for every NPC-owned (no player owner)
-                // plot nobody will necessarily ever open Manage Shop for. A player-owned plot is left
-                // alone -- its owner curates their own Shop via Manage Shop, same as every other
-                // listing. BlockPos.ZERO mirrors restockNaturalShop's own fallback right below --
-                // this only ever affects biome-gated catalog pricing for the dish's plain base price,
-                // which crafted dishes aren't gated on anyway.
-                for (PlotRecord plot : core.getPlots()) {
-                    if (plot.owner().isEmpty()) {
-                        workQueue.enqueue(() -> ShopSeeding.autoListCraftedFoodVariants(level, plot, BlockPos.ZERO));
-                    }
+            UUID plotId = entry.getKey();
+            BlockPos signPos = pos.pos();
+            workQueue.enqueue(() -> {
+                GhostTownHallCoreEntity core = restockPlot(level, plotId, signPos);
+                if (core != null && pipelinedCoreIds.add(core.getUUID())) {
+                    enqueueSettlementPipeline(level, core);
                 }
+            });
+        }
+        enqueueNaturalSettlementShops(server);
+    }
+
+    /**
+     * The per-settlement midnight pipeline (Defense Spending, inter-plot trading, own-stock
+     * crafting, Guardhouse food buying, crafted-food auto-listing) -- extracted from {@link
+     * #onServerTick} so it can be invoked from inside an already-queued job (see that method's own
+     * doc for why resolving which core a sign belongs to is now itself deferred).
+     */
+    private void enqueueSettlementPipeline(ServerLevel level, GhostTownHallCoreEntity core) {
+        // "Defense Spending" (explicit user spec, 2026-10-16) -- transfers gold from the Town
+        // Hall's own boxes into each Guardhouse's boxes BEFORE the Planned-Inventory settlement
+        // and food auto-buy below run, so gold moved this same tick is already spendable the
+        // same night, not just starting the next one. See DefenseSpendingTransfer's own doc.
+        // Enqueued (not called directly) so it still runs strictly before the settleGroup jobs
+        // enqueued right after it -- MidnightWorkQueue is FIFO, so queue order is run order.
+        com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingTransfer.enqueueForSettlement(level, core, workQueue);
+        PlannedInventoryClearing.settleGroup(level, core.getPlots(), workQueue);
+        // Explicit third step (2026-10-10 redesign): turn whatever just changed hands above
+        // into finished goods, for this same settlement only -- see that method's own doc.
+        PlannedInventoryClearing.enqueueCraftFromOwnStockForGroup(level, core.getPlots(), workQueue);
+        // "Preferred Food" (explicit user spec, 2026-10-16) -- buys any Guardhouse-typed
+        // plot's food store up toward its own threshold, same day-boundary as everything
+        // above. See GuardhouseFoodAutoBuy's own doc for the full mechanism.
+        com.github.cerealklla.settlemynts.guardhouse.GuardhouseFoodAutoBuy.enqueueForSettlement(level, core, workQueue);
+        // Fourth step, same day (explicit follow-up: "that way npc villages could
+        // automatically list food separated by value") -- auto-list whatever crafted-food
+        // quality variants just got produced above, for every NPC-owned (no player owner)
+        // plot nobody will necessarily ever open Manage Shop for. A player-owned plot is left
+        // alone -- its owner curates their own Shop via Manage Shop, same as every other
+        // listing. BlockPos.ZERO mirrors restockNaturalShop's own fallback right below --
+        // this only ever affects biome-gated catalog pricing for the dish's plain base price,
+        // which crafted dishes aren't gated on anyway.
+        for (PlotRecord plot : core.getPlots()) {
+            if (plot.owner().isEmpty()) {
+                workQueue.enqueue(() -> ShopSeeding.autoListCraftedFoodVariants(level, plot, BlockPos.ZERO));
             }
         }
-        restockNaturalSettlementShops(server);
     }
 
     /**
@@ -118,25 +135,30 @@ public final class ShopMidnightRestockTicker {
      * (an owner's own production should supply those, not a daily conjure). The gold-nugget floor is
      * still the one piece both paths share verbatim.
      */
-    private void restockNaturalSettlementShops(MinecraftServer server) {
+    private void enqueueNaturalSettlementShops(MinecraftServer server) {
         ServerLevel level = server.overworld(); // Villages are overworld-only.
         if (level == null) {
             return;
         }
+        // One job per natural settlement, not a synchronous loop over all of them -- same
+        // proactive chunking as everything else in this pipeline, see onServerTick's own doc.
         for (Map.Entry<SettlementKey, java.util.List<PlotRecord>> settlementEntry : NaturalSettlementPlotStore.get(server).all().entrySet()) {
             java.util.List<PlotRecord> plots = settlementEntry.getValue();
-            NaturalSettlementPlotOwner owner = new NaturalSettlementPlotOwner(server, settlementEntry.getKey());
-            java.util.Map<net.minecraft.resources.Identifier, PlotRecord> representativeByZone = new java.util.HashMap<>();
-            for (PlotRecord plot : plots) {
-                representativeByZone.putIfAbsent(plot.zoneTypeId(), plot);
-            }
-            for (PlotRecord representative : representativeByZone.values()) {
-                if (representative.shopId().isEmpty()) {
-                    continue;
+            SettlementKey settlementKey = settlementEntry.getKey();
+            workQueue.enqueue(() -> {
+                NaturalSettlementPlotOwner owner = new NaturalSettlementPlotOwner(server, settlementKey);
+                java.util.Map<net.minecraft.resources.Identifier, PlotRecord> representativeByZone = new java.util.HashMap<>();
+                for (PlotRecord plot : plots) {
+                    representativeByZone.putIfAbsent(plot.zoneTypeId(), plot);
                 }
-                ShopSeeding.restockNaturalShop(level, owner, representative, BlockPos.ZERO);
-            }
-            PlannedInventoryClearing.settleGroup(level, plots, workQueue);
+                for (PlotRecord representative : representativeByZone.values()) {
+                    if (representative.shopId().isEmpty()) {
+                        continue;
+                    }
+                    ShopSeeding.restockNaturalShop(level, owner, representative, BlockPos.ZERO);
+                }
+                PlannedInventoryClearing.settleGroup(level, plots, workQueue);
+            });
         }
     }
 
