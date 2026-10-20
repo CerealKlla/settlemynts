@@ -34,9 +34,19 @@ import net.minecraft.world.item.Items;
  * computed server-side the same way via {@code bridge.LyfeMerchantBridge#getPriceBonusFraction} and
  * {@code bridge.YconomicsShopBridge#effectiveBuyCost}/{@code #effectiveSellPayout} -- equal to the
  * raw price whenever Lyfe isn't loaded or this player's Merchant bonus is currently zero.
+ *
+ * <p>{@code plannedInventoryRemaining} (added 2026-10-20, real report: "this rework is allowing a
+ * player to sell something to a shop that they don't want to buy") -- how many more units of this
+ * exact resource the plot's own {@code zone.PlannedInventoryTarget} still wants (its target count
+ * minus current real box stock, floored at 0; 0 whenever no target exists at all for this resource).
+ * A player may only place this resource into {@code plotsign.ShopCartMenu}'s Sell column while this
+ * is {@code > 0} ({@code ShopCartMenu.SellSlot}), and {@code SettlemyntsMod#confirmShopCart} caps how
+ * much actually sells to a freshly-recomputed version of this same number, returning any excess --
+ * the value shown here is a snapshot (as of the last {@code OpenShopPayload}/{@code
+ * ShopStockUpdatePayload}), never the sole authority.
  */
 public record ShopListingEntry(Identifier resourceKey, boolean isTag, Optional<String> customName, int pricePerUnit, int buyPricePerUnit, int shopStock,
-                                int effectiveBuyPrice, int effectiveSellPrice) {
+                                int effectiveBuyPrice, int effectiveSellPrice, int plannedInventoryRemaining) {
 
     public static final Codec<ShopListingEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(ShopListingEntry::resourceKey),
@@ -46,7 +56,8 @@ public record ShopListingEntry(Identifier resourceKey, boolean isTag, Optional<S
             Codec.INT.fieldOf("buy_price_per_unit").forGetter(ShopListingEntry::buyPricePerUnit),
             Codec.INT.fieldOf("shop_stock").forGetter(ShopListingEntry::shopStock),
             Codec.INT.fieldOf("effective_buy_price").forGetter(ShopListingEntry::effectiveBuyPrice),
-            Codec.INT.fieldOf("effective_sell_price").forGetter(ShopListingEntry::effectiveSellPrice)
+            Codec.INT.fieldOf("effective_sell_price").forGetter(ShopListingEntry::effectiveSellPrice),
+            Codec.INT.optionalFieldOf("planned_inventory_remaining", 0).forGetter(ShopListingEntry::plannedInventoryRemaining)
     ).apply(i, ShopListingEntry::new));
 
     /**

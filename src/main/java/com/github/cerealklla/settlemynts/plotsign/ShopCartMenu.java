@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.plotsign;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import com.github.cerealklla.nuclyus.trade.CatalogSlot;
 import com.github.cerealklla.nuclyus.trade.ConjuredItems;
@@ -85,9 +86,9 @@ public class ShopCartMenu extends AbstractContainerMenu {
     // Pg / Sg" price text running directly into the Buy column's icons. BUY_X/SELL_X/PLAYER_INV_X
     // must stay in lockstep with ShopCartScreen's own identical copies of these constants (that
     // class's own doc explains why they're duplicated rather than shared).
-    private static final int BUY_X = 180;
-    private static final int SELL_X = 210;
-    private static final int PLAYER_INV_X = 250;
+    private static final int BUY_X = 230;
+    private static final int SELL_X = 260;
+    private static final int PLAYER_INV_X = 300;
 
     public static final int VISIBLE_SHOP_ROWS = 8;
     public static final int BUY_SELL_SLOTS = 8;
@@ -163,7 +164,7 @@ public class ShopCartMenu extends AbstractContainerMenu {
             addSlot(new ConjuredOnlySlot(buyContainer, i, BUY_X, TOP_Y + i * ROW_HEIGHT));
         }
         for (int i = 0; i < sellContainer.getContainerSize(); i++) {
-            addSlot(new SellSlot(sellContainer, i, SELL_X, TOP_Y + i * ROW_HEIGHT));
+            addSlot(new SellSlot(sellContainer, i, SELL_X, TOP_Y + i * ROW_HEIGHT, this::listings));
         }
         int playerInvY = TOP_Y;
         for (int row = 0; row < 3; row++) {
@@ -303,6 +304,8 @@ public class ShopCartMenu extends AbstractContainerMenu {
     /** Scrolls the Shop column's visible window up/down by one row -- see {@link #refreshCatalogWindow}. */
     public static final int SCROLL_UP_BUTTON_ID = 1;
     public static final int SCROLL_DOWN_BUTTON_ID = 2;
+    /** "Auto Sell" (2026-10-20, explicit user request) -- see {@code SettlemyntsMod#autoSellToShopCart}'s own doc. */
+    public static final int AUTO_SELL_BUTTON_ID = 3;
 
     @Override
     public boolean clickMenuButton(Player player, int id) {
@@ -312,6 +315,12 @@ public class ShopCartMenu extends AbstractContainerMenu {
         }
         if (id == SCROLL_DOWN_BUTTON_ID) {
             refreshCatalogWindow(scrollOffset() + 1);
+            return true;
+        }
+        if (id == AUTO_SELL_BUTTON_ID) {
+            if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+                com.github.cerealklla.settlemynts.SettlemyntsMod.autoSellToShopCart(serverPlayer, this);
+            }
             return true;
         }
         if (id != CONFIRM_BUTTON_ID || !(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) {
@@ -342,20 +351,42 @@ public class ShopCartMenu extends AbstractContainerMenu {
     }
 
     /**
-     * {@link RealOnlySlot}, further refusing a Coin Purse or Recallcinite Totem -- real request,
-     * 2026-10-20: "need to prevent player selling their Recallcinite totem or coin purse." Blocking
-     * it here (rather than only at confirm time) means it can never even be placed into the Sell
-     * column in the first place, via any click/drag/shift-click path -- see {@code
-     * plotsign.UnsellableItems}'s own doc.
+     * {@link RealOnlySlot}, further refusing a Coin Purse or Recallcinite Totem (real request,
+     * 2026-10-20: "need to prevent player selling their Recallcinite totem or coin purse" -- blocking
+     * it here, rather than only at confirm time, means it can never even be placed into the Sell
+     * column in the first place, via any click/drag/shift-click path, see {@code
+     * plotsign.UnsellableItems}'s own doc) and, same day, anything the plot's own Planned Inventory
+     * doesn't currently want (real report: "this rework is allowing a player to sell something to a
+     * shop that they don't want to buy") -- a resource only passes once some {@link ShopListingEntry}
+     * in {@code listingsSupplier} both {@link ShopListingEntry#matches matches} the stack and has a
+     * positive {@link ShopListingEntry#plannedInventoryRemaining}.
+     *
+     * <p>This is a membership (resource-type) gate only, not a precise running quantity cap -- it
+     * can't cheaply know how much of a resource is already sitting in other Sell slots without
+     * re-scanning the whole container on every placement attempt, and the snapshot it reads can go
+     * stale between menu-open and the moment of a click anyway. The authoritative quantity cap is
+     * enforced once, freshly, at {@code SettlemyntsMod#confirmShopCart} time instead, which returns
+     * any queued excess straight back to the player rather than selling it.
+     *
+     * <p>{@code listingsSupplier} is a live reference ({@code ShopCartMenu::listings}), not a snapshot
+     * taken at construction -- {@link #updateListings} reassigns the menu's {@code listings} field to
+     * a new list object on every stock refresh, which a captured plain {@code List} reference would
+     * miss entirely.
      */
     private static final class SellSlot extends RealOnlySlot {
-        SellSlot(Container container, int index, int x, int y) {
+        private final Supplier<List<ShopListingEntry>> listingsSupplier;
+
+        SellSlot(Container container, int index, int x, int y, Supplier<List<ShopListingEntry>> listingsSupplier) {
             super(container, index, x, y);
+            this.listingsSupplier = listingsSupplier;
         }
 
         @Override
         public boolean mayPlace(ItemStack stack) {
-            return super.mayPlace(stack) && !UnsellableItems.isUnsellable(stack);
+            if (!super.mayPlace(stack) || UnsellableItems.isUnsellable(stack)) {
+                return false;
+            }
+            return listingsSupplier.get().stream().anyMatch(l -> l.plannedInventoryRemaining() > 0 && l.matches(stack));
         }
     }
 }

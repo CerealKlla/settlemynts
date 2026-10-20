@@ -1061,7 +1061,7 @@ public class SettlemyntsMod {
         // (ShopCartMenu) via the normal player.openMenu path instead of a plain payload, so vanilla's
         // own slot click/drag/shift-click machinery does the heavy lifting -- see that class's own
         // doc for the four-lane Shop/Buy/Sell/Player design.
-        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, manageBoxesFor(serverLevel, plot));
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, manageBoxesFor(serverLevel, plot), plot);
         player.openMenu(new com.github.cerealklla.settlemynts.plotsign.ShopCartMenuProvider(
                 anchor, plot.plotId(), listings, shopGoldNuggets, playerGoldNuggets));
     }
@@ -1080,11 +1080,16 @@ public class SettlemyntsMod {
      * quality of the item combined -- a *plain* (non-variant) listing still naturally sums across
      * every quality, since {@code ShopResource#matches} only checks the custom name when the
      * listing's own resource carries one.
+     *
+     * <p>{@code plot} (added 2026-10-20) supplies {@link com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget}
+     * lookups for each row's {@code plannedInventoryRemaining} -- see {@code ShopListingEntry}'s own
+     * doc for why this is the gate on what a player may sell back through {@code plotsign.ShopCartMenu}.
      */
     private static java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> buildBuyListings(
             ServerPlayer player,
             java.util.List<com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView> views,
-            java.util.List<net.minecraft.world.Container> boxes) {
+            java.util.List<net.minecraft.world.Container> boxes,
+            PlotRecord plot) {
         java.util.Map<com.github.cerealklla.settlemynts.zone.ShopResource, com.github.cerealklla.settlemynts.api.Settlemynts.VariantStock> stockByVariant =
                 com.github.cerealklla.settlemynts.api.Settlemynts.scanItemStockByVariant(boxes);
         double merchantBonusFraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()
@@ -1100,13 +1105,44 @@ public class SettlemyntsMod {
                             .sum();
                     int effectiveBuyPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveBuyCost(l.pricePerUnit(), merchantBonusFraction);
                     int effectiveSellPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveSellPayout(l.pricePerUnit(), merchantBonusFraction);
+                    // Planned Inventory gate (2026-10-20) -- matched by base resource identity only
+                    // (ignoring quality/customName, same coarser identity PlannedInventoryTarget itself
+                    // uses), and against the item's TOTAL stock across every quality, not just this
+                    // listing's own variant-scoped shopStock above.
+                    int plannedInventoryRemaining = findPlannedInventoryTarget(plot, key, isTag)
+                            .map(target -> {
+                                com.github.cerealklla.settlemynts.zone.ShopResource baseResource = isTag
+                                        ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, key))
+                                        : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(key);
+                                int baseStock = com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, baseResource);
+                                return Math.max(0, target.targetCount() - baseStock);
+                            })
+                            .orElse(0);
                     return new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(
-                            key, isTag, l.resource().customName(), l.pricePerUnit(), l.buyPricePerUnit(), shopStock, effectiveBuyPrice, effectiveSellPrice);
+                            key, isTag, l.resource().customName(), l.pricePerUnit(), l.buyPricePerUnit(), shopStock, effectiveBuyPrice, effectiveSellPrice,
+                            plannedInventoryRemaining);
                 })
                 .sorted(java.util.Comparator
                         .comparing((com.github.cerealklla.settlemynts.plotsign.ShopListingEntry e) -> e.shopStock() <= 0)
                         .thenComparing(com.github.cerealklla.settlemynts.plotsign.ShopListingEntry::label))
                 .toList();
+    }
+
+    /** The plot's own {@link com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget} for {@code resourceKey}/{@code isTag}, matched by base resource identity only (no quality/customName concept exists on a target). */
+    private static java.util.Optional<com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget> findPlannedInventoryTarget(
+            PlotRecord plot, net.minecraft.resources.Identifier resourceKey, boolean isTag) {
+        return plot.plannedInventory().stream()
+                .filter(t -> t.isTag() == isTag && t.resourceKey().equals(resourceKey))
+                .findFirst();
+    }
+
+    /** The {@code zone.ShopResource} a {@code ShopListingEntry} represents -- factored out 2026-10-20 since {@link #confirmShopCart}/{@code #autoSellToShopCart} both need it. */
+    private static com.github.cerealklla.settlemynts.zone.ShopResource resourceFor(com.github.cerealklla.settlemynts.plotsign.ShopListingEntry listing) {
+        return listing.isTag()
+                ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, listing.resourceKey()))
+                : listing.customName().isPresent()
+                    ? com.github.cerealklla.settlemynts.zone.ShopResource.ofExactItem(listing.resourceKey(), listing.customName().get())
+                    : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(listing.resourceKey());
     }
 
     /**
@@ -1116,11 +1152,15 @@ public class SettlemyntsMod {
      * same fix shape as {@link #sendShopGoldUpdate}.
      */
     private static void sendShopStockUpdate(ServerPlayer player, ServerLevel level, UUID plotId, UUID shopId) {
+        java.util.Optional<PlotRecord> plot = com.github.cerealklla.settlemynts.api.Settlemynts.findPlotRecord(level, plotId);
+        if (plot.isEmpty()) {
+            return;
+        }
         java.util.List<com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView> views =
                 com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(level, shopId);
         java.util.List<net.minecraft.world.Container> boxes =
                 com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(level, plotId);
-        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, boxes);
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, boxes, plot.get());
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.ShopStockUpdatePayload(listings));
     }
 
@@ -1522,14 +1562,17 @@ public class SettlemyntsMod {
         }
         java.util.List<net.minecraft.world.Container> boxes =
                 com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, resolved.get().plot().plotId());
+        // Freshly re-resolved (2026-10-20), not resolved.get().plot() -- plannedInventory() can have
+        // changed (another player's Manage Shop edit, or simply drifted stock) since this menu was
+        // opened, and the cap below must be authoritative, not a stale snapshot. See ShopListingEntry's
+        // own doc for why this restriction exists at all.
+        java.util.Optional<PlotRecord> freshPlot =
+                com.github.cerealklla.settlemynts.api.Settlemynts.findPlotRecord(serverLevel, resolved.get().plot().plotId());
 
         boolean anythingProcessed = false;
+        boolean anythingReturnedUnwanted = false;
         for (com.github.cerealklla.settlemynts.plotsign.ShopListingEntry listing : menu.listings()) {
-            com.github.cerealklla.settlemynts.zone.ShopResource resource = listing.isTag()
-                    ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, listing.resourceKey()))
-                    : listing.customName().isPresent()
-                        ? com.github.cerealklla.settlemynts.zone.ShopResource.ofExactItem(listing.resourceKey(), listing.customName().get())
-                        : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(listing.resourceKey());
+            com.github.cerealklla.settlemynts.zone.ShopResource resource = resourceFor(listing);
 
             java.util.List<net.minecraft.world.item.ItemStack> queuedBuy =
                     com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(java.util.List.of(menu.buyContainer()), resource, Integer.MAX_VALUE);
@@ -1541,26 +1584,126 @@ public class SettlemyntsMod {
 
             java.util.List<net.minecraft.world.item.ItemStack> queuedSell =
                     com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(java.util.List.of(menu.sellContainer()), resource, Integer.MAX_VALUE);
-            if (!queuedSell.isEmpty()) {
-                anythingProcessed = true;
-                int sold = processSellLine(player, serverLevel, resolved.get(), shopId.get(), resource, queuedSell);
-                if (sold <= 0) {
-                    // Nothing sold (shop couldn't afford it) -- the drain above already pulled these
-                    // real stacks out of the Sell container; give them straight back rather than
-                    // losing them.
-                    for (net.minecraft.world.item.ItemStack stack : queuedSell) {
-                        if (!player.getInventory().add(stack)) {
-                            player.getInventory().placeItemBackInInventory(stack);
-                        }
+            if (queuedSell.isEmpty()) {
+                continue;
+            }
+            anythingProcessed = true;
+            // Real report, 2026-10-20: "this rework is allowing a player to sell something to a shop
+            // that they don't want to buy" / "the UI will permit the player to over-stock the planned
+            // inventory for that particular item" -- ShopCartMenu.SellSlot already keeps a wholly
+            // un-wanted resource out of the Sell column in the first place, but can't cheaply enforce
+            // an exact running total across several slots/clicks, so the authoritative cap is enforced
+            // here instead: never sell more than the plot's own PlannedInventoryTarget still wants,
+            // recomputed fresh against live stock right now.
+            int cap = freshPlot.flatMap(p -> findPlannedInventoryTarget(p, listing.resourceKey(), listing.isTag()))
+                    .map(target -> Math.max(0, target.targetCount() - com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, resource)))
+                    .orElse(0);
+            int queuedCount = queuedSell.stream().mapToInt(net.minecraft.world.item.ItemStack::getCount).sum();
+            java.util.List<net.minecraft.world.item.ItemStack> toSell = new java.util.ArrayList<>();
+            java.util.List<net.minecraft.world.item.ItemStack> toReturn = new java.util.ArrayList<>();
+            int remainingCap = cap;
+            for (net.minecraft.world.item.ItemStack stack : queuedSell) {
+                if (remainingCap <= 0) {
+                    toReturn.add(stack);
+                    continue;
+                }
+                if (stack.getCount() <= remainingCap) {
+                    toSell.add(stack);
+                    remainingCap -= stack.getCount();
+                } else {
+                    toSell.add(stack.copyWithCount(remainingCap));
+                    toReturn.add(stack.copyWithCount(stack.getCount() - remainingCap));
+                    remainingCap = 0;
+                }
+            }
+            if (toReturn.stream().mapToInt(net.minecraft.world.item.ItemStack::getCount).sum() > 0) {
+                anythingReturnedUnwanted = true;
+                for (net.minecraft.world.item.ItemStack stack : toReturn) {
+                    if (!player.getInventory().add(stack)) {
+                        player.getInventory().placeItemBackInInventory(stack);
                     }
                 }
             }
+            if (toSell.isEmpty()) {
+                continue;
+            }
+            int sold = processSellLine(player, serverLevel, resolved.get(), shopId.get(), resource, toSell);
+            if (sold <= 0) {
+                // Nothing sold (shop couldn't afford it) -- the drain above already pulled these real
+                // stacks out of the Sell container; give them straight back rather than losing them.
+                for (net.minecraft.world.item.ItemStack stack : toSell) {
+                    if (!player.getInventory().add(stack)) {
+                        player.getInventory().placeItemBackInInventory(stack);
+                    }
+                }
+            }
+        }
+        if (anythingReturnedUnwanted) {
+            player.sendSystemMessage(Component.literal("The shop didn't need that much -- returned what it didn't want."));
         }
         if (!anythingProcessed) {
             player.sendSystemMessage(Component.literal("Nothing queued to buy or sell."));
             return;
         }
         finishBuyBatch(player, serverLevel, resolved.get().plot().plotId(), shopId.get());
+    }
+
+    /**
+     * "Auto Sell" on the cart screen (2026-10-20, explicit user request) -- queues everything the
+     * player is carrying that the shop's Planned Inventory currently wants into the Sell column, for
+     * the player to then Confirm Purchase. Scans the player's real main inventory/hotbar only (vanilla's
+     * own {@code Inventory} backs {@code Container#getItem}/{@code #removeItem} with exactly those 36
+     * slots -- armor/offhand live in a separate {@code EntityEquipment}, confirmed against the
+     * decompiled source, so this can never sweep up worn gear). Caps per resource at the same live
+     * {@code targetCount - currentStock} formula {@link #confirmShopCart} itself enforces, minus
+     * whatever's already sitting in the Sell column from an earlier click, so repeated clicks are safe.
+     */
+    public static void autoSellToShopCart(ServerPlayer player, com.github.cerealklla.settlemynts.plotsign.ShopCartMenu menu) {
+        if (!(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, menu.anchor());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        java.util.Optional<PlotRecord> freshPlot =
+                com.github.cerealklla.settlemynts.api.Settlemynts.findPlotRecord(serverLevel, resolved.get().plot().plotId());
+        if (freshPlot.isEmpty()) {
+            return;
+        }
+        java.util.List<net.minecraft.world.Container> boxes =
+                com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, resolved.get().plot().plotId());
+
+        boolean queuedAnything = false;
+        for (com.github.cerealklla.settlemynts.plotsign.ShopListingEntry listing : menu.listings()) {
+            if (listing.plannedInventoryRemaining() <= 0) {
+                continue;
+            }
+            com.github.cerealklla.settlemynts.zone.ShopResource resource = resourceFor(listing);
+            int remaining = findPlannedInventoryTarget(freshPlot.get(), listing.resourceKey(), listing.isTag())
+                    .map(target -> Math.max(0, target.targetCount() - com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, resource)))
+                    .orElse(0);
+            remaining -= com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(java.util.List.of(menu.sellContainer()), resource);
+            if (remaining <= 0) {
+                continue;
+            }
+            java.util.List<net.minecraft.world.item.ItemStack> drained =
+                    com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(java.util.List.of(player.getInventory()), resource, remaining);
+            for (net.minecraft.world.item.ItemStack stack : drained) {
+                com.github.cerealklla.settlemynts.zone.ContainerDeposit.depositIntoAny(java.util.List.of(menu.sellContainer()), stack);
+                if (!stack.isEmpty()) {
+                    // The Sell column's limited slots ran out of room -- give back whatever didn't fit.
+                    if (!player.getInventory().add(stack)) {
+                        player.getInventory().placeItemBackInInventory(stack);
+                    }
+                }
+            }
+            queuedAnything = queuedAnything || !drained.isEmpty();
+        }
+        player.sendSystemMessage(Component.literal(queuedAnything
+                ? "Auto Sell: queued everything the shop currently wants that you're carrying."
+                : "Nothing to auto-sell -- the shop doesn't want more of anything you're carrying right now."));
     }
 
     /**

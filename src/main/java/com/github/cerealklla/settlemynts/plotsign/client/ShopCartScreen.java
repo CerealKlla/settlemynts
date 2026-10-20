@@ -38,9 +38,9 @@ public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
     // Widened 2026-10-20 -- real report, with a screenshot showing the Shop column's "N in stock
     // Pg / Sg" price text running directly into the Buy column's icons. Must stay in lockstep with
     // ShopCartMenu's own identical copies of these constants.
-    private static final int BUY_X = 180;
-    private static final int SELL_X = 210;
-    private static final int PLAYER_INV_X = 250;
+    private static final int BUY_X = 230;
+    private static final int SELL_X = 260;
+    private static final int PLAYER_INV_X = 300;
     private static final int SCROLLBAR_X = BUY_X - 16;
 
     public ShopCartScreen(ShopCartMenu menu, Inventory inventory, Component title) {
@@ -56,6 +56,11 @@ public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
         addRenderableWidget(Button.builder(Component.literal("Confirm Purchase"),
                         b -> minecraft.gameMode.handleInventoryButtonClick(menu.containerId, ShopCartMenu.CONFIRM_BUTTON_ID))
                 .bounds(this.leftPos + SHOP_X, confirmY, 150, 20).build());
+        // "Auto Sell" (2026-10-20, explicit user request) -- queues everything the player is carrying
+        // that the shop's Planned Inventory currently wants straight into the Sell column.
+        addRenderableWidget(Button.builder(Component.literal("Auto Sell"),
+                        b -> minecraft.gameMode.handleInventoryButtonClick(menu.containerId, ShopCartMenu.AUTO_SELL_BUTTON_ID))
+                .bounds(this.leftPos + SHOP_X + 160, confirmY, 100, 20).build());
         addRenderableWidget(Button.builder(Component.literal("^"),
                         b -> minecraft.gameMode.handleInventoryButtonClick(menu.containerId, ShopCartMenu.SCROLL_UP_BUTTON_ID))
                 .bounds(this.leftPos + SCROLLBAR_X, this.topPos + TOP_Y, 12, 12).build());
@@ -91,7 +96,11 @@ public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
             // Real request, 2026-10-20: "need to show the real inventory count available here" -- the
             // catalog slot's own icon always shows a full conjured max-size stack (it has to, for the
             // "infinite stack" pick-up UX), so the real current stock is drawn here instead.
-            String priceLine = listing.shopStock() + " in stock   " + listing.pricePerUnit() + "g / " + listing.buyPricePerUnit() + "g";
+            // "wants N" (2026-10-20) -- only a resource with a positive planned-inventory deficit can
+            // actually be placed into the Sell column at all (see ShopCartMenu.SellSlot's own doc), so
+            // this doubles as the player's only in-UI signal for which rows that's currently true of.
+            String priceLine = listing.shopStock() + " in stock   " + listing.pricePerUnit() + "g / " + listing.buyPricePerUnit() + "g"
+                    + (listing.plannedInventoryRemaining() > 0 ? "   wants " + listing.plannedInventoryRemaining() : "");
             graphics.text(font, priceLine, left + SHOP_X + 20, rowTextY, 0xFFFFFFFF);
         }
         if (listings.size() > ShopCartMenu.VISIBLE_SHOP_ROWS) {

@@ -498,3 +498,28 @@ once, no interception needed) and again as a defense-in-depth filter in the olde
 inventory-scanning `sellToShop` payload path, which doesn't go through the cart menu at all.
 `./gradlew build` green, whole-suite (12 mods) rebuild + `runServer` boot-smoke-test clean. **Not
 yet live-tested.**
+
+**Shop Cart Sell column restricted to Planned Inventory, "Auto Sell" button added, same day**
+(see [context/decisions.md](context/decisions.md)) -- real report: "this rework is allowing a player
+to sell something to a shop that they don't want to buy," plus "the UI will permit the player to
+over-stock the planned inventory for that particular item" and a request for an "Auto Sell" button.
+`ShopListingEntry` gained `plannedInventoryRemaining` (that resource's `PlannedInventoryTarget`
+target count minus its current real box stock, floored at 0; 0 if no target exists at all),
+computed in `buildBuyListings` and refreshed by the existing `ShopStockUpdatePayload` round trip.
+`ShopCartMenu.SellSlot` now refuses any resource with `plannedInventoryRemaining <= 0` in addition
+to its existing Coin-Purse/Totem/conjured-item checks -- a membership gate only, not a precise
+running cap (it can't cheaply track an exact total across several slots/clicks without rescanning
+the whole container per placement, and a stale snapshot wouldn't be authoritative anyway).
+`SettlemyntsMod#confirmShopCart` enforces the actual quantity cap, recomputed fresh against live
+`PlannedInventoryTarget`/box stock at confirm time, splitting each queued Sell stack into
+"sell" (up to the live cap) and "return" (straight back to the player) portions -- this is what
+actually prevents over-stocking, not the slot-level gate, which is UX-only. New "Auto Sell" button
+(`ShopCartMenu.AUTO_SELL_BUTTON_ID`, new `SettlemyntsMod#autoSellToShopCart`) scans the player's real
+main inventory/hotbar only (vanilla's `Inventory` backs `Container#getItem` with exactly those 36
+slots -- armor/offhand live in a separate `EntityEquipment`, confirmed against the decompiled
+source, so it can never sweep up worn gear) and queues everything currently wanted, reusing
+`zone.ContainerWithdraw`/`zone.ContainerDeposit` rather than hand-rolled slot scanning. The Shop
+column's price line also grew a "wants N" suffix so a player can see which rows are currently
+sellable at all without guessing. `BUY_X`/`SELL_X`/`PLAYER_INV_X` widened again (230/260/300) to fit
+the longer price line. `./gradlew build` green, whole-suite (13 mods) rebuild + `runServer`
+boot-smoke-test clean. **Not yet live-tested.**
