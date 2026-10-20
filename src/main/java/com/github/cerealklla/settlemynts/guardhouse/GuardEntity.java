@@ -19,6 +19,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EntityType;
@@ -362,6 +363,22 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         }
         int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
         if (surfaceY - getY() > UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS) {
+            getNavigation().stop();
+            teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
+            return;
+        }
+        // Real report, 2026-10-19: guards still getting stuck in trees despite the 2026-10-17
+        // PathType.LEAVES malus fix. That malus only stops the pathfinder from CHOOSING to route
+        // through a tree's dense interior -- it does nothing to stop one from walking UP ONTO the
+        // canopy's own top surface, which reads as perfectly ordinary walkable ground (a leaf block
+        // is solid-for-standing-on, same as any other block), stranding the guard with no way back
+        // down. The underground check above can't catch this -- it only ever fires when BELOW the
+        // real surface, never above it. Checked directly against the actual block underfoot rather
+        // than inferring from height alone, since a legitimate multi-story building's upper floor is
+        // also "above the no-leaves surface reading" (that heightmap reports the roof, not each
+        // floor) but is never standing on leaves.
+        net.minecraft.core.BlockPos feetPos = new net.minecraft.core.BlockPos(blockX, Mth.floor(getY()), blockZ);
+        if (level.getBlockState(feetPos).is(BlockTags.LEAVES) || level.getBlockState(feetPos.below()).is(BlockTags.LEAVES)) {
             getNavigation().stop();
             teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
         }
