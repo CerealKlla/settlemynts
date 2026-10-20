@@ -16,11 +16,13 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.TagKey;
+import net.minecraft.util.Mth;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.DataSlot;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.Item;
@@ -55,12 +57,25 @@ import net.minecraft.world.item.Items;
  * <p>Deliberately does not include a crafting grid or armor slots -- the described flow never needs
  * either (shift-click only ever moves things between the player's main inventory and Sell), and
  * vanilla's own crafting-grid mechanics are a separate subsystem with no real use case here.
+ *
+ * <p><b>Scrolling + fixed scratch capacity, 2026-10-20</b> -- real report against the first cut of
+ * this screen: "need to fix the scaling, and definitely need the ability to scroll through shop
+ * items." The original version gave every listing its own row across all three lanes, so a shop
+ * with more than a handful of listings grew the window past the screen's own height with no way to
+ * reach the rest. The Shop (catalog) lane now only ever holds {@link #VISIBLE_SHOP_ROWS} real {@code
+ * Slot}s at fixed positions; scrolling repopulates which {@link #listings} entries those slots
+ * currently show (via {@link #refreshCatalogWindow}) rather than moving anything, since this
+ * version's {@code Slot#x}/{@code Slot#y} are {@code final}. The current {@link #scrollOffset} is
+ * kept in a synced {@link DataSlot} so a client-reconstructed menu always agrees with the server
+ * about which window is showing, since that's also what a click on a catalog slot actually resolves
+ * against server-side. Buy/Sell are no longer sized to match the listing count at all -- they're
+ * free-form scratch space (never bound to a specific listing/row), so they're just a fixed {@link
+ * #BUY_SELL_SLOTS}-slot column, same as a small chest.
  */
 public class ShopCartMenu extends AbstractContainerMenu {
 
     private static final int HOTBAR_SIZE = 9;
     private static final int MAIN_INVENTORY_SIZE = 27;
-    private static final int PLAYER_INVENTORY_START = 0; // Reassigned below once lane slot counts are known.
 
     private static final int COLUMN_WIDTH = 18;
     private static final int ROW_HEIGHT = 18;
@@ -70,12 +85,16 @@ public class ShopCartMenu extends AbstractContainerMenu {
     private static final int SELL_X = 98;
     private static final int PLAYER_INV_X = 8;
 
+    public static final int VISIBLE_SHOP_ROWS = 8;
+    public static final int BUY_SELL_SLOTS = 8;
+
     private final ShopAnchor anchor;
     private final UUID plotId;
-    private final List<ShopListingEntry> listings;
+    private List<ShopListingEntry> listings;
     private final Container catalogContainer;
     private final Container buyContainer;
     private final Container sellContainer;
+    private final DataSlot scrollOffsetSlot;
     private int shopGoldNuggets;
     private int playerGoldNuggets;
 
@@ -88,14 +107,12 @@ public class ShopCartMenu extends AbstractContainerMenu {
         this.listings = listings;
         this.shopGoldNuggets = shopGoldNuggets;
         this.playerGoldNuggets = playerGoldNuggets;
-        this.catalogContainer = new SimpleContainer(Math.max(1, listings.size()));
-        for (int i = 0; i < listings.size(); i++) {
-            catalogContainer.setItem(i, ConjuredItems.conjure(representativeStack(listings.get(i))));
-        }
-        int stagingSize = Math.max(9, listings.size());
-        this.buyContainer = new SimpleContainer(stagingSize);
-        this.sellContainer = new SimpleContainer(stagingSize);
+        this.catalogContainer = new SimpleContainer(VISIBLE_SHOP_ROWS);
+        this.buyContainer = new SimpleContainer(BUY_SELL_SLOTS);
+        this.sellContainer = new SimpleContainer(BUY_SELL_SLOTS);
         layoutSlots(inventory);
+        this.scrollOffsetSlot = this.addDataSlot(DataSlot.standalone());
+        refreshCatalogWindow(0);
     }
 
     /** Client-side reconstruction -- see {@code registration.ModMenus#SHOP_CART}. */
@@ -142,7 +159,7 @@ public class ShopCartMenu extends AbstractContainerMenu {
             addSlot(new ConjuredOnlySlot(buyContainer, i, BUY_X, TOP_Y + i * ROW_HEIGHT));
         }
         for (int i = 0; i < sellContainer.getContainerSize(); i++) {
-            addSlot(new RealOnlySlot(sellContainer, i, SELL_X, TOP_Y + i * ROW_HEIGHT));
+            addSlot(new SellSlot(sellContainer, i, SELL_X, TOP_Y + i * ROW_HEIGHT));
         }
         int playerInvY = TOP_Y;
         for (int row = 0; row < 3; row++) {
@@ -153,6 +170,39 @@ public class ShopCartMenu extends AbstractContainerMenu {
         for (int col = 0; col < HOTBAR_SIZE; col++) {
             addSlot(new RealOnlySlot(inventory, col, PLAYER_INV_X + 130 + col * COLUMN_WIDTH, playerInvY + 3 * ROW_HEIGHT + 4));
         }
+    }
+
+    /**
+     * How many listing rows the Shop column scrolls past before the currently-visible window starts.
+     * Clamped to {@code [0, max(0, listings.size() - VISIBLE_SHOP_ROWS)]}; repopulates the (fixed-size,
+     * fixed-position) catalog slots' conjured stacks to match -- see the class doc for why this is a
+     * re-population rather than a slot reposition.
+     */
+    private void refreshCatalogWindow(int requestedOffset) {
+        int maxOffset = Math.max(0, listings.size() - VISIBLE_SHOP_ROWS);
+        int offset = Mth.clamp(requestedOffset, 0, maxOffset);
+        for (int i = 0; i < catalogContainer.getContainerSize(); i++) {
+            int listingIndex = offset + i;
+            catalogContainer.setItem(i, listingIndex < listings.size()
+                    ? ConjuredItems.conjure(representativeStack(listings.get(listingIndex)))
+                    : ItemStack.EMPTY);
+        }
+        scrollOffsetSlot.set(offset);
+    }
+
+    public int scrollOffset() {
+        return scrollOffsetSlot.get();
+    }
+
+    /**
+     * Re-resolves fresh listing data (price/stock) in place -- called from {@code
+     * SettlemyntsModClient} when a {@code ShopStockUpdatePayload} arrives for an already-open cart,
+     * same "patch state in place" shape as {@link #updateGold}. Keeps the current scroll position
+     * (clamped, in case the listing count itself changed) rather than resetting to the top.
+     */
+    public void updateListings(List<ShopListingEntry> listings) {
+        this.listings = listings;
+        refreshCatalogWindow(scrollOffset());
     }
 
     public ShopAnchor anchor() {
@@ -246,9 +296,20 @@ public class ShopCartMenu extends AbstractContainerMenu {
     }
 
     public static final int CONFIRM_BUTTON_ID = 0;
+    /** Scrolls the Shop column's visible window up/down by one row -- see {@link #refreshCatalogWindow}. */
+    public static final int SCROLL_UP_BUTTON_ID = 1;
+    public static final int SCROLL_DOWN_BUTTON_ID = 2;
 
     @Override
     public boolean clickMenuButton(Player player, int id) {
+        if (id == SCROLL_UP_BUTTON_ID) {
+            refreshCatalogWindow(scrollOffset() - 1);
+            return true;
+        }
+        if (id == SCROLL_DOWN_BUTTON_ID) {
+            refreshCatalogWindow(scrollOffset() + 1);
+            return true;
+        }
         if (id != CONFIRM_BUTTON_ID || !(player instanceof net.minecraft.server.level.ServerPlayer serverPlayer)) {
             return false;
         }
@@ -274,5 +335,23 @@ public class ShopCartMenu extends AbstractContainerMenu {
         TradeMenuSupport.returnRealContents(sellContainer, player);
         // buyContainer is intentionally NOT returned -- every stack in it is conjured (never a real
         // possession), safe to just let go out of scope.
+    }
+
+    /**
+     * {@link RealOnlySlot}, further refusing a Coin Purse or Recallcinite Totem -- real request,
+     * 2026-10-20: "need to prevent player selling their Recallcinite totem or coin purse." Blocking
+     * it here (rather than only at confirm time) means it can never even be placed into the Sell
+     * column in the first place, via any click/drag/shift-click path -- see {@code
+     * plotsign.UnsellableItems}'s own doc.
+     */
+    private static final class SellSlot extends RealOnlySlot {
+        SellSlot(Container container, int index, int x, int y) {
+            super(container, index, x, y);
+        }
+
+        @Override
+        public boolean mayPlace(ItemStack stack) {
+            return super.mayPlace(stack) && !UnsellableItems.isUnsellable(stack);
+        }
     }
 }

@@ -469,3 +469,32 @@ guards from independently piling onto the same stale stake, released on arrival,
 or guard death en route (new release call in `GuardEntity#die`, since `Goal#stop()` can't be relied
 on for a dead entity). `./gradlew build`/`test` green, whole-suite (12 mods) rebuild + `runServer`
 boot-smoke-test clean. **Not yet live-tested.**
+
+**`ShopCartMenu` scrolling, real stock display, unsellable-item guard -- three real live-test
+reports against the new cart screen, 2026-10-20** (see [context/decisions.md](context/decisions.md))
+-- "Need to fix the scaling, and definitely need the ability to scroll through shop items" (the
+Shop column used to give every listing its own row with no cap, so the window grew taller than the
+actual game window for a shop with more than a handful of listings); "Also need to show the real
+inventory count available here" (the catalog icon's count was always a generic max-size stack, never
+the shop's real current stock); "Need to prevent player selling their Recallcinite totem or coin
+purse." Fixed, in order: the Shop column is now a fixed `VISIBLE_SHOP_ROWS=8`-slot window that
+*repopulates* which listings it shows on scroll rather than repositioning slots (this version's
+`Slot#x`/`Slot#y` are `final`, confirmed against the real decompiled source before writing any of
+this -- see `ShopCartMenu`'s own class doc), driven by `SCROLL_UP_BUTTON_ID`/`SCROLL_DOWN_BUTTON_ID`
+(mouse wheel over the column, or new "^"/"v" buttons) the same `clickMenuButton` mechanism "Confirm
+Purchase" already used, with the authoritative window position kept in a synced `DataSlot` so a
+client-reconstructed menu always agrees with the server about what a catalog click actually resolves
+to. Buy/Sell are no longer sized to match the listing count either (that was the other half of the
+"scaling" bug) -- they're now a fixed 8-slot scratch grid, since they were never really bound
+per-listing-row to begin with (a shift-click just lands in the first open slot regardless of which
+Shop row it came from). `ShopListingEntry#shopStock` (already computed server-side, previously only
+wired into the old deleted `ShopScreen`) is now drawn next to each visible row's price, and the
+previously-discarded `ShopStockUpdatePayload` consumer now calls a new `ShopCartMenu#updateListings`
+to patch it in place after a Buy/Sell. New `plotsign.UnsellableItems#isUnsellable` (Coin Purse via
+the existing `YconomicsShopBridge#isCoinPurse`, Recallcinite Totem via a new
+`LyfeMerchantBridge#isRecallciniteTotem`) is enforced at the slot level (`ShopCartMenu.SellSlot`, a
+`RealOnlySlot` that also rejects an unsellable stack -- blocks every click/drag/shift-click path at
+once, no interception needed) and again as a defense-in-depth filter in the older
+inventory-scanning `sellToShop` payload path, which doesn't go through the cart menu at all.
+`./gradlew build` green, whole-suite (12 mods) rebuild + `runServer` boot-smoke-test clean. **Not
+yet live-tested.**

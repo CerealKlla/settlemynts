@@ -2,8 +2,10 @@ package com.github.cerealklla.settlemynts.bridge;
 
 import com.github.cerealklla.lyfe.api.Lyfe;
 import com.github.cerealklla.lyfe.merchant.MerchantListener;
+import com.github.cerealklla.lyfe.registration.ModItems;
 
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.fml.ModList;
 
 /**
@@ -48,5 +50,16 @@ public final class LyfeMerchantBridge {
      */
     public static double getPriceBonusFraction(ServerPlayer player) {
         return Lyfe.getMerchantPriceBonusFraction(player);
+    }
+
+    /**
+     * Is {@code stack} a Recallcinite Totem -- real request, 2026-10-20: "need to prevent player
+     * selling their Recallcinite totem." A bound totem is the player's only way back to a chosen
+     * recall point, so losing it to a shop sale (then having the shop re-sell it to someone else, or
+     * just destock it) would be a real, hard-to-recover loss -- see {@code
+     * plotsign.UnsellableItems}, this check's only caller.
+     */
+    public static boolean isRecallciniteTotem(ItemStack stack) {
+        return stack.is(ModItems.RECALLCINITE_TOTEM.get());
     }
 }

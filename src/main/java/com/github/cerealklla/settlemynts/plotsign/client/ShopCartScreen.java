@@ -15,14 +15,19 @@ import net.minecraft.world.entity.player.Inventory;
  * shipped hours earlier the same day -- see {@link ShopCartMenu}'s own doc for the actual four-lane
  * container design this just renders. A real {@link AbstractContainerScreen}, so vanilla's own
  * generic slot rendering/click/drag/tooltip handling does almost everything; this class only draws
- * the flat background panel, column headers, per-row price/label text next to the Shop column, the
- * two gold totals, and the "Confirm Purchase" button.
+ * the flat background panel, column headers, per-row price/stock text next to the Shop column, the
+ * two gold totals, the "Confirm Purchase" button, and (2026-10-20) the Shop column's scroll controls.
  *
- * <p><b>Known limitation, not yet addressed</b>: no scrolling -- every listing gets its own row in
- * the Shop/Buy/Sell columns with no cap, so a shop with many listings will render rows past the
- * bottom of the window. The old {@code ShopScreen} had real scroll support; this one doesn't yet,
- * flagged for a follow-up rather than silently truncating (which would hide real stock from
- * purchase) or guessed at blind.
+ * <p><b>Fixed window height + real scrolling, 2026-10-20</b> -- real report against the first cut:
+ * "need to fix the scaling, and definitely need the ability to scroll through shop items." The
+ * screen's height no longer grows with the shop's listing count at all (that was the "scaling" bug --
+ * a shop with 20+ listings rendered a window taller than the actual game window). The Shop column
+ * now only ever shows {@link ShopCartMenu#VISIBLE_SHOP_ROWS} rows at a time; the mouse wheel (over
+ * the Shop column) and the "^"/"v" buttons both scroll by sending {@link
+ * ShopCartMenu#SCROLL_UP_BUTTON_ID}/{@link ShopCartMenu#SCROLL_DOWN_BUTTON_ID} the same way "Confirm
+ * Purchase" already sends {@link ShopCartMenu#CONFIRM_BUTTON_ID} -- the server is the one authority
+ * on which window is showing (see {@link ShopCartMenu}'s own doc for why), so this screen only ever
+ * reads the current window back via {@link ShopCartMenu#scrollOffset()}, never computes it locally.
  */
 public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
 
@@ -33,10 +38,11 @@ public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
     private static final int BUY_X = 62;
     private static final int SELL_X = 98;
     private static final int PLAYER_INV_X = 138;
+    private static final int SCROLLBAR_X = SHOP_X + 46;
 
     public ShopCartScreen(ShopCartMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title, PLAYER_INV_X + 9 * 18 + 10,
-                TOP_Y + Math.max(4 * ROW_HEIGHT + 24, Math.max(1, menu.listings().size()) * ROW_HEIGHT) + 56);
+                TOP_Y + ShopCartMenu.VISIBLE_SHOP_ROWS * ROW_HEIGHT + 56);
         this.inventoryLabelY = -1000; // Suppress vanilla's auto "Inventory" label -- see class doc, player inv has no separate panel here.
     }
 
@@ -47,6 +53,12 @@ public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
         addRenderableWidget(Button.builder(Component.literal("Confirm Purchase"),
                         b -> minecraft.gameMode.handleInventoryButtonClick(menu.containerId, ShopCartMenu.CONFIRM_BUTTON_ID))
                 .bounds(this.leftPos + SHOP_X, confirmY, 150, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("^"),
+                        b -> minecraft.gameMode.handleInventoryButtonClick(menu.containerId, ShopCartMenu.SCROLL_UP_BUTTON_ID))
+                .bounds(this.leftPos + SCROLLBAR_X, this.topPos + TOP_Y, 12, 12).build());
+        addRenderableWidget(Button.builder(Component.literal("v"),
+                        b -> minecraft.gameMode.handleInventoryButtonClick(menu.containerId, ShopCartMenu.SCROLL_DOWN_BUTTON_ID))
+                .bounds(this.leftPos + SCROLLBAR_X, this.topPos + TOP_Y + ShopCartMenu.VISIBLE_SHOP_ROWS * ROW_HEIGHT - 12, 12, 12).build());
     }
 
     @Override
@@ -68,16 +80,36 @@ public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
         graphics.text(font, goldLine, left + PLAYER_INV_X, top + 4, 0xFFFFD700);
 
         var listings = menu.listings();
-        for (int i = 0; i < listings.size(); i++) {
-            ShopListingEntry listing = listings.get(i);
-            int rowTextY = top + TOP_Y + i * ROW_HEIGHT + ROW_HEIGHT / 2 - 4;
-            String priceLine = listing.pricePerUnit() + "g / " + listing.buyPricePerUnit() + "g";
+        int offset = menu.scrollOffset();
+        int visibleCount = Math.min(ShopCartMenu.VISIBLE_SHOP_ROWS, Math.max(0, listings.size() - offset));
+        for (int row = 0; row < visibleCount; row++) {
+            ShopListingEntry listing = listings.get(offset + row);
+            int rowTextY = top + TOP_Y + row * ROW_HEIGHT + ROW_HEIGHT / 2 - 4;
+            // Real request, 2026-10-20: "need to show the real inventory count available here" -- the
+            // catalog slot's own icon always shows a full conjured max-size stack (it has to, for the
+            // "infinite stack" pick-up UX), so the real current stock is drawn here instead.
+            String priceLine = listing.shopStock() + " in stock   " + listing.pricePerUnit() + "g / " + listing.buyPricePerUnit() + "g";
             graphics.text(font, priceLine, left + SHOP_X + 20, rowTextY, 0xFFFFFFFF);
+        }
+        if (listings.size() > ShopCartMenu.VISIBLE_SHOP_ROWS) {
+            String scrollLabel = (offset + 1) + "-" + (offset + visibleCount) + " / " + listings.size();
+            graphics.text(font, scrollLabel, left + SHOP_X, top + TOP_Y + ShopCartMenu.VISIBLE_SHOP_ROWS * ROW_HEIGHT + 2, 0xFFAAAAAA);
         }
 
         int confirmY = this.topPos + this.imageHeight - 44;
         String hint = "Shop <-> Buy, and Player <-> Sell only -- Confirm Purchase to charge/pay for everything queued.";
         graphics.text(font, Component.literal(hint).withStyle(ChatFormatting.GRAY), left + SHOP_X, confirmY - 12, 0xFFAAAAAA);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (scrollY != 0 && mouseX >= this.leftPos + SHOP_X && mouseX < this.leftPos + BUY_X
+                && mouseY >= this.topPos + TOP_Y && mouseY < this.topPos + TOP_Y + ShopCartMenu.VISIBLE_SHOP_ROWS * ROW_HEIGHT) {
+            int buttonId = scrollY > 0 ? ShopCartMenu.SCROLL_UP_BUTTON_ID : ShopCartMenu.SCROLL_DOWN_BUTTON_ID;
+            minecraft.gameMode.handleInventoryButtonClick(menu.containerId, buttonId);
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
     @Override

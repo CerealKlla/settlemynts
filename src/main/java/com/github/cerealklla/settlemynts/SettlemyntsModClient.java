@@ -261,12 +261,17 @@ public class SettlemyntsModClient {
             }
         });
 
-        // Real gap, 2026-10-20: the "Shop Stock" column this used to patch was part of the old
-        // button-list ShopScreen, now replaced by ShopCartMenu's infinite-catalog design (see that
-        // class's own doc) -- a live per-row stock count isn't rendered anywhere in the new screen
-        // yet. The server still correctly enforces real stock at Confirm time regardless; this is
-        // purely a missing display refinement, not a correctness gap. See ShopStockUpdatePayload's
-        // own doc for the original intent.
+        // Patches the currently-open cart menu's real "N in stock" numbers in place after a Buy/Sell
+        // (real request, 2026-10-20: "need to show the real inventory count available here" -- the
+        // catalog's conjured stacks always render as a full max-size stack, which isn't the real
+        // current stock) -- same "patch state in place" shape as the gold patch just above.
+        ClientPlotSignRequests.takePendingStockUpdate().ifPresent(update -> {
+            if (Minecraft.getInstance().player != null
+                    && Minecraft.getInstance().player.containerMenu instanceof com.github.cerealklla.settlemynts.plotsign.ShopCartMenu cartMenu) {
+                cartMenu.updateListings(update.listings());
+            }
+        });
+
         // Opens the WishlistScreen on "Press H to chat," or refreshes it in place if a "Sell" click
         // on that same screen just re-sent fresh data (same dual-purpose shape as the gold/stock
         // patches above vs. the "open a new screen" pattern everything else here uses).
@@ -282,8 +287,6 @@ public class SettlemyntsModClient {
                 Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.ChatMenuScreen(update));
             }
         });
-
-        ClientPlotSignRequests.takePendingStockUpdate(); // Consumed and discarded -- see the comment above.
 
         // NPC Menu overhaul (2026-10-16) -- "G" (above) and a plain right-click both land here.
         ClientPlotSignRequests.takePendingNpcMenu().ifPresent(request -> {

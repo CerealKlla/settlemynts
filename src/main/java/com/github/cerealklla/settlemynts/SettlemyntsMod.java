@@ -1399,6 +1399,14 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("You don't have any of that to sell."));
             return;
         }
+        // Real request, 2026-10-20: "need to prevent player selling their Recallcinite totem or coin
+        // purse." The new ShopCartMenu's Sell lane already refuses these at the slot level (see
+        // plotsign.ShopCartMenu.SellSlot); this older inventory-scanning path needs its own check
+        // since it never goes through that menu at all. See plotsign.UnsellableItems's own doc.
+        if (soldStacks.stream().anyMatch(com.github.cerealklla.settlemynts.plotsign.UnsellableItems::isUnsellable)) {
+            player.sendSystemMessage(Component.literal("You can't sell that."));
+            return;
+        }
         int itemsSold = processSellLine(player, serverLevel, resolvedSell.get(), shopId.get(), resource, soldStacks);
         if (itemsSold <= 0) {
             return;
