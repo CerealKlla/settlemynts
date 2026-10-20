@@ -75,6 +75,21 @@ public final class ShopScreen extends Screen {
 
     private final OpenShopPayload data;
     private int scrollOffset;
+    // Cart + confirm, 2026-10-20 (real report: spam-clicking Buy/Sell lags the whole server) --
+    // every click used to send its own BuyFromShopPayload/SellToShopPayload immediately (quantity
+    // always 1), each one independently re-running the full shop-resolution path server-side
+    // (SettlemyntsMod#resolveShopContext -> api.Settlemynts#resolvePlotBoxes -> a full-world
+    // GhostTownHallCoreEntity scan, PLUS a second and third such scan for the gold/stock refresh
+    // that follows every single purchase) -- a spam-click burst meant dozens of full settlement
+    // scans per second. Both payloads already carry a real `quantity` field the server-side handler
+    // already processes in one pass regardless of its size (confirmed: SettlemyntsMod#buyFromShop/
+    // #sellToShop resolve the shop ONCE per call, not once per unit) -- so no server-side change or
+    // new payload type was needed at all. A click now only accumulates a local, client-only pending
+    // quantity per row (zero network traffic); "Confirm Purchase" sends exactly one payload per
+    // distinct row that has something queued (bounded by how many different items were queued, not
+    // by how many times a button was clicked), then clears the cart.
+    private final java.util.LinkedHashMap<ShopListingEntry, Integer> cartBuy = new java.util.LinkedHashMap<>();
+    private final java.util.LinkedHashMap<ShopListingEntry, Integer> cartSell = new java.util.LinkedHashMap<>();
     // Mutable, unlike everything else `data` carries -- updated in place by a ShopGoldUpdatePayload
     // after a Buy/Sell (real report, 2026-10-10: these totals never changed after a purchase, since
     // `data` itself is just a one-time snapshot from whenever the screen opened). Every render reads
@@ -132,14 +147,21 @@ public final class ShopScreen extends Screen {
             if (rowY < VIEWPORT_TOP || rowY + ROW_HEIGHT > footerTop) {
                 continue; // Not fully inside the viewport this frame -- see class doc.
             }
-            addRenderableWidget(Button.builder(priceLabel("Buy", listing.pricePerUnit(), listing.effectiveBuyPrice()), b -> buy(listing))
+            addRenderableWidget(Button.builder(priceLabel("Buy", listing.pricePerUnit(), listing.effectiveBuyPrice(), cartBuy.getOrDefault(listing, 0)), b -> buy(listing))
                     .bounds(centerX + BUY_BUTTON_X, rowY, PRICE_BUTTON_WIDTH, 20).build());
-            addRenderableWidget(Button.builder(priceLabel("Sell", listing.buyPricePerUnit(), listing.effectiveSellPrice()), b -> sell(listing))
+            addRenderableWidget(Button.builder(priceLabel("Sell", listing.buyPricePerUnit(), listing.effectiveSellPrice(), cartSell.getOrDefault(listing, 0)), b -> sell(listing))
                     .bounds(centerX + SELL_BUTTON_X, rowY, PRICE_BUTTON_WIDTH, 20).build());
         }
 
+        boolean cartHasAnything = !cartBuy.isEmpty() || !cartSell.isEmpty();
         addRenderableWidget(Button.builder(Component.literal("Close"), b -> onClose())
-                .bounds(centerX - 50, footerTop + 6, 100, 20).build());
+                .bounds(centerX - 170, footerTop + 6, 100, 20).build());
+        Button confirmButton = addRenderableWidget(Button.builder(Component.literal("Confirm Purchase"), b -> confirmCart())
+                .bounds(centerX - 60, footerTop + 6, 120, 20).build());
+        confirmButton.active = cartHasAnything;
+        Button clearButton = addRenderableWidget(Button.builder(Component.literal("Clear Cart"), b -> clearCart())
+                .bounds(centerX + 70, footerTop + 6, 100, 20).build());
+        clearButton.active = cartHasAnything;
     }
 
     @Override
@@ -152,12 +174,36 @@ public final class ShopScreen extends Screen {
         return true;
     }
 
+    /** Purely local -- adds to this row's pending cart quantity, no network traffic at all. */
     private void buy(ShopListingEntry listing) {
-        send(new BuyFromShopPayload(data.anchor(), listing.resourceKey(), listing.isTag(), listing.customName(), 1));
+        cartBuy.merge(listing, 1, Integer::sum);
+        rebuildShopWidgets();
     }
 
     private void sell(ShopListingEntry listing) {
-        send(new SellToShopPayload(data.anchor(), listing.resourceKey(), listing.isTag(), listing.customName(), 1));
+        cartSell.merge(listing, 1, Integer::sum);
+        rebuildShopWidgets();
+    }
+
+    /** One payload per distinct queued row (not per unit) -- see the cart fields' own doc. */
+    private void confirmCart() {
+        for (var entry : cartBuy.entrySet()) {
+            ShopListingEntry listing = entry.getKey();
+            send(new BuyFromShopPayload(data.anchor(), listing.resourceKey(), listing.isTag(), listing.customName(), entry.getValue()));
+        }
+        for (var entry : cartSell.entrySet()) {
+            ShopListingEntry listing = entry.getKey();
+            send(new SellToShopPayload(data.anchor(), listing.resourceKey(), listing.isTag(), listing.customName(), entry.getValue()));
+        }
+        cartBuy.clear();
+        cartSell.clear();
+        rebuildShopWidgets();
+    }
+
+    private void clearCart() {
+        cartBuy.clear();
+        cartSell.clear();
+        rebuildShopWidgets();
     }
 
     private void send(CustomPacketPayload payload) {
@@ -166,11 +212,15 @@ public final class ShopScreen extends Screen {
 
     /** "Buy (5g)", or "Buy (5g) (4g)" in green when this player's Merchant bonus makes the real price
      * different -- see class doc. The "g" suffix (added 2026-10-09, real report: a player thought the
-     * number was a quantity to buy, not its gold cost) makes clear every number here is a price. */
-    private static Component priceLabel(String verb, int rawPrice, int effectivePrice) {
+     * number was a quantity to buy, not its gold cost) makes clear every number here is a price.
+     * Appends " x N" (2026-10-20, cart) when this row has a nonzero pending cart quantity. */
+    private static Component priceLabel(String verb, int rawPrice, int effectivePrice, int cartQuantity) {
         Component label = Component.literal(verb + " (" + rawPrice + "g)");
         if (effectivePrice != rawPrice) {
             label = label.copy().append(Component.literal(" (" + effectivePrice + "g)").withStyle(ChatFormatting.GREEN));
+        }
+        if (cartQuantity > 0) {
+            label = label.copy().append(Component.literal(" x" + cartQuantity).withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD));
         }
         return label;
     }
