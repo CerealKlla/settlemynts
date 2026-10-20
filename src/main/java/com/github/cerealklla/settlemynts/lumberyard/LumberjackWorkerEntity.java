@@ -119,6 +119,25 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         return Villager.createAttributes();
     }
 
+    /**
+     * Added 2026-10-21 alongside {@code LumberjackWorkGoal#findTarget}'s nearest-first rewrite --
+     * real report ("stands next to a tree doing nothing"), traced via temporary diagnostic logging to
+     * the worker repeatedly being assigned far-away trees across a large plot's own steep terraced
+     * terrain (visible in the reporting screenshot), timing out, and -- the population churning
+     * through several different UUIDs in a few minutes strongly suggested -- quite possibly dying to
+     * fall damage along the way. The nearest-first fix should make this rare on its own, but there's
+     * no reason a worker whose entire job is walking around chopping/replanting trees should ever be
+     * at risk of dying to a fall its own patrol route created -- this is an independent safety net,
+     * not conditioned on whether the travel-distance fix alone turns out to be sufficient.
+     */
+    @Override
+    public boolean isInvulnerableTo(ServerLevel level, net.minecraft.world.damagesource.DamageSource source) {
+        if (source.is(net.minecraft.tags.DamageTypeTags.IS_FALL)) {
+            return true;
+        }
+        return super.isInvulnerableTo(level, source);
+    }
+
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(1, new FloatGoal(this));

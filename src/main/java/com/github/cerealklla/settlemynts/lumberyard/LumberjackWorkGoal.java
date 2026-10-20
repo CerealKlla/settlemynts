@@ -224,6 +224,46 @@ public class LumberjackWorkGoal extends Goal {
         return avoided;
     }
 
+    // Precomputed once (not per findTarget call): every (dx, dz) offset within MAX_SCAN_RADIUS_BLOCKS,
+    // sorted nearest-first -- see findTarget's own doc for why this replaced a fixed raster scan order.
+    private static final int MAX_SCAN_RADIUS_BLOCKS = 80;
+    private static final List<int[]> SPIRAL_OFFSETS = buildSpiralOffsets(MAX_SCAN_RADIUS_BLOCKS);
+
+    private static List<int[]> buildSpiralOffsets(int maxRadius) {
+        List<int[]> offsets = new ArrayList<>();
+        for (int dx = -maxRadius; dx <= maxRadius; dx++) {
+            for (int dz = -maxRadius; dz <= maxRadius; dz++) {
+                offsets.add(new int[]{dx, dz});
+            }
+        }
+        offsets.sort(java.util.Comparator.comparingInt(o -> o[0] * o[0] + o[1] * o[1]));
+        return offsets;
+    }
+
+    /**
+     * Scans outward from the worker's OWN current position (nearest-first, via {@link
+     * #SPIRAL_OFFSETS}) instead of a fixed top-left-to-bottom-right raster order -- real production
+     * incident, 2026-10-21: temporary diagnostic logging (added to chase a live "stands next to a
+     * tree doing nothing despite plenty of harvestable trees nearby" report) showed the exact same
+     * couple of far-corner trees being picked as the target over and over, by entirely different
+     * worker instances, every one of them giving up after the full 100-tick pursuit timeout having
+     * barely moved from its own spawn point. The raster scan always returns the first qualifying
+     * candidate in a fixed (minX, minZ)-first order regardless of where the worker actually is --
+     * on a large plot, that's very often a tree 30+ blocks away while a much closer one sits
+     * unconsidered. Chasing a far tree across this plot's own steep terraced terrain (visible in the
+     * reporting screenshot) for the full pursuit window, repeatedly, is also a very plausible
+     * explanation for the worker population churning through several different UUIDs in the same
+     * short window -- fall damage on the terraces was never ruled out, so {@code
+     * LumberjackWorkerEntity} also gained fall-damage immunity the same day, as a direct, independent
+     * safety net regardless of how well this fix reduces unnecessary travel.
+     *
+     * <p>Deliberately still an early-exit scan (stops at the first qualifying candidate, same as
+     * before) rather than evaluating every column and comparing -- {@link #findTrunkBase} already
+     * flood-fills up to {@link #MAX_CONNECTED_LOGS} blocks the instant it sees a log-topped column, so
+     * evaluating many candidates per call (instead of stopping at the first) would multiply that cost
+     * by however many trees exist in the plot. Reordering the scan is the cheap fix; "first found"
+     * under this new order already means "nearest," with no extra flood-fill work needed.
+     */
     private WorkTarget findTarget(ServerLevel level, Geometry.Polygon area) {
         int minX = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
         for (Geometry.Polygon.Vertex v : area.vertices()) {
@@ -237,54 +277,57 @@ public class LumberjackWorkGoal extends Goal {
         boolean nativeZone = worker.isNativeLumberyardZone(level);
         int scanned = 0;
         BlockPos firstPlantCandidate = null;
-        for (int x = minX; x <= maxX; x++) {
-            for (int z = minZ; z <= maxZ; z++) {
-                if (!area.contains(x, z)) {
-                    continue;
+        BlockPos workerPos = worker.blockPosition();
+        int originX = workerPos.getX();
+        int originZ = workerPos.getZ();
+        for (int[] offset : SPIRAL_OFFSETS) {
+            int x = originX + offset[0];
+            int z = originZ + offset[1];
+            if (x < minX || x > maxX || z < minZ || z > maxZ || !area.contains(x, z)) {
+                continue;
+            }
+            if (scanned++ > MAX_COLUMNS_SCANNED) {
+                return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null);
+            }
+            int topY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+            BlockPos topSolid = new BlockPos(x, topY - 1, z);
+            BlockState topState = level.getBlockState(topSolid);
+            if (topState.is(BlockTags.LOGS)) {
+                BlockPos base = findTrunkBase(level, topSolid);
+                if (isRealTree(level, base) && !isAvoided(level, base)) {
+                    // Real live report, 2026-10-12: "Lumberjacks are very clearly targeting the
+                    // tops of trees... they just climb to the top and then stand there instead of
+                    // chopping." The ground-level base is still this method's stable identity for
+                    // isRealTree/avoidance tracking (same log, no matter which direction the
+                    // worker approaches from) -- but a wide-trunked or buttressed tree (dark oak
+                    // 2x2, jungle) can have every ground-level neighbor of the base ALSO be solid
+                    // trunk, making the base itself physically unreachable within
+                    // HARVEST_ARRIVE_DIST_SQ from any ground path. The worker's pathfinder then
+                    // has nothing better to do than climb the trunk's exterior looking for
+                    // somewhere within range, and gets stuck there, repeatedly failing to arrive.
+                    // Since harvest() already flood-fills the whole connected tree from wherever
+                    // the worker actually ends up, the real fix is to aim it at whichever log in
+                    // that same connected structure is nearest the worker's OWN current position
+                    // -- almost always something near the worker's own height, genuinely
+                    // reachable on foot, not the base specifically.
+                    BlockPos approach = nearestConnectedLog(level, base, workerPos);
+                    return new WorkTarget(approach, true, base); // Harvest always wins immediately once found.
                 }
-                if (scanned++ > MAX_COLUMNS_SCANNED) {
-                    return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null);
-                }
-                int topY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-                BlockPos topSolid = new BlockPos(x, topY - 1, z);
-                BlockState topState = level.getBlockState(topSolid);
-                if (topState.is(BlockTags.LOGS)) {
-                    BlockPos base = findTrunkBase(level, topSolid);
-                    if (isRealTree(level, base) && !isAvoided(level, base)) {
-                        // Real live report, 2026-10-12: "Lumberjacks are very clearly targeting the
-                        // tops of trees... they just climb to the top and then stand there instead of
-                        // chopping." The ground-level base is still this method's stable identity for
-                        // isRealTree/avoidance tracking (same log, no matter which direction the
-                        // worker approaches from) -- but a wide-trunked or buttressed tree (dark oak
-                        // 2x2, jungle) can have every ground-level neighbor of the base ALSO be solid
-                        // trunk, making the base itself physically unreachable within
-                        // HARVEST_ARRIVE_DIST_SQ from any ground path. The worker's pathfinder then
-                        // has nothing better to do than climb the trunk's exterior looking for
-                        // somewhere within range, and gets stuck there, repeatedly failing to arrive.
-                        // Since harvest() already flood-fills the whole connected tree from wherever
-                        // the worker actually ends up, the real fix is to aim it at whichever log in
-                        // that same connected structure is nearest the worker's OWN current position
-                        // -- almost always something near the worker's own height, genuinely
-                        // reachable on foot, not the base specifically.
-                        BlockPos approach = nearestConnectedLog(level, base, worker.blockPosition());
-                        return new WorkTarget(approach, true, base); // Harvest always wins immediately once found.
-                    }
-                    // Not a real tree (no leaves anywhere nearby) -- almost certainly a player-built
-                    // log structure (2026-10-05, real report: "destroyed the building to try to plant
-                    // trees" -- this is the actual fix, see isRealTree's own doc). Skip it entirely,
-                    // don't treat it as a planting spot either.
-                    continue;
-                }
-                if (firstPlantCandidate == null && PLANTABLE_SOIL.contains(topState.getBlock())
-                        && level.getBlockState(topSolid.above()).canBeReplaced()
-                        && !hasNearbyTreeOrSapling(level, area, x, topSolid.getY(), z, spacing)
-                        && !isAvoided(level, topSolid.above())
-                        // On a non-native Zone Type, only ever replant exactly where this same worker
-                        // just chopped a real tree -- never expand into brand-new bare ground. See
-                        // lastHarvestedTreeBase's own field doc.
-                        && (nativeZone || topSolid.above().equals(lastHarvestedTreeBase))) {
-                    firstPlantCandidate = topSolid.above();
-                }
+                // Not a real tree (no leaves anywhere nearby) -- almost certainly a player-built
+                // log structure (2026-10-05, real report: "destroyed the building to try to plant
+                // trees" -- this is the actual fix, see isRealTree's own doc). Skip it entirely,
+                // don't treat it as a planting spot either.
+                continue;
+            }
+            if (firstPlantCandidate == null && PLANTABLE_SOIL.contains(topState.getBlock())
+                    && level.getBlockState(topSolid.above()).canBeReplaced()
+                    && !hasNearbyTreeOrSapling(level, area, x, topSolid.getY(), z, spacing)
+                    && !isAvoided(level, topSolid.above())
+                    // On a non-native Zone Type, only ever replant exactly where this same worker
+                    // just chopped a real tree -- never expand into brand-new bare ground. See
+                    // lastHarvestedTreeBase's own field doc.
+                    && (nativeZone || topSolid.above().equals(lastHarvestedTreeBase))) {
+                firstPlantCandidate = topSolid.above();
             }
         }
         return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null);
