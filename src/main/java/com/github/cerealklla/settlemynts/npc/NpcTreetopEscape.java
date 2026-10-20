@@ -100,8 +100,17 @@ public final class NpcTreetopEscape {
      */
     public static int realSurfaceY(ServerLevel level, int x, int z) {
         BlockPos pos = new BlockPos(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1, z);
-        while (pos.getY() > level.getMinY() && isTreeMaterial(level.getBlockState(pos))) {
+        // Real incident, 2026-10-20: this had no depth bound at all, and isTreeMaterial counts plain
+        // air as "keep scanning" (needed so check() can see through gaps in a canopy) -- anywhere a
+        // Guard/Resident/Farmer stood above a cave, ravine, or any other air pocket, this scanned every
+        // block down to bedrock (worst case ~384) every single tick, for every such NPC. Confirmed live:
+        // continuous "slow tick"/8s+ ticks from the moment this method started being called. Bounded the
+        // same way check() already bounds its own identical scan -- past this many blocks with no real
+        // ground found, just stop and use whatever's there rather than paying for an unbounded descent.
+        int scanned = 0;
+        while (scanned < MAX_SCAN_DEPTH_BLOCKS && pos.getY() > level.getMinY() && isTreeMaterial(level.getBlockState(pos))) {
             pos = pos.below();
+            scanned++;
         }
         return pos.getY() + 1;
     }
