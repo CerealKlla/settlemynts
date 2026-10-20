@@ -85,6 +85,11 @@ public class LumberjackWorkGoal extends Goal {
     private static final int MAX_PURSUE_TICKS = 100; // ~5s of real failure to arrive -- give up.
     private static final long AVOID_DURATION_TICKS = 1200; // 1 minute before retrying the same spot.
     private static final double AVOID_RADIUS_BLOCKS = 3.0;
+    // How many consecutive give-ups in a row, with the worker's own position never actually moving,
+    // before concluding pathfinding itself is broken here (not just an unlucky string of unreachable
+    // targets) and teleporting straight to the target instead -- see tick's own give-up branch doc.
+    private static final int STUCK_RESCUE_THRESHOLD = 3;
+    private static final double STUCK_MOVEMENT_THRESHOLD_SQ = 9.0; // 3 blocks -- "didn't really go anywhere."
 
     private final LumberjackWorkerEntity worker;
     private final double speedModifier;
@@ -100,6 +105,9 @@ public class LumberjackWorkGoal extends Goal {
     private int repathCooldown;
     private int pursueTicks;
     private final List<AvoidedTarget> recentlyAvoided = new ArrayList<>();
+    // Stuck-pathfinding rescue state -- see tick's own give-up branch doc.
+    private BlockPos stuckGiveUpPos;
+    private int consecutiveStuckGiveUps;
 
     // "private residence farmers and lumberjacks are only supposed to harvest and re-plant existing
     // plants, not plant wholly new ones" (explicit user spec, 2026-10-16) -- on a plot whose own Zone
@@ -179,6 +187,35 @@ public class LumberjackWorkGoal extends Goal {
                 // identity, so pendingTarget is still the right (and only) key.
                 BlockPos avoidKey = pendingIsHarvest && pendingHarvestIdentity != null ? pendingHarvestIdentity : pendingTarget;
                 recentlyAvoided.add(new AvoidedTarget(avoidKey, level.getGameTime() + AVOID_DURATION_TICKS));
+                // Real live report, 2026-10-21: a worker standing on genuinely normal, legitimate
+                // ground (confirmed directly against the real terrain via RCON -- not elevated, not
+                // trapped underground/in-canopy, both already covered by the entity's own safety
+                // nets) still failed to reach ANY target, repeatedly, across several different
+                // harvest/plant candidates in a row, never moving at all. This plot's own steep
+                // terraced terrain (the same one the fall-damage/leaves fixes above were built for)
+                // can apparently still defeat vanilla's pathfinder outright on some columns -- too
+                // many stacked multi-block elevation changes for it to ever resolve a route, not a
+                // reachability problem any amount of retrying or re-targeting fixes. Tracked via
+                // {@link #stuckGiveUpPos}/{@link #consecutiveStuckGiveUps}: once several give-ups in
+                // a row happen without the worker's own position moving at all, pathfinding itself is
+                // the thing that's broken here, not the target choice -- teleport straight to the
+                // real surface at the target's own column as a last resort, bypassing the pathfinder
+                // entirely, the same "direct teleport" shape this entity's other safety nets already
+                // use for an unrecoverable situation.
+                BlockPos currentPos = worker.blockPosition();
+                if (stuckGiveUpPos != null && currentPos.distSqr(stuckGiveUpPos) <= STUCK_MOVEMENT_THRESHOLD_SQ) {
+                    consecutiveStuckGiveUps++;
+                } else {
+                    consecutiveStuckGiveUps = 1;
+                }
+                stuckGiveUpPos = currentPos;
+                if (consecutiveStuckGiveUps >= STUCK_RESCUE_THRESHOLD) {
+                    int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, pendingTarget.getX(), pendingTarget.getZ());
+                    worker.getNavigation().stop();
+                    worker.teleportTo(pendingTarget.getX() + 0.5, surfaceY, pendingTarget.getZ() + 0.5);
+                    consecutiveStuckGiveUps = 0;
+                    stuckGiveUpPos = null;
+                }
                 pendingTarget = null;
                 pendingHarvestIdentity = null;
                 return;
@@ -189,6 +226,11 @@ public class LumberjackWorkGoal extends Goal {
             }
             return;
         }
+        // Real arrival (not a rescue teleport) -- proves pathfinding genuinely works from here, so
+        // the stuck-streak tracked for the rescue fallback above shouldn't carry into an unrelated
+        // future failure.
+        consecutiveStuckGiveUps = 0;
+        stuckGiveUpPos = null;
         if (pendingIsHarvest) {
             harvest(level, pendingTarget);
             if (pendingHarvestIdentity != null) {
