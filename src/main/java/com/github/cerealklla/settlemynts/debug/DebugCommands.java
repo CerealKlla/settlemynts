@@ -578,6 +578,38 @@ public final class DebugCommands {
         source.sendSuccess(() -> Component.literal("Re-applied tiered catalog defaults for \"" + plotName
                 + "\" (was stuck at applied-tier " + previousAppliedTier
                 + ") -- any newly-added catalog listings/Planned Inventory targets should now show up."), true);
+
+        // Temporary diagnostic, 2026-10-20 (real report: this command has reported success 5 times
+        // in a row with nothing actually changing in the real Shop) -- directly compares the
+        // catalog's own current recommendation set against what's really listed/suppressed, instead
+        // of trusting the "success" message above. Remove once the real gap is found.
+        UUID shopId = foundPlot.shopId().get();
+        UUID targetPlotId = foundPlot.plotId();
+        PlotRecord refreshed = foundCore.getPlots().stream()
+                .filter(p -> p.plotId().equals(targetPlotId)).findFirst().orElse(foundPlot);
+        java.util.Set<Identifier> catalogIds = new java.util.HashSet<>();
+        for (com.github.cerealklla.settlemynts.zone.SeedListing seed
+                : com.github.cerealklla.settlemynts.zone.ShopSeeding.catalogSeedListings(level, refreshed, anchor)) {
+            seed.resource().flatMap(com.github.cerealklla.settlemynts.zone.ShopResource::itemId).ifPresent(catalogIds::add);
+        }
+        java.util.Set<Identifier> configuredIds = new java.util.HashSet<>();
+        for (com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView view
+                : com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(level, shopId)) {
+            view.resource().itemId().ifPresent(configuredIds::add);
+        }
+        java.util.Set<Identifier> suppressedIds = new java.util.HashSet<>();
+        for (com.github.cerealklla.settlemynts.zone.SuppressedShopResource s : refreshed.suppressedShopResources()) {
+            if (!s.isTag()) {
+                suppressedIds.add(s.resourceKey());
+            }
+        }
+        List<Identifier> missing = catalogIds.stream().filter(id -> !configuredIds.contains(id)).sorted(Identifier::compareTo).toList();
+        source.sendSuccess(() -> Component.literal("[diag] catalog=" + catalogIds.size() + " configured=" + configuredIds.size()
+                + " suppressed=" + suppressedIds.size() + " missingFromRealShop=" + missing.size()), false);
+        for (Identifier id : missing) {
+            boolean suppressed = suppressedIds.contains(id);
+            source.sendSuccess(() -> Component.literal("  - " + id + (suppressed ? " (SUPPRESSED)" : " (not suppressed -- should have just been added)")), false);
+        }
         return 1;
     }
 

@@ -47,10 +47,22 @@ public final class MidnightWorkQueue {
         long deadline = System.nanoTime() + TICK_BUDGET_NANOS;
         while (!jobs.isEmpty() && System.nanoTime() < deadline) {
             Runnable job = jobs.poll();
+            // Temporary diagnostic, 2026-10-20 (real incident: the midnight pass logged 8+ real
+            // seconds wall-clock and individual ticks over 2 seconds despite this 10ms-per-tick
+            // budget, meaning some single enqueued job is itself far larger than "small" -- pump()
+            // has no way to preempt mid-job, so one oversized job blows the whole tick's budget by
+            // itself. Logs which job class (and how long) whenever a single job alone is this slow,
+            // to find the still-unchunked spot instead of guessing. Remove once found and fixed.
+            long jobStart = System.nanoTime();
             try {
                 job.run();
             } catch (RuntimeException e) {
                 SettlemyntsMod.LOGGER.error("MidnightWorkQueue: a queued job threw", e);
+            } finally {
+                long jobElapsedMs = (System.nanoTime() - jobStart) / 1_000_000L;
+                if (jobElapsedMs >= 20) {
+                    SettlemyntsMod.LOGGER.info("[LagDiagnostics] MidnightWorkQueue job took {}ms ({})", jobElapsedMs, job.getClass().getName());
+                }
             }
         }
     }

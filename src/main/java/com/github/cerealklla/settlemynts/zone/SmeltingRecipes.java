@@ -1,6 +1,7 @@
 package com.github.cerealklla.settlemynts.zone;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -15,6 +16,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.SingleRecipeInput;
 import net.minecraft.world.item.crafting.SmeltingRecipe;
 
@@ -69,13 +71,32 @@ public final class SmeltingRecipes {
     private SmeltingRecipes() {
     }
 
+    // Real production incident, 2026-10-20: this used to scan the server's ENTIRE RecipeManager
+    // (every real vanilla/datapack recipe, calling Recipe#assemble on each SmeltingRecipe candidate)
+    // from scratch on every single call -- and PlannedInventoryClearing's recursive buy-vs-craft cost
+    // estimation (cheapestCraftOption/estimateCraftCost/cheapestCostForOneUnit, mutually recursive
+    // over every ingredient of every candidate recipe) calls this once per ingredient, at every
+    // recursion level, with no caching at all. A real crash confirmed this directly: the watchdog's
+    // own 60-second stack trace showed this exact full-manager scan sitting at the bottom of that
+    // recursion, called repeatedly. Cached keyed by the RecipeManager's own identity (not a TTL or a
+    // manual invalidation hook) -- NeoForge/vanilla hands out a genuinely new RecipeManager instance
+    // on every data reload, so a reload naturally gets a fresh cache for free with no event wiring.
+    private static RecipeManager cachedManager;
+    private static Map<Identifier, List<LyfeCraftingBridge.RecipeInfo>> cache = Map.of();
+
     /** One alternate {@code RecipeInfo} per real vanilla furnace fuel (lava bucket excluded) for {@code resultId}, or empty if no real vanilla Furnace recipe produces it. */
     public static List<LyfeCraftingBridge.RecipeInfo> getAll(ServerLevel level, Identifier resultId) {
-        Item resultItem = BuiltInRegistries.ITEM.getOptional(resultId).orElse(null);
-        if (resultItem == null) {
-            return List.of();
+        RecipeManager manager = level.getServer().getRecipeManager();
+        if (manager != cachedManager) {
+            cachedManager = manager;
+            cache = buildCache(level, manager);
         }
-        for (RecipeHolder<?> holder : level.getServer().getRecipeManager().getRecipes()) {
+        return cache.getOrDefault(resultId, List.of());
+    }
+
+    private static Map<Identifier, List<LyfeCraftingBridge.RecipeInfo>> buildCache(ServerLevel level, RecipeManager manager) {
+        Map<Identifier, List<LyfeCraftingBridge.RecipeInfo>> result = new HashMap<>();
+        for (RecipeHolder<?> holder : manager.getRecipes()) {
             if (!(holder.value() instanceof SmeltingRecipe recipe)) {
                 continue;
             }
@@ -83,9 +104,13 @@ public final class SmeltingRecipes {
             if (firstInput.isEmpty()) {
                 continue;
             }
-            ItemStack result = recipe.assemble(new SingleRecipeInput(new ItemStack(firstInput.get())));
-            if (result.isEmpty() || result.getItem() != resultItem) {
+            ItemStack resultStack = recipe.assemble(new SingleRecipeInput(new ItemStack(firstInput.get())));
+            if (resultStack.isEmpty()) {
                 continue;
+            }
+            Identifier resultId = BuiltInRegistries.ITEM.getKey(resultStack.getItem());
+            if (result.containsKey(resultId)) {
+                continue; // First matching recipe wins -- same semantics the old scan-and-return-first had.
             }
             Identifier inputId = BuiltInRegistries.ITEM.getKey(firstInput.get().value());
             List<LyfeCraftingBridge.RecipeInfo> alternates = new ArrayList<>();
@@ -100,8 +125,8 @@ public final class SmeltingRecipes {
                 alternates.add(new LyfeCraftingBridge.RecipeInfo(resultId, 0, components, Map.of(),
                         LyfeCraftingBridge.RecipeInfo.StructureRequirement.FURNACE, 0));
             }
-            return alternates;
+            result.put(resultId, alternates);
         }
-        return List.of();
+        return result;
     }
 }
