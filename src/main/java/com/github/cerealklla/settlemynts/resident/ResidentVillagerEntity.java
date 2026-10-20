@@ -132,7 +132,9 @@ public class ResidentVillagerEntity extends Villager implements com.github.cerea
         if (surfaceY - getY() > UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS) {
             getNavigation().stop();
             teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
+            return;
         }
+        com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.check(this, level);
     }
 
     @Override

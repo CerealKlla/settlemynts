@@ -19,7 +19,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EntityType;
@@ -374,15 +373,12 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         // canopy's own top surface, which reads as perfectly ordinary walkable ground (a leaf block
         // is solid-for-standing-on, same as any other block), stranding the guard with no way back
         // down. The underground check above can't catch this -- it only ever fires when BELOW the
-        // real surface, never above it. Checked directly against the actual block underfoot rather
-        // than inferring from height alone, since a legitimate multi-story building's upper floor is
-        // also "above the no-leaves surface reading" (that heightmap reports the roof, not each
-        // floor) but is never standing on leaves.
-        net.minecraft.core.BlockPos feetPos = new net.minecraft.core.BlockPos(blockX, Mth.floor(getY()), blockZ);
-        if (level.getBlockState(feetPos).is(BlockTags.LEAVES) || level.getBlockState(feetPos.below()).is(BlockTags.LEAVES)) {
-            getNavigation().stop();
-            teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
-        }
+        // real surface, never above it. Extracted into the shared com.github.cerealklla.settlemynts.npc.NpcTreetopEscape
+        // 2026-10-20 after a real report confirmed the SAME gap in another NPC type -- this was
+        // originally fixed here only, with the other four NPC types explicitly flagged "known gap,
+        // not yet fixed," which was the wrong scope for the user's actual request ("fix it for all
+        // NPCs, not guards specifically").
+        com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.check(this, level);
     }
 
     @Override

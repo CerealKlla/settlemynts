@@ -126,7 +126,9 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
             getNavigation().stop();
             int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
             teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
+            return;
         }
+        com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.check(this, level);
     }
 
     /**

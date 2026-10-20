@@ -118,6 +118,7 @@ public class MinerWorkerEntity extends Villager implements PlotNpc {
     protected void customServerAiStep(ServerLevel level) {
         // Deliberately never calls super.customServerAiStep (Villager's own) -- see class/method doc.
         com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
+        com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.check(this, level);
     }
 
     @Override
