@@ -573,6 +573,16 @@ public final class DebugCommands {
         int previousAppliedTier = foundPlot.tieredDefaultsAppliedTier();
         PlotRecord resetPlot = foundPlot.withTieredDefaultsAppliedTier(0);
         BlockPos anchor = resetPlot.boxPos().orElse(pos);
+        // Real bug found 2026-10-20: for an NPC-owned plot (owner().isEmpty()), ShopSeeding#syncToCatalog
+        // calls applyCatalogFull and then immediately REFETCHES the plot fresh from foundCore's own live
+        // list before calling applyTieredDefaults -- which silently discarded this reset, since it only
+        // ever existed on this local `resetPlot` copy, never actually persisted. The refetched copy still
+        // had the real (un-reset) tieredDefaultsAppliedTier, so applyTieredDefaults's own gate
+        // (`tier <= tieredDefaultsAppliedTier()`) kept returning immediately every single time this
+        // command ran, for a Blacksmith plot or anything else with no owner -- confirmed directly: zero
+        // [ShopSeedDiag] log lines ever appeared despite several real runs. Fixed by persisting the reset
+        // through the owner first, so syncToCatalog's own refetch sees it too.
+        foundCore.updatePlot(resetPlot);
         com.github.cerealklla.settlemynts.zone.ShopSeeding.syncToCatalog(level, resetPlot, foundCore, anchor);
         String plotName = foundPlot.name();
         source.sendSuccess(() -> Component.literal("Re-applied tiered catalog defaults for \"" + plotName
