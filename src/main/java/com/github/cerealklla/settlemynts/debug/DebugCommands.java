@@ -81,6 +81,8 @@ public final class DebugCommands {
                         .executes(ctx -> naturalVillagers(ctx.getSource())))
                 .then(Commands.literal("resyncprotection")
                         .executes(ctx -> resyncProtection(ctx.getSource())))
+                .then(Commands.literal("resyncshop")
+                        .executes(ctx -> resyncShop(ctx.getSource())))
                 .then(Commands.literal("highwayinfo")
                         .then(Commands.argument("instanceId", StringArgumentType.string())
                                 .executes(ctx -> highwayInfo(ctx.getSource(), StringArgumentType.getString(ctx, "instanceId")))))
@@ -524,6 +526,58 @@ public final class DebugCommands {
         String label = newOwner.isPresent() ? ownerArg : "NPC-owned (no owner)";
         source.sendSuccess(() -> Component.literal("Plot \"" + updated.name() + "\" owner set to " + label
                 + ". (This does not create/cancel a recurring rent bill -- that's unaffected.)"), true);
+        return 1;
+    }
+
+    /**
+     * DEBUG ONLY -- added 2026-10-21, real report: a Blacksmith plot already at the right Tier never
+     * picked up the Nature Staff catalog entry added the same day (see {@code
+     * structure.ShopSeedCatalogs} in Lyfe). Root cause isn't stale Planned Inventory, as first
+     * suspected -- {@code zone.ShopSeeding#applyTieredDefaults} genuinely re-derives/merges targets
+     * on every real Tier increase. The actual gap: that same method is guarded on {@code tier >
+     * plot.tieredDefaultsAppliedTier()}, so a plot that already had its *current* tier's defaults
+     * applied (even before the catalog itself changed) will never re-notice a catalog-content change
+     * at that same tier -- only a genuine new tier-crossing re-triggers it. This resets that one
+     * plot's {@code tieredDefaultsAppliedTier} back to 0 and immediately re-runs {@code
+     * ShopSeeding#syncToCatalog} (the exact same path "Enter/Manage Shop" already calls on open),
+     * which re-derives and persists fresh listings/Planned Inventory targets against the catalog as
+     * it stands right now. Resolves the target plot the same "stand inside it" way {@link
+     * #setPlotOwner} does.
+     */
+    private static int resyncShop(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof net.minecraft.world.entity.player.Player player) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world (stand inside the target plot)."));
+            return 0;
+        }
+        AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+        BlockPos pos = player.blockPosition();
+        GhostTownHallCoreEntity foundCore = null;
+        PlotRecord foundPlot = null;
+        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+            Optional<PlotRecord> plot = com.github.cerealklla.settlemynts.zone.PlotGeometry.findContainingPlot(level, core, pos.getX(), pos.getZ());
+            if (plot.isPresent()) {
+                foundCore = core;
+                foundPlot = plot.get();
+                break;
+            }
+        }
+        if (foundPlot == null) {
+            source.sendFailure(Component.literal("You're not standing inside any finalized plot."));
+            return 0;
+        }
+        if (foundPlot.shopId().isEmpty()) {
+            source.sendFailure(Component.literal("Plot \"" + foundPlot.name() + "\" has no Shop yet -- nothing to resync."));
+            return 0;
+        }
+        int previousAppliedTier = foundPlot.tieredDefaultsAppliedTier();
+        PlotRecord resetPlot = foundPlot.withTieredDefaultsAppliedTier(0);
+        BlockPos anchor = resetPlot.boxPos().orElse(pos);
+        com.github.cerealklla.settlemynts.zone.ShopSeeding.syncToCatalog(level, resetPlot, foundCore, anchor);
+        String plotName = foundPlot.name();
+        source.sendSuccess(() -> Component.literal("Re-applied tiered catalog defaults for \"" + plotName
+                + "\" (was stuck at applied-tier " + previousAppliedTier
+                + ") -- any newly-added catalog listings/Planned Inventory targets should now show up."), true);
         return 1;
     }
 
