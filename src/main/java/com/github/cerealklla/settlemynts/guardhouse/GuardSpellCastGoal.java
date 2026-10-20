@@ -88,9 +88,20 @@ public final class GuardSpellCastGoal extends Goal {
     }
 
     private LivingEntity findInjuredAlly() {
+        // Temporary diagnostic, 2026-10-20 (see npc.NpcTreetopEscape's own identical addition -- real
+        // report of sustained 140-280ms ticks near a settlement; this runs every tick, unthrottled, for
+        // every staff-wielding guard). Remove once the real culprit is confirmed.
+        long diagStart = System.nanoTime();
         AABB scanBox = guard.getBoundingBox().inflate(HEAL_SCAN_RADIUS);
         List<LivingEntity> candidates = guard.level().getEntitiesOfClass(LivingEntity.class, scanBox,
                 e -> e != guard && e.isAlive() && !(e instanceof Enemy) && e.getHealth() < e.getMaxHealth() * 0.5F);
-        return candidates.stream().min(Comparator.comparingDouble(e -> e.getHealth() / e.getMaxHealth())).orElse(null);
+        LivingEntity result = candidates.stream().min(Comparator.comparingDouble(e -> e.getHealth() / e.getMaxHealth())).orElse(null);
+        long diagElapsedNanos = System.nanoTime() - diagStart;
+        if (diagElapsedNanos >= 2_000_000L) {
+            com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
+                    "[LagDiagnostics] GuardSpellCastGoal.findInjuredAlly took {}ms ({} candidates)",
+                    diagElapsedNanos / 1_000_000L, candidates.size());
+        }
+        return result;
     }
 }

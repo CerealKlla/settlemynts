@@ -55,7 +55,27 @@ public final class NpcTreetopEscape {
     private NpcTreetopEscape() {
     }
 
+    // Temporary diagnostic, 2026-10-20 (real report: sustained 140-280ms ticks and a disconnect while
+    // the player was near their settlement, well above vanilla's 50ms budget, despite every other
+    // known per-system diagnostic in this mod staying quiet) -- logs this call's own real cost if it
+    // crosses a small threshold, since this now runs unconditionally per Guard/Resident/Farmer every
+    // tick. Remove once the real culprit is confirmed.
+    private static final long DIAG_THRESHOLD_NANOS = 2_000_000L; // 2ms
+
     public static void check(Mob npc, ServerLevel level) {
+        long diagStart = System.nanoTime();
+        try {
+            checkInternal(npc, level);
+        } finally {
+            long diagElapsedNanos = System.nanoTime() - diagStart;
+            if (diagElapsedNanos >= DIAG_THRESHOLD_NANOS) {
+                com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
+                        "[LagDiagnostics] NpcTreetopEscape.check took {}ms ({})", diagElapsedNanos / 1_000_000L, npc.getType());
+            }
+        }
+    }
+
+    private static void checkInternal(Mob npc, ServerLevel level) {
         int blockX = Mth.floor(npc.getX());
         int blockZ = Mth.floor(npc.getZ());
         int feetY = Mth.floor(npc.getY());
@@ -99,6 +119,7 @@ public final class NpcTreetopEscape {
      * level.getHeight(MOTION_BLOCKING_NO_LEAVES, x, z)} at face value.
      */
     public static int realSurfaceY(ServerLevel level, int x, int z) {
+        long diagStart = System.nanoTime();
         BlockPos pos = new BlockPos(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1, z);
         // Real incident, 2026-10-20: this had no depth bound at all, and isTreeMaterial counts plain
         // air as "keep scanning" (needed so check() can see through gaps in a canopy) -- anywhere a
@@ -111,6 +132,11 @@ public final class NpcTreetopEscape {
         while (scanned < MAX_SCAN_DEPTH_BLOCKS && pos.getY() > level.getMinY() && isTreeMaterial(level.getBlockState(pos))) {
             pos = pos.below();
             scanned++;
+        }
+        long diagElapsedNanos = System.nanoTime() - diagStart;
+        if (diagElapsedNanos >= DIAG_THRESHOLD_NANOS) {
+            com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
+                    "[LagDiagnostics] NpcTreetopEscape.realSurfaceY took {}ms (scanned {})", diagElapsedNanos / 1_000_000L, scanned);
         }
         return pos.getY() + 1;
     }
