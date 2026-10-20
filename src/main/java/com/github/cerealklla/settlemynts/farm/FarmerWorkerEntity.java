@@ -109,6 +109,7 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
 
     @Override
     protected void customServerAiStep(ServerLevel level) {
+        com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
         int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);

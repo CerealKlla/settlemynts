@@ -355,6 +355,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
     @Override
     protected void customServerAiStep(ServerLevel level) {
         super.customServerAiStep(level);
+        com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
         if (homePos != null

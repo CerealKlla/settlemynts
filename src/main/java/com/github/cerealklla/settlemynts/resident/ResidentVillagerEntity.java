@@ -125,6 +125,7 @@ public class ResidentVillagerEntity extends Villager implements com.github.cerea
     @Override
     protected void customServerAiStep(ServerLevel level) {
         // Deliberately never calls super.customServerAiStep (Villager's own) -- see class doc.
+        com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
         int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
