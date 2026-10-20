@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.registration;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.guardhouse.GuardhouseFoodMenu;
+import com.github.cerealklla.settlemynts.plotsign.ShopCartMenu;
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.inventory.MenuType;
@@ -21,4 +22,8 @@ public final class ModMenus {
             "guardhouse_food",
             () -> IMenuTypeExtension.create((windowId, inventory, extraData) ->
                     new GuardhouseFoodMenu(null, windowId, inventory, extraData.readVarInt(), extraData.readBoolean(), extraData.readBlockPos())));
+
+    public static final DeferredHolder<MenuType<?>, MenuType<ShopCartMenu>> SHOP_CART = MENU_TYPES.register(
+            "shop_cart",
+            () -> IMenuTypeExtension.create((windowId, inventory, extraData) -> ShopCartMenu.fromNetwork(windowId, inventory, extraData)));
 }

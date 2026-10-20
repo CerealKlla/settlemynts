@@ -1055,9 +1055,15 @@ public class SettlemyntsMod {
             return;
         }
 
+        // Real redesign, 2026-10-20 ("I'd like it to look something like this" -- a real four-
+        // container cart mockup, replacing the OpenShopPayload-driven button-list screen shipped
+        // hours earlier the same day): Buy mode now opens a genuine AbstractContainerMenu
+        // (ShopCartMenu) via the normal player.openMenu path instead of a plain payload, so vanilla's
+        // own slot click/drag/shift-click machinery does the heavy lifting -- see that class's own
+        // doc for the four-lane Shop/Buy/Sell/Player design.
         java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = buildBuyListings(player, views, manageBoxesFor(serverLevel, plot));
-        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenShopPayload(
-                anchor, plot.plotId(), false, listings, java.util.List.of(), shopGoldNuggets, playerGoldNuggets));
+        player.openMenu(new com.github.cerealklla.settlemynts.plotsign.ShopCartMenuProvider(
+                anchor, plot.plotId(), listings, shopGoldNuggets, playerGoldNuggets));
     }
 
     private static java.util.List<net.minecraft.world.Container> manageBoxesFor(ServerLevel level, PlotRecord plot) {
@@ -1193,8 +1199,31 @@ public class SettlemyntsMod {
                     ? com.github.cerealklla.settlemynts.zone.ShopResource.ofExactItem(payload.resourceKey(), payload.customName().get())
                     : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(payload.resourceKey());
         java.util.List<net.minecraft.world.Container> boxes = com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, plotId);
+        boolean bought = processBuyLine(player, serverLevel, resolvedBuy.get(), boxes, shopId.get(), resource, payload.quantity());
+        if (!bought) {
+            return;
+        }
+        finishBuyBatch(player, serverLevel, plotId, shopId.get());
+    }
+
+    /**
+     * Refactored out of the old single-item {@link #buyFromShop} 2026-10-20, so {@link
+     * #confirmShopCart} (the new cart-screen batch path) can process several distinct listings
+     * against the SAME already-resolved {@code shopContext}/{@code boxes} instead of re-resolving
+     * the full shop-lookup path (a full-world {@code GhostTownHallCoreEntity} scan) once per listing
+     * -- the exact same "resolve once, loop many" optimization the shop screen's own earlier cart
+     * fix already applied client-side for repeated clicks on one listing, now applied server-side
+     * for several different listings in one Confirm. Everything through the sales-tax withholding
+     * and ledger entry is unchanged from the original method; the gold/stock-refresh/auto-crafting-
+     * check steps are split out into {@link #finishBuyBatch} so they only run once per *batch* (one
+     * real purchase click, or one whole cart confirm), not once per listing within a confirm.
+     * Returns {@code false} (and sends the player a message) if nothing was actually bought.
+     */
+    private static boolean processBuyLine(ServerPlayer player, ServerLevel serverLevel, ShopContext shopContext,
+                                           java.util.List<net.minecraft.world.Container> boxes, UUID shopId,
+                                           com.github.cerealklla.settlemynts.zone.ShopResource resource, int quantity) {
         com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.PurchaseResult result =
-                com.github.cerealklla.settlemynts.api.Settlemynts.purchaseFromSettlementShop(serverLevel, plotId, shopId.get(), resource, payload.quantity(), boxes);
+                com.github.cerealklla.settlemynts.api.Settlemynts.purchaseFromSettlementShop(serverLevel, shopContext.plot().plotId(), shopId, resource, quantity, boxes);
         // Captured once, up front -- real report, 2026-10-09: "Buying 0 for # gold." PurchaseResult#
         // filled() isn't a stored count, it re-sums itemsReceived()'s own ItemStacks every call, and
         // player.getInventory().add(stack) below mutates those same stack instances in place (vanilla
@@ -1203,7 +1232,7 @@ public class SettlemyntsMod {
         int filled = result.filled();
         if (filled <= 0) {
             player.sendSystemMessage(Component.literal("Out of stock."));
-            return;
+            return false;
         }
         if (!com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.withdrawNuggets(player, result.nuggetsCharged())) {
             // Stock was already drained/paid into the shop's own boxes above -- this shouldn't
@@ -1211,7 +1240,7 @@ public class SettlemyntsMod {
             // if it does, refund isn't attempted here (a known, flagged simplification -- see
             // decisions.md) since under-stocked/under-funded purchases are expected to be rare.
             player.sendSystemMessage(Component.literal("You don't have enough Gold Nuggets."));
-            return;
+            return false;
         }
         // 2026-10-06 fix (real report: "bought items from a Settlement shop, it took my gold but
         // never gave me the item") -- the stock drained from the shop's boxes was never actually
@@ -1260,7 +1289,7 @@ public class SettlemyntsMod {
         // nuggetsCharged above) and moves to the Town Hall, before the gold-total UI refresh below
         // so it reflects the post-tax amount immediately. See #resolveSalesTax's own doc for why
         // Guardhouses are naturally exempt with no special-casing needed here.
-        if (resolvedBuy.get().owner() instanceof GhostTownHallCoreEntity taxCore) {
+        if (shopContext.owner() instanceof GhostTownHallCoreEntity taxCore) {
             int tax = resolveSalesTax(taxCore, result.nuggetsCharged());
             if (tax > 0) {
                 com.github.cerealklla.settlemynts.zone.ShopResource goldNuggets = com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(
@@ -1268,16 +1297,10 @@ public class SettlemyntsMod {
                 java.util.List<net.minecraft.world.item.ItemStack> withdrawnTax =
                         com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(boxes, goldNuggets, tax);
                 int actuallyTaxed = withdrawnTax.stream().mapToInt(net.minecraft.world.item.ItemStack::getCount).sum();
-                depositSalesTax(serverLevel, taxCore, resolvedBuy.get().plot(), actuallyTaxed, player.getGameProfile().name());
+                depositSalesTax(serverLevel, taxCore, shopContext.plot(), actuallyTaxed, player.getGameProfile().name());
             }
         }
         player.sendSystemMessage(Component.literal("Bought " + filled + " for " + result.nuggetsCharged() + " nuggets."));
-        sendShopGoldUpdate(player, serverLevel, plotId);
-        sendShopStockUpdate(player, serverLevel, plotId, shopId.get());
-        // 2026-10-10 redesign: check this one shop for auto-crafting opportunities once it's gone
-        // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
-        com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
-        com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plotId);
         // Ledger entry (2026-10-12) -- recorded from the shop's own side, since the ledger lives on
         // this plot's Building Supply Box. Resolved live via constructionBoxId (2026-10-16 fix,
         // real standing bug: the old plot.boxPos() snapshot goes stale the moment a box is ever
@@ -1285,9 +1308,20 @@ public class SettlemyntsMod {
         // temporary diagnostic this used to fall back to.
         if (ModList.get().isLoaded("blueprynts")) {
             com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
-                    serverLevel, resolvedBuy.get().plot(),
+                    serverLevel, shopContext.plot(),
                     "Sold " + filled + "x to " + player.getGameProfile().name() + " for " + result.nuggetsCharged() + " nuggets");
         }
+        return true;
+    }
+
+    /** The once-per-batch tail of a buy (or a batch of buys) -- see {@link #processBuyLine}'s own doc. */
+    private static void finishBuyBatch(ServerPlayer player, ServerLevel serverLevel, UUID plotId, UUID shopId) {
+        sendShopGoldUpdate(player, serverLevel, plotId);
+        sendShopStockUpdate(player, serverLevel, plotId, shopId);
+        // 2026-10-10 redesign: check this one shop for auto-crafting opportunities once it's gone
+        // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
+        com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
+        com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plotId);
     }
 
     /**
@@ -1365,16 +1399,14 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("You don't have any of that to sell."));
             return;
         }
-        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.SellResult result =
-                com.github.cerealklla.settlemynts.api.Settlemynts.sellToSettlementShop(serverLevel, plotId, shopId.get(), resource, soldStacks);
-        if (result.itemsSold() <= 0) {
-            player.sendSystemMessage(Component.literal("The shop can't afford to buy that right now."));
+        int itemsSold = processSellLine(player, serverLevel, resolvedSell.get(), shopId.get(), resource, soldStacks);
+        if (itemsSold <= 0) {
             return;
         }
-        // All-or-nothing on the Yconomics side (see that method's own doc) -- itemsSold() is always
+        // All-or-nothing on the Yconomics side (see processSellLine's own doc) -- itemsSold is always
         // either 0 or exactly sum(soldStacks counts), so removing that many in the same slot order
         // soldStacks was built from stays consistent with whichever exact stacks were just deposited.
-        int remaining = result.itemsSold();
+        int remaining = itemsSold;
         for (int slot : matchingSlots) {
             if (remaining <= 0) {
                 break;
@@ -1383,6 +1415,33 @@ public class SettlemyntsMod {
             inventory.removeItem(slot, take);
             remaining -= take;
         }
+        finishBuyBatch(player, serverLevel, plotId, shopId.get());
+    }
+
+    /**
+     * Refactored out of the old inventory-sourced {@link #sellToShop} 2026-10-20 -- same "resolve
+     * once, loop many" motivation as {@link #processBuyLine}'s own doc, but ALSO reused for a
+     * genuinely different stack *source*: the old caller scans the player's live inventory for
+     * matching stacks, while {@link #confirmShopCart} (the new cart-screen batch path) already has
+     * its {@code soldStacks} sitting in the cart menu's own Sell container, never in the player's
+     * inventory at all. This method deliberately doesn't know or care which -- it just processes
+     * already-resolved {@code soldStacks} into a real transaction (deposit into the shop, pay the
+     * seller, tax, Merchant bonus/XP, message, ledger) and returns how many units were actually
+     * sold (0 if the shop couldn't afford it) -- the caller is responsible for removing exactly that
+     * many units from wherever {@code soldStacks} actually came from, since Yconomics' own "all-or-
+     * nothing" guarantee (itemsSold is always 0 or exactly {@code sum(soldStacks counts)}, see the
+     * original method's own comment) means that's always safe to do unconditionally once this
+     * returns a positive count.
+     */
+    private static int processSellLine(ServerPlayer player, ServerLevel serverLevel, ShopContext shopContext, UUID shopId,
+                                        com.github.cerealklla.settlemynts.zone.ShopResource resource,
+                                        java.util.List<net.minecraft.world.item.ItemStack> soldStacks) {
+        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.SellResult result =
+                com.github.cerealklla.settlemynts.api.Settlemynts.sellToSettlementShop(serverLevel, shopContext.plot().plotId(), shopId, resource, soldStacks);
+        if (result.itemsSold() <= 0) {
+            player.sendSystemMessage(Component.literal("The shop can't afford to buy that right now."));
+            return 0;
+        }
         int nuggetsOwed = result.nuggetsReceived();
         // Merchant skill price bonus, sell-side (2026-10-08) -- same mechanism/formula as
         // MerchantListener's own vanilla-NPC sell bonus: extra nuggets paid directly, since there's
@@ -1390,8 +1449,8 @@ public class SettlemyntsMod {
         // per-unit via ShopPricing.effectiveSellPayout (not a flat % bonus on top of the base payout)
         // -- that method guarantees the result is always strictly less than what the SAME player
         // would currently pay to buy this item back, closing a real zero-cost buy/sell XP loop a
-        // naive flat-% bonus here would otherwise allow (see buyFromShop's own comment for the exact
-        // rounding case found).
+        // naive flat-% bonus here would otherwise allow (see processBuyLine's own comment for the
+        // exact rounding case found).
         if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()) {
             double fraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player);
             int effectivePayoutPerUnit = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveSellPayout(result.sellPricePerUnit(), fraction);
@@ -1400,7 +1459,7 @@ public class SettlemyntsMod {
         // Settlement sales tax (explicit user spec, 2026-10-17) -- the player is the Seller in this
         // transaction, withheld straight out of their payout before it's ever minted/handed over (no
         // withdrawal needed, unlike buyFromShop's case, since this gold was never given to anyone yet).
-        if (resolvedSell.get().owner() instanceof GhostTownHallCoreEntity taxCore) {
+        if (shopContext.owner() instanceof GhostTownHallCoreEntity taxCore) {
             int tax = resolveSalesTax(taxCore, nuggetsOwed);
             if (tax > 0) {
                 nuggetsOwed -= tax;
@@ -1415,18 +1474,85 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.grantMerchantXp(player, nuggetsOwed);
         }
         player.sendSystemMessage(Component.literal("Sold " + result.itemsSold() + " for " + nuggetsOwed + " nuggets."));
-        sendShopGoldUpdate(player, serverLevel, plotId);
-        sendShopStockUpdate(player, serverLevel, plotId, shopId.get());
-        // 2026-10-10 redesign: check this one shop for auto-crafting opportunities once it's gone
-        // quiet, instead of a continuous whole-world ticker -- see ShopCraftingDebounceTicker's own doc.
-        com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker.markActivity(serverLevel, plotId);
-        com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(plotId);
-        // Ledger entry (2026-10-12) -- see buyFromShop's own identical hook/fix.
+        // Ledger entry (2026-10-12) -- see processBuyLine's own identical hook/fix.
         if (ModList.get().isLoaded("blueprynts")) {
             com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
-                    serverLevel, resolvedSell.get().plot(),
+                    serverLevel, shopContext.plot(),
                     "Bought " + result.itemsSold() + "x from " + player.getGameProfile().name() + " for " + nuggetsOwed + " nuggets");
         }
+        return result.itemsSold();
+    }
+
+    /**
+     * "Confirm Purchase" on the new cart-screen {@code plotsign.ShopCartMenu} (2026-10-20) --
+     * resolves the shop ONCE, then processes every distinct listing with something queued in Buy/
+     * Sell against that same resolution (see {@link #processBuyLine}/{@link #processSellLine}'s own
+     * docs for why this avoids the full-world-scan-per-line cost a naive per-slot loop would have).
+     * Grouped by matching {@link ShopListingEntry#matches}, not by slot position, via {@code
+     * zone.ContainerWithdraw#drain} against the menu's own Buy/Sell containers -- a player is free to
+     * rearrange/merge stacks within either column without this caring where exactly they ended up.
+     *
+     * <p>Buy lines are drained from the cart unconditionally (conjured stacks have no real backing,
+     * so there's nothing to lose if a line fails -- "out of stock"/"insufficient funds" still reaches
+     * the player via the usual chat message from {@link #processBuyLine}). Sell lines are different:
+     * {@link com.github.cerealklla.nuclyus.trade.TradeMenuSupport} drain removes real items from the
+     * menu's Sell container as a side effect, so a failed sell line (the shop can't afford it) puts
+     * those real stacks straight back rather than letting them vanish.
+     */
+    public static void confirmShopCart(ServerPlayer player, com.github.cerealklla.settlemynts.plotsign.ShopCartMenu menu) {
+        if (!(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, menu.anchor());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        java.util.Optional<UUID> shopId = resolved.get().plot().shopId();
+        if (shopId.isEmpty()) {
+            return;
+        }
+        java.util.List<net.minecraft.world.Container> boxes =
+                com.github.cerealklla.settlemynts.api.Settlemynts.resolvePlotBoxes(serverLevel, resolved.get().plot().plotId());
+
+        boolean anythingProcessed = false;
+        for (com.github.cerealklla.settlemynts.plotsign.ShopListingEntry listing : menu.listings()) {
+            com.github.cerealklla.settlemynts.zone.ShopResource resource = listing.isTag()
+                    ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, listing.resourceKey()))
+                    : listing.customName().isPresent()
+                        ? com.github.cerealklla.settlemynts.zone.ShopResource.ofExactItem(listing.resourceKey(), listing.customName().get())
+                        : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(listing.resourceKey());
+
+            java.util.List<net.minecraft.world.item.ItemStack> queuedBuy =
+                    com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(java.util.List.of(menu.buyContainer()), resource, Integer.MAX_VALUE);
+            int buyQuantity = queuedBuy.stream().mapToInt(net.minecraft.world.item.ItemStack::getCount).sum();
+            if (buyQuantity > 0) {
+                anythingProcessed = true;
+                processBuyLine(player, serverLevel, resolved.get(), boxes, shopId.get(), resource, buyQuantity);
+            }
+
+            java.util.List<net.minecraft.world.item.ItemStack> queuedSell =
+                    com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(java.util.List.of(menu.sellContainer()), resource, Integer.MAX_VALUE);
+            if (!queuedSell.isEmpty()) {
+                anythingProcessed = true;
+                int sold = processSellLine(player, serverLevel, resolved.get(), shopId.get(), resource, queuedSell);
+                if (sold <= 0) {
+                    // Nothing sold (shop couldn't afford it) -- the drain above already pulled these
+                    // real stacks out of the Sell container; give them straight back rather than
+                    // losing them.
+                    for (net.minecraft.world.item.ItemStack stack : queuedSell) {
+                        if (!player.getInventory().add(stack)) {
+                            player.getInventory().placeItemBackInInventory(stack);
+                        }
+                    }
+                }
+            }
+        }
+        if (!anythingProcessed) {
+            player.sendSystemMessage(Component.literal("Nothing queued to buy or sell."));
+            return;
+        }
+        finishBuyBatch(player, serverLevel, resolved.get().plot().plotId(), shopId.get());
     }
 
     /**

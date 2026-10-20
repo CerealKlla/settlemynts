@@ -17,11 +17,11 @@ import com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests;
 import com.github.cerealklla.settlemynts.plotsign.client.ClientProximityScanner;
 import com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotConfigSignMenuScreen;
+import com.github.cerealklla.settlemynts.plotsign.client.ShopCartScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotDetailsScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.NpcMenuScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.PlotManagementScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.ShopPromptOverlay;
-import com.github.cerealklla.settlemynts.plotsign.client.ShopScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.WishlistScreen;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.registration.ModMenus;
@@ -134,6 +134,7 @@ public class SettlemyntsModClient {
     @SubscribeEvent
     static void onRegisterMenuScreens(RegisterMenuScreensEvent event) {
         event.register(ModMenus.GUARDHOUSE_FOOD.get(), GuardhouseFoodScreen::new);
+        event.register(ModMenus.SHOP_CART.get(), ShopCartScreen::new);
     }
 
     @SubscribeEvent
@@ -234,11 +235,12 @@ public class SettlemyntsModClient {
             }
         });
 
+        // Buy mode no longer reaches this at all, 2026-10-20 -- it opens a real ShopCartMenu via
+        // vanilla's own player.openMenu path now instead of sending OpenShopPayload (see that
+        // class's own doc), so this request is only ever manage=true in practice these days.
         ClientPlotSignRequests.takePendingShop().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(request.manage()
-                        ? new com.github.cerealklla.settlemynts.plotsign.client.ManageShopScreen(request)
-                        : new ShopScreen(request));
+                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.ManageShopScreen(request));
             }
         });
 
@@ -248,19 +250,23 @@ public class SettlemyntsModClient {
             }
         });
 
-        // Patches the currently-open Shop screen's gold totals in place after a Buy/Sell (real
-        // report, 2026-10-10) -- deliberately NOT routed through the "open a screen" pattern above,
-        // since every one of those is a no-op while a screen is already open, which is exactly the
-        // case here (the Shop screen itself is what's open when this fires).
+        // Patches the currently-open cart menu's gold totals in place after a Buy/Sell (real report,
+        // 2026-10-10, now against the real ShopCartMenu, 2026-10-20) -- checked against the player's
+        // live containerMenu rather than the currently-displayed Screen, since the menu itself is the
+        // thing that actually holds this state.
         ClientPlotSignRequests.takePendingGoldUpdate().ifPresent(update -> {
-            if (Minecraft.getInstance().screen instanceof ShopScreen shopScreen) {
-                shopScreen.updateGold(update.shopGoldNuggets(), update.playerGoldNuggets());
+            if (Minecraft.getInstance().player != null
+                    && Minecraft.getInstance().player.containerMenu instanceof com.github.cerealklla.settlemynts.plotsign.ShopCartMenu cartMenu) {
+                cartMenu.updateGold(update.shopGoldNuggets(), update.playerGoldNuggets());
             }
         });
 
-        // Same pattern as the gold-update patch above, for the "Shop Stock" column (real report,
-        // 2026-10-10: "When buying/selling from a store the shop stock number is not changing") --
-        // see ShopStockUpdatePayload's own doc.
+        // Real gap, 2026-10-20: the "Shop Stock" column this used to patch was part of the old
+        // button-list ShopScreen, now replaced by ShopCartMenu's infinite-catalog design (see that
+        // class's own doc) -- a live per-row stock count isn't rendered anywhere in the new screen
+        // yet. The server still correctly enforces real stock at Confirm time regardless; this is
+        // purely a missing display refinement, not a correctness gap. See ShopStockUpdatePayload's
+        // own doc for the original intent.
         // Opens the WishlistScreen on "Press H to chat," or refreshes it in place if a "Sell" click
         // on that same screen just re-sent fresh data (same dual-purpose shape as the gold/stock
         // patches above vs. the "open a new screen" pattern everything else here uses).
@@ -277,11 +283,7 @@ public class SettlemyntsModClient {
             }
         });
 
-        ClientPlotSignRequests.takePendingStockUpdate().ifPresent(update -> {
-            if (Minecraft.getInstance().screen instanceof ShopScreen shopScreen) {
-                shopScreen.updateListings(update.listings());
-            }
-        });
+        ClientPlotSignRequests.takePendingStockUpdate(); // Consumed and discarded -- see the comment above.
 
         // NPC Menu overhaul (2026-10-16) -- "G" (above) and a plain right-click both land here.
         ClientPlotSignRequests.takePendingNpcMenu().ifPresent(request -> {
