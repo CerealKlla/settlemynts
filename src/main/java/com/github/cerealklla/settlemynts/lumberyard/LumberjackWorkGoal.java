@@ -210,7 +210,13 @@ public class LumberjackWorkGoal extends Goal {
                 }
                 stuckGiveUpPos = currentPos;
                 if (consecutiveStuckGiveUps >= STUCK_RESCUE_THRESHOLD) {
-                    int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, pendingTarget.getX(), pendingTarget.getZ());
+                    // Real report, 2026-10-20: workers kept "suffocating in a wall" at the exact same
+                    // coordinates across many respawns -- this teleport's target column is the tree
+                    // itself, so the raw heightmap (which only ignores LEAVES, not LOGS) landed workers
+                    // inside the trunk/canopy almost every time, same heightmap-contamination bug
+                    // already found and fixed for Guard/Resident/Farmer (see npc.NpcTreetopEscape's own
+                    // doc) but never propagated to this, a separate rescue path built the same day.
+                    int surfaceY = com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.realSurfaceY(level, pendingTarget.getX(), pendingTarget.getZ());
                     worker.getNavigation().stop();
                     worker.teleportTo(pendingTarget.getX() + 0.5, surfaceY, pendingTarget.getZ() + 0.5);
                     consecutiveStuckGiveUps = 0;

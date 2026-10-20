@@ -603,8 +603,17 @@ public final class PlannedInventoryClearing {
         }
         long directCost = cheapestSellerPrice(level, participants, buyer, key);
 
+        // Real production incident, 2026-10-20: a single call here took 44 real seconds (one tick
+        // away from a second watchdog crash the same night) -- the recursive cost search below has no
+        // memoization at all, so the same ingredient's cost (e.g. a furnace fuel item shared by many
+        // different smeltable alternates, itself possibly smeltable too) gets recomputed from scratch
+        // every time it's reached by a different branch, blowing up combinatorially with recipe/fuel
+        // alternate count rather than staying bounded by the number of distinct resources involved.
+        // Fresh per real unit-fulfillment attempt (costs can legitimately change between attempts as
+        // stock/participants shift), threaded down through the whole recursive search below.
+        Map<ResourceKey, Long> costMemo = new java.util.HashMap<>();
         Optional<CraftOption> craftOption = key.isTag() ? Optional.empty()
-                : cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting);
+                : cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting, costMemo);
 
         boolean useCraft = craftOption.isPresent() && (directCost < 0 || craftOption.get().cost() <= directCost);
         if (useCraft) {
@@ -627,7 +636,8 @@ public final class PlannedInventoryClearing {
      * {@code id} itself before recursing into {@link #estimateCraftCost}.
      */
     private static Optional<CraftOption> cheapestCraftOption(ServerLevel level, List<Participant> participants, Participant buyer,
-                                                               Identifier id, PlotCraftingCapability capability, Set<Identifier> visiting) {
+                                                               Identifier id, PlotCraftingCapability capability, Set<Identifier> visiting,
+                                                               Map<ResourceKey, Long> costMemo) {
         if (visiting.contains(id)) {
             return Optional.empty();
         }
@@ -637,7 +647,7 @@ public final class PlannedInventoryClearing {
             if (!candidate.craftableWith(capability)) {
                 continue;
             }
-            long cost = estimateCraftCost(level, participants, buyer, candidate, capability, nextVisiting);
+            long cost = estimateCraftCost(level, participants, buyer, candidate, capability, nextVisiting, costMemo);
             if (cost >= 0 && (best == null || cost < best.cost())) {
                 best = new CraftOption(candidate, cost);
             }
@@ -660,10 +670,11 @@ public final class PlannedInventoryClearing {
      * than it really is.
      */
     private static long estimateCraftCost(ServerLevel level, List<Participant> participants, Participant buyer,
-                                           LyfeCraftingBridge.RecipeInfo recipe, PlotCraftingCapability capability, Set<Identifier> visiting) {
+                                           LyfeCraftingBridge.RecipeInfo recipe, PlotCraftingCapability capability, Set<Identifier> visiting,
+                                           Map<ResourceKey, Long> costMemo) {
         long total = 0;
         for (Map.Entry<Identifier, Integer> entry : recipe.specificComponents().entrySet()) {
-            long unitCost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(entry.getKey(), false), capability, visiting);
+            long unitCost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(entry.getKey(), false), capability, visiting, costMemo);
             if (unitCost < 0) {
                 return -1;
             }
@@ -672,7 +683,7 @@ public final class PlannedInventoryClearing {
         for (Map.Entry<String, Integer> entry : recipe.genericComponents().entrySet()) {
             long cheapestMemberUnitCost = -1;
             for (Identifier member : LyfeCraftingBridge.componentGroupMembers(entry.getKey())) {
-                long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), capability, visiting);
+                long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), capability, visiting, costMemo);
                 if (cost >= 0 && (cheapestMemberUnitCost < 0 || cost < cheapestMemberUnitCost)) {
                     cheapestMemberUnitCost = cost;
                 }
@@ -686,24 +697,37 @@ public final class PlannedInventoryClearing {
         return (total + outputCount - 1) / outputCount;
     }
 
-    /** Non-mutating: the cheaper of direct-buy or recursive self-craft for one unit of {@code key}, or {@code -1} if neither is achievable. */
+    /**
+     * Non-mutating: the cheaper of direct-buy or recursive self-craft for one unit of {@code key}, or
+     * {@code -1} if neither is achievable. Checks/populates {@code costMemo} first -- see {@link
+     * #fulfillOneUnit}'s own doc for why this exists (real incident: unmemoized, this recursion could
+     * take 44+ real seconds for one single resource with a deep/wide alternate-fuel dependency chain).
+     * Only ever caches a successfully-resolved ({@code >= 0}) result, never a {@code -1} -- a {@code -1}
+     * can legitimately depend on which cyclic path reached this key first (the {@code visiting} guard),
+     * so caching it risks reusing a cycle artifact from one path as a false negative for a different,
+     * genuinely-unblocked path to the same resource; a real resolved cost has no such path-dependence
+     * (the world state it's computed from doesn't change mid-search), so it's always safe to reuse.
+     */
     private static long cheapestCostForOneUnit(ServerLevel level, List<Participant> participants, Participant buyer,
-                                                ResourceKey key, PlotCraftingCapability capability, Set<Identifier> visiting) {
+                                                ResourceKey key, PlotCraftingCapability capability, Set<Identifier> visiting,
+                                                Map<ResourceKey, Long> costMemo) {
+        Long cached = costMemo.get(key);
+        if (cached != null) {
+            return cached;
+        }
         long direct = cheapestSellerPrice(level, participants, buyer, key);
         long craft = -1;
         if (!key.isTag()) {
-            Optional<CraftOption> option = cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting);
+            Optional<CraftOption> option = cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting, costMemo);
             if (option.isPresent()) {
                 craft = option.get().cost();
             }
         }
-        if (direct < 0) {
-            return craft;
+        long result = direct < 0 ? craft : (craft < 0 ? direct : Math.min(direct, craft));
+        if (result >= 0) {
+            costMemo.put(key, result);
         }
-        if (craft < 0) {
-            return direct;
-        }
-        return Math.min(direct, craft);
+        return result;
     }
 
     /** Cheapest real Shop listing price for {@code key} across every participant except {@code buyer}, or {@code -1} if nobody lists it. Price-only -- not stock-limited, see class doc. */
@@ -825,10 +849,12 @@ public final class PlannedInventoryClearing {
 
     private static Identifier cheapestGroupMember(ServerLevel level, List<Participant> participants, Participant buyer,
                                                     List<Identifier> members, PlotCraftingCapability capability, Set<Identifier> visiting) {
+        // Fresh per call, same reasoning as fulfillOneUnit's own costMemo -- see that method's doc.
+        Map<ResourceKey, Long> costMemo = new java.util.HashMap<>();
         Identifier best = null;
         long bestCost = -1;
         for (Identifier member : members) {
-            long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), capability, visiting);
+            long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), capability, visiting, costMemo);
             if (cost >= 0 && (bestCost < 0 || cost < bestCost)) {
                 bestCost = cost;
                 best = member;
