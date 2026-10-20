@@ -48,11 +48,22 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
     public LumberjackWorkerEntity(EntityType<? extends Villager> type, Level level) {
         super(type, level);
         skipDropExperience();
-        // Real report, 2026-10-17: "NPCs keep getting stuck up in trees" -- neither vanilla's Mob nor
-        // AbstractVillager sets a PathType.LEAVES malus, so a tree's leaf canopy reads as ordinary
-        // walkable ground; a Lumberjack working directly at trees is especially prone to routing up
-        // into one. See guardhouse.GuardEntity's own identical fix for the full writeup.
-        this.setPathfindingMalus(net.minecraft.world.level.pathfinder.PathType.LEAVES, -1.0F);
+        // The suite-wide 2026-10-17 PathType.LEAVES fix (see guardhouse.GuardEntity's own identical
+        // one) sets this malus to -1.0F (fully BLOCKED, vanilla's "impassable" convention) for every
+        // ground NPC, to stop one from pathing up into a tree's canopy. That's wrong specifically for
+        // a Lumberjack -- real report, 2026-10-21: "walking up to fully grown trees and then turning
+        // around." A mature tree's own leaf skirt routinely overhangs down to ground level right next
+        // to its trunk, well within LumberjackWorkGoal's own 3-block harvest-arrive radius -- with
+        // LEAVES fully blocked, the pathfinder has no route at all into that radius and the worker
+        // paths as far as the canopy's edge, then has nowhere left to go (reads as "turning around").
+        // Left at neutral (0.0F, no preference either way, same as plain ground) for this entity only
+        // -- the "stuck up in a tree" concern the harsh malus was originally fixing is independently
+        // covered now by this class's own isActuallyTrappedUnderground (a real-ceiling check, ignores
+        // tree material) and npc.NpcTreetopEscape (now fixed to scan past tree material for genuine
+        // stranding, see its own doc), so a Lumberjack no longer needs the pathfinder itself to avoid
+        // leaves pre-emptively. Every other ground NPC (Guard/Resident/Farmer/Miner) keeps the harsh
+        // -1.0F -- none of them have a job that requires walking up to a tree's own trunk.
+        this.setPathfindingMalus(net.minecraft.world.level.pathfinder.PathType.LEAVES, 0.0F);
     }
 
     /** Called once by {@link LumberjackSpawnTicker} right after construction. */

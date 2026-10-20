@@ -5,7 +5,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Mob;
-import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Shared "stuck on top of a tree" safety net for this suite's custom ground NPCs -- extracted
@@ -14,35 +14,42 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * pathing THROUGH a tree's interior, not from climbing UP ONTO its flat canopy top, which reads as
  * ordinary walkable ground). Real report, 2026-10-20: another NPC (not a Guard) found stuck the same
  * way, confirming the gap flagged but not fixed in Guard's own decisions.md entry actually bit live.
- * Checked directly against the block underfoot rather than inferring from height alone, since a
- * legitimate multi-story building's upper floor is also "above the no-leaves surface reading" (that
- * heightmap reports the roof, not each floor) but is never standing on leaves.
  *
- * <p><b>Elevation guard added 2026-10-21</b> -- real regression found the very next day: a Lumberjack
- * worker (whose entire job is standing right next to a tree's trunk at ground level to chop it, see
- * {@code lumberyard.LumberjackWorkGoal}) would walk up to a tree and never actually harvest it. Root
- * cause: the original check above fires on "is my feet in/on ANY leaves block," with no distinction
- * between "stranded tens of blocks up on a canopy's flat top" (the real Guard report this was built
- * for) and "standing at completely normal ground level under a tree's own low-hanging canopy skirt,
- * leaf litter, or an overhanging branch" -- the latter is the Lumberjack's routine, expected working
- * position. Firing on every AI tick in that state calls {@code getNavigation().stop()} continuously,
- * which starves {@code LumberjackWorkGoal#tick}'s own repath logic of the uninterrupted travel time
- * it needs to ever get within harvest range, hanging the worker in a visible "walked up, then just
- * stands there" loop -- exactly this report. Fixed by only triggering once the NPC is genuinely
- * elevated above the real (leaves-ignoring) ground, not merely touching a leaf block at any height --
- * a worker stranded high in a canopy will clear this by a wide margin, while one at normal ground
- * level under a low canopy/litter never will.
+ * <p><b>Elevation guard added 2026-10-21, then corrected the same day</b> -- a Lumberjack worker
+ * (whose entire job is standing right next to a tree's trunk at ground level, see {@code
+ * lumberyard.LumberjackWorkGoal}) would walk up to a tree and never actually harvest it, because the
+ * original check fired on "is my feet in/on ANY leaves block" with no distinction from "standing at
+ * normal ground level under a tree's own low leaves." The first fix added an elevation check against
+ * {@code Heightmap.Types.MOTION_BLOCKING_NO_LEAVES} -- which turned out to be the wrong reference
+ * surface: that heightmap type only ignores LEAVES when scanning for the topmost solid block, but a
+ * tree's own horizontal branch LOG is just as solid as real terrain, so an NPC perched on a branch
+ * (real report, confirmed live via a screenshot + direct block inspection: feet in leaves, standing
+ * on a log branch at y=70 with real ground not until y=62) made the heightmap itself report the
+ * branch as "the surface" -- collapsing the computed elevation difference to zero and defeating the
+ * whole check, including the teleport destination (which would have landed the NPC right back on the
+ * same branch it was already stuck on).
+ *
+ * <p>Fixed by never trusting a heightmap scan here at all -- instead, scans straight down from the
+ * NPC's feet counting through consecutive LEAVES/LOGS blocks (both still "part of the tree" from this
+ * check's perspective, not just leaves) until hitting the first block that's neither, which is the
+ * real ground/structure underneath. A short count (a block or two of leaf litter, or a worker simply
+ * standing in a low branch's shadow) is normal ground-level tree work and is left alone; a long count
+ * confirms the NPC is genuinely elevated on tree material with nothing real supporting it close by,
+ * and the scan's own endpoint -- the real solid block it finally found -- is used as the teleport
+ * destination, so the NPC always lands on verified real ground, never back on another part of the
+ * same tree.
  */
 public final class NpcTreetopEscape {
 
-    // How far above the real ground (MOTION_BLOCKING_NO_LEAVES) an NPC's feet must be, on top of
-    // standing on/in a leaves block, before this counts as "stranded on a canopy" rather than
-    // "working at normal ground level under low-hanging leaves/litter." Deliberately smaller than
-    // GuardEntity's own 5-block UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS (that's the opposite direction,
-    // below real ground, and tolerates terrain irregularity differently) -- a genuinely stranded NPC
-    // reported "tens of blocks" up, while a real tree's lowest leaves rarely sit more than 1-2 blocks
-    // above the ground a worker stands on beside its trunk.
-    private static final int MIN_STRANDED_ELEVATION_BLOCKS = 3;
+    // How many consecutive leaves/log blocks (tree material) an NPC may have directly beneath its
+    // feet before this counts as "stranded in the tree" rather than "working at normal ground level
+    // under a low branch/leaf litter." A real tree's lowest leaves/litter rarely stack more than a
+    // block or two above the ground a worker stands on beside its trunk.
+    private static final int MIN_STRANDED_GAP_BLOCKS = 3;
+
+    // Bounds the downward scan against an oddly tall structure or a genuine void below (e.g. standing
+    // over a ravine under the tree) -- generously covers even a very tall vanilla tree's full canopy.
+    private static final int MAX_SCAN_DEPTH_BLOCKS = 48;
 
     private NpcTreetopEscape() {
     }
@@ -55,11 +62,20 @@ public final class NpcTreetopEscape {
         if (!level.getBlockState(feetPos).is(BlockTags.LEAVES) && !level.getBlockState(feetPos.below()).is(BlockTags.LEAVES)) {
             return;
         }
-        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
-        if (feetY - surfaceY < MIN_STRANDED_ELEVATION_BLOCKS) {
-            return;
+        BlockPos scan = feetPos.below();
+        int gap = 0;
+        while (gap < MAX_SCAN_DEPTH_BLOCKS && isTreeMaterial(level.getBlockState(scan))) {
+            scan = scan.below();
+            gap++;
+        }
+        if (gap < MIN_STRANDED_GAP_BLOCKS || gap >= MAX_SCAN_DEPTH_BLOCKS) {
+            return; // Real ground close by (normal tree-base work), or no real ground found at all -- leave it alone either way.
         }
         npc.getNavigation().stop();
-        npc.teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
+        npc.teleportTo(blockX + 0.5, scan.getY() + 1, blockZ + 0.5);
+    }
+
+    private static boolean isTreeMaterial(BlockState state) {
+        return state.isAir() || state.is(BlockTags.LEAVES) || state.is(BlockTags.LOGS);
     }
 }
