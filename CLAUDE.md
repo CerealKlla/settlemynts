@@ -564,3 +564,9 @@ with `if (slotIndex < 0) return;`, so suppressing `-999` entirely just leaves an
 no-op for any click not over a real `Slot`. `ShopCartScreen` gained the identical override.
 `./gradlew build` green, whole-suite (13 mods) rebuild + `runServer` boot-smoke-test clean. **Not
 yet re-confirmed live.**
+
+**Shop screen's "wants N" line removed, same day** -- explicit request: "Don't show the preferred
+count on the shop, players don't need to know that." A plot's Planned Inventory target is the
+owner's own private restocking plan; the Sell column's gate/cap (`ShopCartMenu.SellSlot`/
+`confirmShopCart`) is unaffected, only the price-line display text changed. `./gradlew build`
+green.
