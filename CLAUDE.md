@@ -548,3 +548,19 @@ vanilla's own `GoalSelector` fall through to it automatically whenever the spell
 is the only place this mod ever references `com.github.cerealklla.lyfe.api.Lyfe` for this feature,
 same isolation convention as `LyfeManaBridge` above. `./gradlew build` green, whole-suite (13 mods)
 rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested.**
+
+**Real bug fixed, confirmed live via screenshot, same day: a Shop catalog item could be dropped on
+the ground by clicking outside the trade window** -- explicit user report citing the exact
+precedent this screen was supposed to already follow: "citing the methodology used for the Kyt
+editor screen." The gap: `ShopCartMenu#removed` only discards a carried conjured stack when the
+screen *closes*; clicking outside the panel while holding something is a completely different
+vanilla path (`AbstractContainerScreen#hasClickedOutside` -> the `-999` sentinel ->
+`AbstractContainerMenu#doClick` calling `player.drop(getCarried(), true)` directly), which never
+goes through `removed()` at all and has no conjured-item awareness whatsoever. Kyt's own
+`loadout.client.LoadoutEditorScreen` already hit this identical bug (2026-10-16) and fixed it by
+overriding `hasClickedOutside` to always return `false` -- confirmed safe there against the
+decompiled `AbstractContainerMenu#doClick` source, since every non-`-999` branch already starts
+with `if (slotIndex < 0) return;`, so suppressing `-999` entirely just leaves an ordinary safe
+no-op for any click not over a real `Slot`. `ShopCartScreen` gained the identical override.
+`./gradlew build` green, whole-suite (13 mods) rebuild + `runServer` boot-smoke-test clean. **Not
+yet re-confirmed live.**

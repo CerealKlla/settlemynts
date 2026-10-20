@@ -128,4 +128,28 @@ public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
     public boolean isPauseScreen() {
         return false;
     }
+
+    /**
+     * Real report, 2026-10-20, with a screenshot of a Shop catalog item dropped on the ground:
+     * "you are able to pick up a shop item and drop it on the ground by clicking outside the trade
+     * window... citing the methodology used for the Kyt editor screen" -- that's exactly the fix
+     * this is. Vanilla's own {@code AbstractContainerScreen#mouseClicked}/{@code mouseReleased} both
+     * compute "did this click land outside the panel" via this exact method, and send the
+     * server-authoritative {@code SLOT_CLICKED_OUTSIDE} (-999) sentinel for one when it did --
+     * {@code AbstractContainerMenu#doClick} handles that sentinel by unconditionally calling {@code
+     * player.drop(getCarried(), true)}, a direct world-item spawn with no conjured-item awareness at
+     * all, completely bypassing {@code ShopCartMenu#removed}'s own discard logic (which only ever
+     * runs when the screen actually *closes*, not on every click). Kyt's own
+     * {@code loadout.client.LoadoutEditorScreen} hit this identical bug and fixed it exactly this
+     * way: forcing this to always return {@code false} is safe, not just convenient -- confirmed
+     * there against the decompiled {@code AbstractContainerMenu#doClick} source that every
+     * non-{@code -999} branch already starts with {@code if (slotIndex < 0) return;}, so suppressing
+     * the -999 sentinel entirely still leaves a completely safe no-op for any click/release that
+     * isn't over a real {@link net.minecraft.world.inventory.Slot} -- exactly ordinary vanilla
+     * behavior for clicking dead background space *inside* a normal container screen's own panel.
+     */
+    @Override
+    protected boolean hasClickedOutside(double mouseX, double mouseY, int xo, int yo) {
+        return false;
+    }
 }
