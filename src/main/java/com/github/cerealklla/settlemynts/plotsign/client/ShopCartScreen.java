@@ -96,11 +96,14 @@ public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
             // Real request, 2026-10-20: "need to show the real inventory count available here" -- the
             // catalog slot's own icon always shows a full conjured max-size stack (it has to, for the
             // "infinite stack" pick-up UX), so the real current stock is drawn here instead.
-            // "wants N" (2026-10-20) -- only a resource with a positive planned-inventory deficit can
-            // actually be placed into the Sell column at all (see ShopCartMenu.SellSlot's own doc), so
-            // this doubles as the player's only in-UI signal for which rows that's currently true of.
-            String priceLine = listing.shopStock() + " in stock   " + listing.pricePerUnit() + "g / " + listing.buyPricePerUnit() + "g"
-                    + (listing.plannedInventoryRemaining() > 0 ? "   wants " + listing.plannedInventoryRemaining() : "");
+            // The "wants N" planned-inventory-deficit suffix that used to sit here was removed per
+            // explicit request the same day: "Don't show the preferred count on the shop, players
+            // don't need to know that" -- a plot's own Planned Inventory target is the owner's
+            // private restocking plan, not public shopper-facing info (same treatment this project
+            // already gives SuppressedShopResource/Manage Shop internals elsewhere). The underlying
+            // mechanism (ShopCartMenu.SellSlot's gate, confirmShopCart's cap) is completely
+            // unaffected -- only this display line changed.
+            String priceLine = listing.shopStock() + " in stock   " + listing.pricePerUnit() + "g / " + listing.buyPricePerUnit() + "g";
             graphics.text(font, priceLine, left + SHOP_X + 20, rowTextY, 0xFFFFFFFF);
         }
         if (listings.size() > ShopCartMenu.VISIBLE_SHOP_ROWS) {
