@@ -73,11 +73,15 @@ public final class PlannedInventoryClearing {
     private record Participant(PlotRecord plot, List<Container> boxes) {
     }
 
-    public static void settleGroup(ServerLevel level, List<PlotRecord> plots) {
-        // Temporary debug logging (2026-10-10, real report: "the server seems very laggy right now")
-        // -- this is the once-a-day midnight auto-purchase/auto-craft pass; timed end to end so a lag
-        // spike around a day boundary can be attributed to this specifically rather than guessed at.
-        long start = System.nanoTime();
+    /**
+     * Builds this settlement's buyer/seller participant list up front (confirmed fast -- see {@link
+     * MidnightWorkQueue}'s own doc, the real production incident this fixed), then enqueues one small
+     * job per resource onto {@code queue} instead of settling every resource synchronously in a single
+     * tight loop. A settlement with a large participant/resource count now spreads its own settlement
+     * pass across as many ticks as it takes to drain, instead of blocking the tick it was detected on
+     * for however long the whole pass happens to take.
+     */
+    public static void settleGroup(ServerLevel level, List<PlotRecord> plots, MidnightWorkQueue queue) {
         List<Participant> participants = new ArrayList<>();
         for (PlotRecord plot : plots) {
             // Only exclude a plot that can do neither side of a trade -- a shop with real listings but
@@ -106,11 +110,14 @@ public final class PlannedInventoryClearing {
         SettlemyntsMod.LOGGER.info(
                 "PlannedInventoryClearing: starting midnight settlement pass -- {} participant(s), {} resource(s)",
                 participants.size(), resourceKeys.size());
+        long start = System.nanoTime();
         for (ResourceKey key : resourceKeys) {
-            settleResource(level, participants, key);
+            queue.enqueue(() -> settleResource(level, participants, key));
         }
-        double ms = (System.nanoTime() - start) / 1_000_000.0;
-        SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: midnight settlement pass finished in {}ms", String.format("%.1f", ms));
+        queue.enqueue(() -> {
+            double ms = (System.nanoTime() - start) / 1_000_000.0;
+            SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: midnight settlement pass finished in {}ms (wall-clock, spread across ticks)", String.format("%.1f", ms));
+        });
     }
 
     /**
@@ -129,16 +136,34 @@ public final class PlannedInventoryClearing {
      */
     public static void craftFromOwnStockForGroup(ServerLevel level, List<PlotRecord> plots) {
         for (PlotRecord plot : plots) {
-            if (plot.shopId().isEmpty() || plot.plannedInventory().isEmpty()) {
-                continue;
-            }
-            Optional<Geometry.Polygon> polygon = Settlemynts.resolvePolygonDirect(level, plot);
-            if (polygon.isEmpty()) {
-                continue; // Natural-village plot, or otherwise unresolvable -- no Lyfe structure can exist there anyway.
-            }
-            List<Container> boxes = Settlemynts.resolveBoxesForPolygon(level, polygon.get());
-            craftFromOwnStock(level, plot, polygon.get(), boxes);
+            craftFromOwnStockForPlot(level, plot);
         }
+    }
+
+    /**
+     * Same as {@link #craftFromOwnStockForGroup}, but enqueues one job per plot onto {@link
+     * MidnightWorkQueue} instead of looping synchronously -- see that class's own doc for why. Each
+     * plot's own {@code MAX_CRAFTS_PER_PLOT_PER_TARGET}-bounded crafting loop is cheap on its own, but
+     * a settlement with many crafting plots could still add up; spreading by plot costs nothing extra
+     * (crafting order between plots was never meaningful) and keeps this step as tick-safe as {@link
+     * #settleGroup} now is.
+     */
+    public static void enqueueCraftFromOwnStockForGroup(ServerLevel level, List<PlotRecord> plots, MidnightWorkQueue queue) {
+        for (PlotRecord plot : plots) {
+            queue.enqueue(() -> craftFromOwnStockForPlot(level, plot));
+        }
+    }
+
+    private static void craftFromOwnStockForPlot(ServerLevel level, PlotRecord plot) {
+        if (plot.shopId().isEmpty() || plot.plannedInventory().isEmpty()) {
+            return;
+        }
+        Optional<Geometry.Polygon> polygon = Settlemynts.resolvePolygonDirect(level, plot);
+        if (polygon.isEmpty()) {
+            return; // Natural-village plot, or otherwise unresolvable -- no Lyfe structure can exist there anyway.
+        }
+        List<Container> boxes = Settlemynts.resolveBoxesForPolygon(level, polygon.get());
+        craftFromOwnStock(level, plot, polygon.get(), boxes);
     }
 
     /** Single-plot entry point -- see {@link #craftFromOwnStockForGroup}'s own doc for the full story. */

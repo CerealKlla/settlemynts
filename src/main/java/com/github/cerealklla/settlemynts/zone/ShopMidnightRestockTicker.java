@@ -28,9 +28,17 @@ public final class ShopMidnightRestockTicker {
     private static final long TICKS_PER_DAY = 24000L;
 
     private long lastKnownDay = -1;
+    // Real production incident, 2026-10-20: the heavy per-settlement steps below used to run fully
+    // synchronously the instant a day boundary was detected, and a single settlement's own
+    // PlannedInventoryClearing#settleGroup pass took 57 real seconds end to end -- long enough to
+    // trip the dedicated server's 60-second ServerWatchdog and force-crash the whole process mid-tick.
+    // See MidnightWorkQueue's own doc for the full writeup and why this can't just move to a real
+    // background thread instead.
+    private final MidnightWorkQueue workQueue = new MidnightWorkQueue();
 
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
+        workQueue.pump();
         MinecraftServer server = event.getServer();
         long currentDay = Math.floorDiv(server.overworld().getOverworldClockTime(), TICKS_PER_DAY);
         if (lastKnownDay < 0) {
@@ -65,15 +73,17 @@ public final class ShopMidnightRestockTicker {
                 // Hall's own boxes into each Guardhouse's boxes BEFORE the Planned-Inventory settlement
                 // and food auto-buy below run, so gold moved this same tick is already spendable the
                 // same night, not just starting the next one. See DefenseSpendingTransfer's own doc.
-                com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingTransfer.transferForSettlement(level, core);
-                PlannedInventoryClearing.settleGroup(level, core.getPlots());
+                // Queued (not called directly) so it still runs strictly before the settleGroup jobs
+                // enqueued right after it -- MidnightWorkQueue is FIFO, so queue order is run order.
+                workQueue.enqueue(() -> com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingTransfer.transferForSettlement(level, core));
+                PlannedInventoryClearing.settleGroup(level, core.getPlots(), workQueue);
                 // Explicit third step (2026-10-10 redesign): turn whatever just changed hands above
                 // into finished goods, for this same settlement only -- see that method's own doc.
-                PlannedInventoryClearing.craftFromOwnStockForGroup(level, core.getPlots());
+                PlannedInventoryClearing.enqueueCraftFromOwnStockForGroup(level, core.getPlots(), workQueue);
                 // "Preferred Food" (explicit user spec, 2026-10-16) -- buys any Guardhouse-typed
                 // plot's food store up toward its own threshold, same day-boundary as everything
                 // above. See GuardhouseFoodAutoBuy's own doc for the full mechanism.
-                com.github.cerealklla.settlemynts.guardhouse.GuardhouseFoodAutoBuy.buyForSettlement(level, core);
+                workQueue.enqueue(() -> com.github.cerealklla.settlemynts.guardhouse.GuardhouseFoodAutoBuy.buyForSettlement(level, core));
                 // Fourth step, same day (explicit follow-up: "that way npc villages could
                 // automatically list food separated by value") -- auto-list whatever crafted-food
                 // quality variants just got produced above, for every NPC-owned (no player owner)
@@ -84,7 +94,7 @@ public final class ShopMidnightRestockTicker {
                 // which crafted dishes aren't gated on anyway.
                 for (PlotRecord plot : core.getPlots()) {
                     if (plot.owner().isEmpty()) {
-                        ShopSeeding.autoListCraftedFoodVariants(level, plot, BlockPos.ZERO);
+                        workQueue.enqueue(() -> ShopSeeding.autoListCraftedFoodVariants(level, plot, BlockPos.ZERO));
                     }
                 }
             }
@@ -126,7 +136,7 @@ public final class ShopMidnightRestockTicker {
                 }
                 ShopSeeding.restockNaturalShop(level, owner, representative, BlockPos.ZERO);
             }
-            PlannedInventoryClearing.settleGroup(level, plots);
+            PlannedInventoryClearing.settleGroup(level, plots, workQueue);
         }
     }
 
