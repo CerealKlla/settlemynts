@@ -1,9 +1,10 @@
 package com.github.cerealklla.settlemynts.npc;
 
+import com.github.cerealklla.settlemynts.bridge.LyfeManaBridge;
+
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.LivingEntity;
-import net.neoforged.fml.ModList;
 
 /**
  * A floating health-bar nameplate for this suite's custom NPCs (Guard, Resident, Farmer, Lumberjack,
@@ -14,13 +15,14 @@ import net.neoforged.fml.ModList;
  * absent or full), so a healthy/topped-up NPC never shows a bar at all.
  *
  * <p>Appends a Mana indicator (design doc, 2026-10-20, Lyfe's own feature: "represented... above
- * NPC heads when not at 100%") when Lyfe is loaded and {@code api.Lyfe#manaNameplateLine} returns
- * one -- added here, in Settlemynts (which already depends on Lyfe, one-way), rather than a second
- * independent nameplate writer in Lyfe, since two listeners both calling {@code setCustomName} on
- * the same entity would race and stomp each other's text. Placed on the *same* line as the health
- * bar (two spaces apart), not a second stacked line -- vanilla's own nametag rendering draws
- * {@code Entity#getDisplayName()} as a single line, with no built-in support for an embedded
- * newline actually breaking visually onto a second row.
+ * NPC heads when not at 100%") via {@link LyfeManaBridge} (never {@code
+ * com.github.cerealklla.lyfe.api.Lyfe} directly -- see that bridge's own doc) -- added here, in
+ * Settlemynts (which already depends on Lyfe, one-way), rather than a second independent nameplate
+ * writer in Lyfe, since two listeners both calling {@code setCustomName} on the same entity would
+ * race and stomp each other's text. Placed on the *same* line as the health bar (two spaces apart),
+ * not a second stacked line -- vanilla's own nametag rendering draws {@code
+ * Entity#getDisplayName()} as a single line, with no built-in support for an embedded newline
+ * actually breaking visually onto a second row.
  */
 public final class NpcHealthBar {
 
@@ -33,8 +35,8 @@ public final class NpcHealthBar {
     }
 
     public static void update(LivingEntity npc) {
-        Component manaLine = ModList.get().isLoaded("lyfe")
-                ? com.github.cerealklla.lyfe.api.Lyfe.manaNameplateLine(npc).orElse(null)
+        Component manaLine = LyfeManaBridge.isLoaded()
+                ? LyfeManaBridge.manaNameplateLine(npc).orElse(null)
                 : null;
 
         float max = npc.getMaxHealth();

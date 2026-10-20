@@ -527,9 +527,24 @@ boot-smoke-test clean. **Not yet live-tested.**
 **`npc.NpcHealthBar` now also shows Lyfe's new Mana stat, 2026-10-20** -- Lyfe's large new Mana
 feature (see its own context/design-document.md Section 24) wants an "above NPC heads when not at
 100%" indicator; rather than a second nameplate writer independently calling `setCustomName` on the
-same entity (which would race this one), `NpcHealthBar` now appends Lyfe's own bar text (a new
-`api.Lyfe#manaNameplateLine`, gated behind `ModList.isLoaded("lyfe")`) onto the *same line* as the
-health bar, two spaces apart -- not a second stacked line, since vanilla's own nametag rendering
-has no real support for an embedded newline actually breaking visually onto a second row.
-`./gradlew build` green, whole-suite (13 mods) rebuild + `runServer` boot-smoke-test clean. **Not
-yet live-tested.**
+same entity (which would race this one), `NpcHealthBar` now appends Lyfe's own bar text onto the
+*same line* as the health bar, two spaces apart -- not a second stacked line, since vanilla's own
+nametag rendering has no real support for an embedded newline actually breaking visually onto a
+second row. **Corrected the same day**: the first version called `com.github.cerealklla.lyfe.api.Lyfe`
+directly (behind only a runtime `ModList.isLoaded` guard) -- routed through a new
+`bridge.LyfeManaBridge` instead, matching this suite's established convention that a general-purpose
+class (touched regardless of which mods are loaded) must never itself reference an optional
+dependency's type, only a dedicated bridge class may. `./gradlew build` green, whole-suite
+(13 mods) rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested.**
+
+**Guards now cast Spark of Life when equipped with a Nature Staff, same day** (see Lyfe's own
+context/design-document.md Section 24) -- explicit user spec, called "very important": heal a
+nearby same-alignment ally under 50% HP first, otherwise cast at range, otherwise melee while on
+cooldown. New `guardhouse.GuardSpellCastGoal` (priority 2, swapped in by
+`GuardEntity#reassessWeaponGoal`'s new third branch alongside the existing melee/bow ones) -- the
+melee fallback needed no manual logic at all, since re-adding `meleeGoal` at priority 3 lets
+vanilla's own `GoalSelector` fall through to it automatically whenever the spell goal's own
+`canUse()` says there's nothing to heal and the spell is unavailable. New `bridge.LyfeMagicianBridge`
+is the only place this mod ever references `com.github.cerealklla.lyfe.api.Lyfe` for this feature,
+same isolation convention as `LyfeManaBridge` above. `./gradlew build` green, whole-suite (13 mods)
+rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested.**

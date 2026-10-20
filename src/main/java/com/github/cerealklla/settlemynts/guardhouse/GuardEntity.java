@@ -9,6 +9,7 @@ import com.github.cerealklla.cartographyr.geo.EntityId;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.kyt.loadout.LoadoutRecord;
+import com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
@@ -109,6 +110,9 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
 
     private final RangedBowAttackGoal<GuardEntity> bowGoal = new RangedBowAttackGoal<>(this, 1.0, 20, 15.0F);
     private final MeleeAttackGoal meleeGoal = new MeleeAttackGoal(this, 1.0, false);
+    // Lyfe's Mana feature (2026-10-20) -- see GuardSpellCastGoal's own doc for the full priority
+    // design ("heal allies, then ranged spell combat, melee while on cooldown").
+    private final GuardSpellCastGoal spellCastGoal = new GuardSpellCastGoal(this);
 
     private UUID settlementCoreId;
     private UUID plotId;
@@ -242,8 +246,16 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
         }
         this.goalSelector.removeGoal(this.meleeGoal);
         this.goalSelector.removeGoal(this.bowGoal);
+        this.goalSelector.removeGoal(this.spellCastGoal);
         if (getMainHandItem().getItem() instanceof BowItem) {
             this.goalSelector.addGoal(2, this.bowGoal);
+        } else if (LyfeMagicianBridge.isLoaded() && LyfeMagicianBridge.isNatureStaff(getMainHandItem())) {
+            // Spell-cast at priority 2 (tried first); melee at priority 3 as a pure fallback -- the
+            // GoalSelector itself handles "melee while on cooldown" for free, since spellCastGoal's
+            // own canUse() returning false (nothing to heal, spell unavailable) lets the
+            // lower-priority melee goal start instead. See GuardSpellCastGoal's own doc.
+            this.goalSelector.addGoal(2, this.spellCastGoal);
+            this.goalSelector.addGoal(3, this.meleeGoal);
         } else {
             this.goalSelector.addGoal(2, this.meleeGoal);
         }
