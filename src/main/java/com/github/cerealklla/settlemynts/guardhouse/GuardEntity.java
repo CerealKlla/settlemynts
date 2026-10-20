@@ -44,7 +44,6 @@ import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
@@ -373,7 +372,12 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
                 && Math.max(Math.abs(blockX - homePos.getX()), Math.abs(blockZ - homePos.getZ())) <= UNDERGROUND_CHECK_HOME_RADIUS_BLOCKS) {
             return; // Near its own (possibly indoor, under-a-roof) spawn point -- see this field's own doc.
         }
-        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
+        // Real report, 2026-10-21: a guard found bouncing between a branch log and real ground
+        // forever -- this used to take the raw heightmap at face value, which (like
+        // npc.NpcTreetopEscape's own identical past bug) can land on a tree branch instead of real
+        // ground, fighting that class's own corrected check in an endless loop. See
+        // NpcTreetopEscape#realSurfaceY's own doc for the full writeup.
+        int surfaceY = com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.realSurfaceY(level, blockX, blockZ);
         if (surfaceY - getY() > UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS) {
             getNavigation().stop();
             teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);

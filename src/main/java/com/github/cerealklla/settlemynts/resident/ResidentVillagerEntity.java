@@ -21,7 +21,6 @@ import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
@@ -128,7 +127,10 @@ public class ResidentVillagerEntity extends Villager implements com.github.cerea
         com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
-        int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
+        // See guardhouse.GuardEntity's own 2026-10-21 fix: a raw heightmap value here can land on a
+        // tree branch instead of real ground, fighting npc.NpcTreetopEscape's own corrected check in
+        // an endless teleport loop. realSurfaceY scans past tree material the same way that class does.
+        int surfaceY = com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.realSurfaceY(level, blockX, blockZ);
         if (surfaceY - getY() > UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS) {
             getNavigation().stop();
             teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);

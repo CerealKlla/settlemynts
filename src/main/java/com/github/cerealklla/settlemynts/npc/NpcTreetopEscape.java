@@ -6,6 +6,7 @@ import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Shared "stuck on top of a tree" safety net for this suite's custom ground NPCs -- extracted
@@ -77,5 +78,31 @@ public final class NpcTreetopEscape {
 
     private static boolean isTreeMaterial(BlockState state) {
         return state.isAir() || state.is(BlockTags.LEAVES) || state.is(BlockTags.LOGS);
+    }
+
+    /**
+     * Real report, 2026-10-21: a Guard found visibly bouncing up and down every tick or two, between
+     * a branch log embedded in a tree and the real ground well below it. Root cause: {@code
+     * guardhouse.GuardEntity}/{@code resident.ResidentVillagerEntity}/{@code farm.FarmerWorkerEntity}
+     * each have their own "am I stuck underground" safety net, written independently of this class
+     * and never updated when the heightmap-contamination bug above was found and fixed here -- each
+     * one still computes its own reference "surface" via a raw, un-scanned {@code
+     * Heightmap.Types.MOTION_BLOCKING_NO_LEAVES} call, which (as documented above) can land on a
+     * branch log instead of real ground. The two safety nets then fight each other forever: the
+     * underground check sees the NPC standing on real ground as "6 blocks below the (contaminated)
+     * surface," teleports it UP into the branch; this class's own {@link #check} immediately sees it
+     * now stranded on that branch and teleports it back DOWN to the real ground; repeat indefinitely.
+     *
+     * <p>This method is the fix: the same tree-material-aware downward scan {@link #check} already
+     * uses, just anchored at the raw heightmap's own candidate instead of the NPC's current feet --
+     * those three underground checks should call this instead of taking {@code
+     * level.getHeight(MOTION_BLOCKING_NO_LEAVES, x, z)} at face value.
+     */
+    public static int realSurfaceY(ServerLevel level, int x, int z) {
+        BlockPos pos = new BlockPos(x, level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1, z);
+        while (pos.getY() > level.getMinY() && isTreeMaterial(level.getBlockState(pos))) {
+            pos = pos.below();
+        }
+        return pos.getY() + 1;
     }
 }
