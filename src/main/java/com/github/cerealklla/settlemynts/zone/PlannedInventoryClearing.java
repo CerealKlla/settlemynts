@@ -112,7 +112,7 @@ public final class PlannedInventoryClearing {
                 participants.size(), resourceKeys.size());
         long start = System.nanoTime();
         for (ResourceKey key : resourceKeys) {
-            queue.enqueue(() -> settleResource(level, participants, key));
+            queue.enqueue(() -> settleResource(level, participants, key, queue));
         }
         queue.enqueue(() -> {
             double ms = (System.nanoTime() - start) / 1_000_000.0;
@@ -301,11 +301,11 @@ public final class PlannedInventoryClearing {
         return all.isEmpty() ? Optional.empty() : Optional.of(all.get(0));
     }
 
-    private static void settleResource(ServerLevel level, List<Participant> participants, ResourceKey key) {
+    private static void settleResource(ServerLevel level, List<Participant> participants, ResourceKey key, MidnightWorkQueue queue) {
         if (!key.isTag()) {
             Optional<LyfeCraftingBridge.RecipeInfo> recipe = resolveRecipe(level, key.id());
             if (recipe.isPresent()) {
-                settleCraftableResource(level, participants, key, recipe.get());
+                enqueueCraftableResource(level, participants, key, queue);
                 return;
             }
         }
@@ -485,7 +485,18 @@ public final class PlannedInventoryClearing {
 
     // ---- NPC plot crafting: buy-vs-craft midnight resolution -- see class doc. ----
 
-    private static void settleCraftableResource(ServerLevel level, List<Participant> participants, ResourceKey key, LyfeCraftingBridge.RecipeInfo recipe) {
+    /**
+     * Was a plain synchronous loop (up to {@link #MAX_CRAFTS_PER_PLOT_PER_TARGET} recursive
+     * buy-vs-craft resolutions, per buyer, all inside the one {@code settleResource} job {@link
+     * #settleGroup} already queues per resource) until a real production freeze, 2026-10-21 (see
+     * {@link MidnightWorkQueue}'s own doc for the first incident this class caused) -- spreading work
+     * by resource alone wasn't enough once a single craftable resource's own recursive cost search,
+     * repeated up to 64 times per buyer, could itself take tens of seconds inside one queued job.
+     * Now enqueues one job per (buyer, unit attempt) instead, each doing at most one recursive
+     * resolution -- the real atomic unit of expensive work -- so even a settlement's worst-case
+     * deficit spreads across as many ticks as it takes rather than piling into a single one.
+     */
+    private static void enqueueCraftableResource(ServerLevel level, List<Participant> participants, ResourceKey key, MidnightWorkQueue queue) {
         for (Participant buyer : participants) {
             PlannedInventoryTarget target = findTarget(buyer.plot(), key);
             if (target == null) {
@@ -496,24 +507,33 @@ public final class PlannedInventoryClearing {
                 continue;
             }
             PlotCraftingCapability capability = PlotCraftingCapability.resolve(level, buyer.plot().plotId());
-            // Re-checks real stock after every unit obtained (2026-10-18 fix) instead of looping a
-            // fixed "deficit" count -- see craft.MiscRecipes' own doc: a direct buy always nets
-            // exactly 1, but a self-craft of a multi-output recipe (Leaf Litter -> 10 Charcoal) nets
-            // recipe.outputCount() at once, so a fixed-count loop would keep calling fulfillOneUnit
-            // once per unit of ORIGINAL deficit even after a single craft already covered it several
-            // times over -- wastefully over-consuming ingredients for units nobody actually needed.
-            // Capped at MAX_CRAFTS_PER_PLOT_PER_TARGET as a safety bound against looping forever if
-            // fulfillOneUnit ever "succeeds" without actually moving stock toward target.
-            for (int i = 0; i < MAX_CRAFTS_PER_PLOT_PER_TARGET; i++) {
-                int currentStock = ContainerWithdraw.countAvailable(buyer.boxes(), key.toShopResource());
-                if (currentStock >= target.targetCount()) {
-                    break;
-                }
-                if (!fulfillOneUnit(level, participants, buyer, key, capability, new LinkedHashSet<>())) {
-                    break; // Can't make further progress on this resource for this buyer this round.
-                }
-            }
+            queue.enqueue(() -> attemptOneCraftableUnit(level, participants, buyer, key, target, capability, queue, 0));
         }
+    }
+
+    /**
+     * One unit-attempt of {@link #enqueueCraftableResource}'s own job chain -- re-checks real stock
+     * (2026-10-18 fix, unchanged: a self-craft of a multi-output recipe can net several units at
+     * once, so a fixed-count loop would over-consume ingredients for units nobody still needs) and,
+     * if progress is still possible, re-enqueues itself for the next unit instead of looping inline.
+     * {@code attemptsSoFar} is the same {@link #MAX_CRAFTS_PER_PLOT_PER_TARGET} safety bound the old
+     * inline loop had, against looping forever if {@link #fulfillOneUnit} ever "succeeds" without
+     * actually moving stock toward target.
+     */
+    private static void attemptOneCraftableUnit(ServerLevel level, List<Participant> participants, Participant buyer,
+                                                 ResourceKey key, PlannedInventoryTarget target, PlotCraftingCapability capability,
+                                                 MidnightWorkQueue queue, int attemptsSoFar) {
+        if (attemptsSoFar >= MAX_CRAFTS_PER_PLOT_PER_TARGET) {
+            return;
+        }
+        int currentStock = ContainerWithdraw.countAvailable(buyer.boxes(), key.toShopResource());
+        if (currentStock >= target.targetCount()) {
+            return;
+        }
+        if (!fulfillOneUnit(level, participants, buyer, key, capability, new LinkedHashSet<>())) {
+            return; // Can't make further progress on this resource for this buyer this round.
+        }
+        queue.enqueue(() -> attemptOneCraftableUnit(level, participants, buyer, key, target, capability, queue, attemptsSoFar + 1));
     }
 
     /**
