@@ -153,6 +153,10 @@ public class ShopCartMenu extends AbstractContainerMenu {
             stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME,
                     net.minecraft.network.chat.Component.literal(listing.customName().get()));
         }
+        if (!listing.customModelDataStrings().isEmpty()) {
+            stack.set(net.minecraft.core.component.DataComponents.CUSTOM_MODEL_DATA,
+                    new net.minecraft.world.item.component.CustomModelData(java.util.List.of(), java.util.List.of(), listing.customModelDataStrings(), java.util.List.of()));
+        }
         return stack;
     }
 

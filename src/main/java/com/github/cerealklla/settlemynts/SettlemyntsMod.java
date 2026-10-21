@@ -1103,6 +1103,23 @@ public class SettlemyntsMod {
                             .filter(e -> l.resource().matches(e.getValue().sample()))
                             .mapToInt(e -> e.getValue().count())
                             .sum();
+                    // Real report, 2026-10-20: the Shop screen showed the generic blank-paper icon for
+                    // a Research Note listing instead of its own per-target icon (e.g. a Stone Axe
+                    // overlay), even though the tooltip correctly showed "Research Notes - Stone Axe
+                    // (Tier 1)" -- that name comes from the listing's own stored customName, but the
+                    // icon is driven by a CustomModelData component (see lyfe.research.ResearchNoteItem
+                    // #createFor's own doc) that a listing has no field for at all, so the client's
+                    // conjured representative stack (ShopCartMenu#representativeStack) was always a
+                    // bare, component-less ItemStack -- correct name, generic fallback icon. Pulls the
+                    // real CustomModelData strings off a live matching box sample when one exists (the
+                    // common case -- a zero-stock listing simply keeps the generic icon, a flagged,
+                    // acceptable gap rather than a structural change to Yconomics' own ShopResource).
+                    java.util.List<String> customModelDataStrings = stockByVariant.values().stream()
+                            .filter(v -> l.resource().matches(v.sample()))
+                            .findFirst()
+                            .map(v -> v.sample().get(net.minecraft.core.component.DataComponents.CUSTOM_MODEL_DATA))
+                            .map(net.minecraft.world.item.component.CustomModelData::strings)
+                            .orElse(java.util.List.of());
                     int effectiveBuyPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveBuyCost(l.pricePerUnit(), merchantBonusFraction);
                     int effectiveSellPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveSellPayout(l.pricePerUnit(), merchantBonusFraction);
                     // Planned Inventory gate (2026-10-20) -- matched by base resource identity only
@@ -1120,7 +1137,7 @@ public class SettlemyntsMod {
                             .orElse(0);
                     return new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(
                             key, isTag, l.resource().customName(), l.pricePerUnit(), l.buyPricePerUnit(), shopStock, effectiveBuyPrice, effectiveSellPrice,
-                            plannedInventoryRemaining);
+                            plannedInventoryRemaining, customModelDataStrings);
                 })
                 .sorted(java.util.Comparator
                         .comparing((com.github.cerealklla.settlemynts.plotsign.ShopListingEntry e) -> e.shopStock() <= 0)

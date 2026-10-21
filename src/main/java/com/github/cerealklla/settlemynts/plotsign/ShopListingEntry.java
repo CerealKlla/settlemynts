@@ -46,7 +46,8 @@ import net.minecraft.world.item.Items;
  * ShopStockUpdatePayload}), never the sole authority.
  */
 public record ShopListingEntry(Identifier resourceKey, boolean isTag, Optional<String> customName, int pricePerUnit, int buyPricePerUnit, int shopStock,
-                                int effectiveBuyPrice, int effectiveSellPrice, int plannedInventoryRemaining) {
+                                int effectiveBuyPrice, int effectiveSellPrice, int plannedInventoryRemaining,
+                                java.util.List<String> customModelDataStrings) {
 
     public static final Codec<ShopListingEntry> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(ShopListingEntry::resourceKey),
@@ -57,7 +58,8 @@ public record ShopListingEntry(Identifier resourceKey, boolean isTag, Optional<S
             Codec.INT.fieldOf("shop_stock").forGetter(ShopListingEntry::shopStock),
             Codec.INT.fieldOf("effective_buy_price").forGetter(ShopListingEntry::effectiveBuyPrice),
             Codec.INT.fieldOf("effective_sell_price").forGetter(ShopListingEntry::effectiveSellPrice),
-            Codec.INT.optionalFieldOf("planned_inventory_remaining", 0).forGetter(ShopListingEntry::plannedInventoryRemaining)
+            Codec.INT.optionalFieldOf("planned_inventory_remaining", 0).forGetter(ShopListingEntry::plannedInventoryRemaining),
+            Codec.STRING.listOf().optionalFieldOf("custom_model_data_strings", java.util.List.of()).forGetter(ShopListingEntry::customModelDataStrings)
     ).apply(i, ShopListingEntry::new));
 
     /**
