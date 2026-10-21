@@ -274,7 +274,12 @@ public class LumberjackWorkGoal extends Goal {
         consecutiveStuckGiveUps = 0;
         stuckGiveUpPos = null;
         if (pendingIsHarvest) {
-            harvest(level, pendingTarget);
+            // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc. A
+            // real harvest (flood-fill + leaf-bounding-box clear) only happens occasionally (once
+            // per completed tree, not every tick) -- wrapped separately from the rest of tick() so a
+            // periodic spike here isn't confused with the far-more-frequent arrival/pursuit path.
+            com.github.cerealklla.settlemynts.diagnostics.TickProfiler.time(
+                    "LumberjackWorkGoal.harvest", () -> harvest(level, pendingTarget));
             if (pendingHarvestIdentity != null) {
                 lastHarvestedTreeBase = pendingHarvestIdentity;
             }

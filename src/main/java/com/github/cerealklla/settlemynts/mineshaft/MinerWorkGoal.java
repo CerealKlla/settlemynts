@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.github.cerealklla.cartographyr.api.Cartography;
+import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.zone.ContainerDeposit;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
@@ -84,7 +85,14 @@ public class MinerWorkGoal extends Goal {
         if (plot.isEmpty() || plot.get().boxPos().isEmpty()) {
             return false; // No known mine entrance to work toward.
         }
-        List<BlockPos> boxPositions = Settlemynts.resolvePlotBoxPositions(level, worker.plotId());
+        // Real fix, 2026-10-21: live TickProfiler data showed this call alone costing 100-130ms,
+        // repeatedly -- resolvePlotBoxPositions(level, plotId) re-does a full-world
+        // GhostTownHallCoreEntity scan from scratch (see Settlemynts#findPolygonForPlot) even though
+        // this goal already has the plot's own PlotRecord in hand two lines up. Using
+        // resolvePolygonDirect (a cheap per-entity-id lookup, no world scan) plus the matching
+        // polygon-based overload closes the same "resolve once, reuse" gap already fixed elsewhere.
+        Optional<Geometry.Polygon> polygon = Settlemynts.resolvePolygonDirect(level, plot.get());
+        List<BlockPos> boxPositions = polygon.map(p -> Settlemynts.resolveBoxPositionsForPolygon(level, p)).orElse(List.of());
         if (boxPositions.isEmpty()) {
             return false; // No storage chest on the plot to work from.
         }

@@ -548,8 +548,21 @@ public final class Settlemynts {
         if (polygon.isEmpty()) {
             return List.of();
         }
+        return resolveBoxPositionsForPolygon(level, polygon.get());
+    }
+
+    /**
+     * Same as the tail of {@link #resolvePlotBoxPositions}, but for a polygon the caller already has
+     * in hand -- added 2026-10-21 after live `TickProfiler` data showed {@code
+     * mineshaft.MinerWorkGoal#canUse} repeatedly costing 100-130ms on this method's own full-world
+     * {@code GhostTownHallCoreEntity} scan (via {@link #findPolygonForPlot}), called redundantly on
+     * top of that same goal's own {@code resolvePlotRecord} just lines above it -- the exact
+     * "resolve once, reuse" gap {@link #resolveBoxesForPolygon}/{@link #resolvePolygonDirect} were
+     * already built to close for other callers (see those methods' own docs), just never applied here.
+     */
+    public static List<BlockPos> resolveBoxPositionsForPolygon(ServerLevel level, Geometry.Polygon polygon) {
         List<BlockPos> positions = new ArrayList<>();
-        for (UUID boxId : Cartography.getBoxesAt(level, polygon.get())) {
+        for (UUID boxId : Cartography.getBoxesAt(level, polygon)) {
             Cartography.getBoxLocation(level, boxId).ifPresent(globalPos -> positions.add(globalPos.pos()));
         }
         return positions;
