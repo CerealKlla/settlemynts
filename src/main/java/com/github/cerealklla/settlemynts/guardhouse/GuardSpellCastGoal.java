@@ -103,7 +103,13 @@ public final class GuardSpellCastGoal extends Goal {
         }
         guard.getLookControl().setLookAt(target, 30.0F, 30.0F);
         guard.lookAt(target, 30.0F, 30.0F);
-        if (distanceSqr <= CAST_RANGE_SQR) {
+        // Real report, 2026-10-20: "shooting into walls, like they don't care if they can't hit
+        // their target" -- this only ever gated on distance, never a clear shot, same bug a
+        // straight-line projectile with no homing can't hide. Same line-of-sight check
+        // GuardSightGoal already uses for target *acquisition* -- here it's needed again for the
+        // actual firing moment, since a target can duck behind cover after being acquired. Applies
+        // to both heal and attack casts -- a wall blocks a heal bolt exactly as well as a damage one.
+        if (distanceSqr <= CAST_RANGE_SQR && guard.hasLineOfSight(target)) {
             LyfeMagicianBridge.attemptCastSparkOfLife(guard);
         }
     }

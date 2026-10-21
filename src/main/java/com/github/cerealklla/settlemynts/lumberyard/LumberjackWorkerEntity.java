@@ -151,7 +151,18 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
-        if (isActuallyTrappedUnderground(level, blockX, blockZ)) {
+        // Real report, 2026-10-21: "more lumberyard NPCs suffocating in trees" -- a recurrence
+        // after the heightmap-contamination rescue teleports were already fixed, so the cause here
+        // is different: isActuallyTrappedUnderground only ever scanned for a solid *ceiling above*
+        // the worker's head, deliberately ignoring tree material there (so legitimate low-branch
+        // work isn't a false positive) -- but it never checked whether the worker's OWN occupied
+        // space (feet/head) is itself solid. A sapling this worker just planted can grow into a
+        // full trunk around it mid-tick (vanilla's own growth tick doesn't care what's standing on
+        // the block), embedding it in real log collision with open headroom just a few blocks up --
+        // exactly the "ceiling above is fine, but I'm suffocating right now" case this check always
+        // missed. Tree material counts here too, unlike the ceiling scan below -- being embedded in
+        // a log is exactly as suffocating as being embedded in stone.
+        if (isEmbeddedInSolid(level, blockX, blockZ) || isActuallyTrappedUnderground(level, blockX, blockZ)) {
             getNavigation().stop();
             // Real report, 2026-10-20: "bouncing within a tree and slowly suffocating" -- the
             // detection above (isActuallyTrappedUnderground) is correctly tree-aware, but this escape
@@ -184,6 +195,20 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
      * not "underground"). Only a solid, non-tree ceiling across the whole threshold band counts as
      * actually trapped.
      */
+    /**
+     * True if the worker's own feet or head block is currently solid -- i.e. real vanilla
+     * suffocation is actively happening or about to, regardless of material (unlike {@link
+     * #isActuallyTrappedUnderground}'s ceiling scan, tree material counts as solid here: a log
+     * grown around the worker suffocates it exactly as well as stone would).
+     */
+    private boolean isEmbeddedInSolid(ServerLevel level, int blockX, int blockZ) {
+        int feetY = Mth.floor(getY());
+        BlockPos feetPos = new BlockPos(blockX, feetY, blockZ);
+        BlockPos headPos = feetPos.above();
+        return !level.getBlockState(feetPos).getCollisionShape(level, feetPos).isEmpty()
+                || !level.getBlockState(headPos).getCollisionShape(level, headPos).isEmpty();
+    }
+
     private boolean isActuallyTrappedUnderground(ServerLevel level, int blockX, int blockZ) {
         int startY = Mth.floor(getY()) + 1;
         for (int dy = 0; dy < UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS; dy++) {
