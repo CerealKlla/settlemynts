@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge;
 
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.monster.Enemy;
@@ -116,8 +117,29 @@ public final class GuardSpellCastGoal extends Goal {
         } else {
             guard.getNavigation().stop();
         }
-        guard.getLookControl().setLookAt(target, 30.0F, 30.0F);
-        guard.lookAt(target, 30.0F, 30.0F);
+        // Real report, 2026-10-21: "Guard NPCs are not accounting for 'bullet drop' and any kind
+        // of range consistenly shoot short of the target." Spark of Life is a gravity-affected
+        // throwable (SparkOfLifeProjectile) with no built-in drop compensation of its own --
+        // SparkOfLifeCasting#attemptCast just fires along whatever direction the caster is
+        // currently looking, which is fine for a player (aims by eye, compensates naturally) but
+        // not for an NPC whose look aims directly at the target's real position with no arc. Same
+        // heuristic GuardEntity's own bow code already uses for an identical problem
+        // (AbstractSkeleton#performRangedAttack, confirmed against the decompiled source): aim a
+        // bit above the target, scaled by horizontal distance, instead of solving the exact
+        // ballistic arc.
+        double xd = target.getX() - guard.getX();
+        double zd = target.getZ() - guard.getZ();
+        double horizontalDist = Math.sqrt(xd * xd + zd * zd);
+        double aimY = target.getY(0.5) + horizontalDist * 0.2;
+        guard.getLookControl().setLookAt(target.getX(), aimY, target.getZ(), 30.0F, 30.0F);
+        // The look control above only applies its own smoothing on a later tick -- casting happens
+        // immediately below, in this same tick, so the actual fired pitch needs to be set directly
+        // here too (same trig Mob#lookAt uses internally for its Entity-based overload, duplicated
+        // since its own rotlerp smoothing helper is private and this needs a plain coordinate, not
+        // an Entity, to aim at the elevated point rather than the target's real position).
+        double yd = aimY - guard.getEyeY();
+        guard.setXRot((float) -(Mth.atan2(yd, horizontalDist) * 180.0F / Math.PI));
+        guard.setYRot((float) (Mth.atan2(zd, xd) * 180.0F / Math.PI) - 90.0F);
         if (distanceSqr <= CAST_RANGE_SQR && lineOfSight) {
             LyfeMagicianBridge.attemptCastSparkOfLife(guard);
         }
