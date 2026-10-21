@@ -35,8 +35,15 @@ public class GuardPickUpItemsGoal extends Goal {
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc. Another
+    // prime suspect: no cooldown/reroll throttle at all, so this runs a full 16-block-radius
+    // ItemEntity scan every tick for every Guard, unconditionally.
     @Override
     public boolean canUse() {
+        return com.github.cerealklla.settlemynts.diagnostics.TickProfiler.timeValue("GuardPickUpItemsGoal.canUse", this::canUseInternal);
+    }
+
+    private boolean canUseInternal() {
         if (!(guard.level() instanceof ServerLevel level)) {
             return false;
         }
@@ -68,8 +75,13 @@ public class GuardPickUpItemsGoal extends Goal {
         return true;
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc.
     @Override
     public void tick() {
+        com.github.cerealklla.settlemynts.diagnostics.TickProfiler.time("GuardPickUpItemsGoal.tick", this::tickInternal);
+    }
+
+    private void tickInternal() {
         // Real production crash, 2026-10-16: GoalSelector#tickRunningGoals(true) ticks every
         // still-"running" goal EVERY tick, independent of the separate, throttled cleanup pass that
         // actually calls stop() once canContinueToUse() goes false -- confirmed directly against the

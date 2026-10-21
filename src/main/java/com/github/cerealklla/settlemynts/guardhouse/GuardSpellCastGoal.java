@@ -53,8 +53,19 @@ public final class GuardSpellCastGoal extends Goal {
         setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc. This goal is
+    // a prime suspect: requiresUpdateEveryTick()=true means tick() runs every tick while active, AND
+    // canContinueToUse() (checked every tick by vanilla's own GoalSelector while active) fully
+    // delegates back to canUse() -- so a single staff-wielding Guard can call findInjuredAlly (its
+    // own 16-block-radius AABB entity scan, completely unthrottled unlike GuardSightGoal's 10-tick
+    // cooldown) up to 4 times in one tick. Wrapped separately (not just findInjuredAlly itself) so
+    // the breakdown can directly show whether this duplication is the real cost.
     @Override
     public boolean canUse() {
+        return com.github.cerealklla.settlemynts.diagnostics.TickProfiler.timeValue("GuardSpellCastGoal.canUse", this::canUseInternal);
+    }
+
+    private boolean canUseInternal() {
         if (findInjuredAlly(CRITICAL_HEAL_THRESHOLD) != null) {
             return true;
         }
@@ -69,7 +80,7 @@ public final class GuardSpellCastGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
-        return canUse();
+        return com.github.cerealklla.settlemynts.diagnostics.TickProfiler.timeValue("GuardSpellCastGoal.canContinueToUse", this::canUse);
     }
 
     @Override
@@ -79,6 +90,10 @@ public final class GuardSpellCastGoal extends Goal {
 
     @Override
     public void tick() {
+        com.github.cerealklla.settlemynts.diagnostics.TickProfiler.time("GuardSpellCastGoal.tick", this::tickInternal);
+    }
+
+    private void tickInternal() {
         LivingEntity criticalAlly = findInjuredAlly(CRITICAL_HEAL_THRESHOLD);
         if (criticalAlly != null) {
             engage(criticalAlly);
@@ -160,6 +175,7 @@ public final class GuardSpellCastGoal extends Goal {
                     "[LagDiagnostics] GuardSpellCastGoal.findInjuredAlly took {}ms ({} candidates)",
                     diagElapsedNanos / 1_000_000L, candidates.size());
         }
+        com.github.cerealklla.settlemynts.diagnostics.TickProfiler.record("GuardSpellCastGoal.findInjuredAlly", diagElapsedNanos);
         return result;
     }
 }

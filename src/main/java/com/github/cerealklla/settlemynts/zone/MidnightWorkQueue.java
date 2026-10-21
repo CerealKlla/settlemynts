@@ -59,10 +59,16 @@ public final class MidnightWorkQueue {
             } catch (RuntimeException e) {
                 SettlemyntsMod.LOGGER.error("MidnightWorkQueue: a queued job threw", e);
             } finally {
-                long jobElapsedMs = (System.nanoTime() - jobStart) / 1_000_000L;
+                long jobElapsedNanos = System.nanoTime() - jobStart;
+                long jobElapsedMs = jobElapsedNanos / 1_000_000L;
                 if (jobElapsedMs >= 20) {
                     SettlemyntsMod.LOGGER.info("[LagDiagnostics] MidnightWorkQueue job took {}ms ({})", jobElapsedMs, job.getClass().getName());
                 }
+                // Feeds diagnostics.TickProfiler too (2026-10-21), one category per job class, so
+                // this pass's real share of a slow tick shows up in the same aggregate breakdown as
+                // every other suspect system.
+                com.github.cerealklla.settlemynts.diagnostics.TickProfiler.record(
+                        "MidnightWorkQueue:" + job.getClass().getSimpleName(), jobElapsedNanos);
             }
         }
     }

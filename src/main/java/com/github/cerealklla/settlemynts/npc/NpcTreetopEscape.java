@@ -72,6 +72,8 @@ public final class NpcTreetopEscape {
                 com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
                         "[LagDiagnostics] NpcTreetopEscape.check took {}ms ({})", diagElapsedNanos / 1_000_000L, npc.getType());
             }
+            // Feeds diagnostics.TickProfiler too (2026-10-21) -- see that class's own doc.
+            com.github.cerealklla.settlemynts.diagnostics.TickProfiler.record("NpcTreetopEscape.check", diagElapsedNanos);
         }
     }
 
@@ -138,6 +140,7 @@ public final class NpcTreetopEscape {
             com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
                     "[LagDiagnostics] NpcTreetopEscape.realSurfaceY took {}ms (scanned {})", diagElapsedNanos / 1_000_000L, scanned);
         }
+        com.github.cerealklla.settlemynts.diagnostics.TickProfiler.record("NpcTreetopEscape.realSurfaceY", diagElapsedNanos);
         return pos.getY() + 1;
     }
 }

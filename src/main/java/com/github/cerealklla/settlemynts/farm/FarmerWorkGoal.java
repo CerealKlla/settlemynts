@@ -77,8 +77,13 @@ public class FarmerWorkGoal extends Goal {
         setFlags(EnumSet.of(Flag.MOVE));
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc.
     @Override
     public boolean canUse() {
+        return com.github.cerealklla.settlemynts.diagnostics.TickProfiler.timeValue("FarmerWorkGoal.canUse", this::canUseInternal);
+    }
+
+    private boolean canUseInternal() {
         if (!worker.getNavigation().isDone()) {
             return false;
         }
@@ -120,8 +125,13 @@ public class FarmerWorkGoal extends Goal {
         pendingTarget = null;
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc.
     @Override
     public void tick() {
+        com.github.cerealklla.settlemynts.diagnostics.TickProfiler.time("FarmerWorkGoal.tick", this::tickInternal);
+    }
+
+    private void tickInternal() {
         if (pendingTarget == null || !(worker.level() instanceof ServerLevel level)) {
             return;
         }

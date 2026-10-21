@@ -18,6 +18,7 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 public final class LagDiagnostics {
 
     private static final long THRESHOLD_NANOS = 40_000_000L; // 40ms -- vanilla's own tick budget is 50ms.
+    static final long THRESHOLD_MS = THRESHOLD_NANOS / 1_000_000L;
     private long tickStartNanos;
 
     @SubscribeEvent
@@ -28,8 +29,11 @@ public final class LagDiagnostics {
     @SubscribeEvent
     public void onTickPost(ServerTickEvent.Post event) {
         long elapsedMs = (System.nanoTime() - tickStartNanos) / 1_000_000L;
-        if (elapsedMs >= THRESHOLD_NANOS / 1_000_000L) {
+        if (elapsedMs >= THRESHOLD_MS) {
             SettlemyntsMod.LOGGER.info("[LagDiagnostics] slow tick: {}ms", elapsedMs);
         }
+        // Added 2026-10-21 -- see TickProfiler's own doc for why a breakdown is needed on top of
+        // this already-existing total-tick-time check.
+        TickProfiler.reportIfSlow(elapsedMs);
     }
 }

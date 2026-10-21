@@ -138,8 +138,13 @@ public class LumberjackWorkGoal extends Goal {
         setFlags(EnumSet.of(Flag.MOVE));
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc.
     @Override
     public boolean canUse() {
+        return com.github.cerealklla.settlemynts.diagnostics.TickProfiler.timeValue("LumberjackWorkGoal.canUse", this::canUseInternal);
+    }
+
+    private boolean canUseInternal() {
         if (!worker.getNavigation().isDone()) {
             return false;
         }
@@ -185,8 +190,13 @@ public class LumberjackWorkGoal extends Goal {
         pendingConnectedLogs = null;
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc.
     @Override
     public void tick() {
+        com.github.cerealklla.settlemynts.diagnostics.TickProfiler.time("LumberjackWorkGoal.tick", this::tickInternal);
+    }
+
+    private void tickInternal() {
         if (pendingTarget == null || !(worker.level() instanceof ServerLevel level)) {
             return;
         }

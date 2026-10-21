@@ -64,8 +64,13 @@ public class MinerWorkGoal extends Goal {
         setFlags(EnumSet.of(Flag.MOVE));
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc.
     @Override
     public boolean canUse() {
+        return com.github.cerealklla.settlemynts.diagnostics.TickProfiler.timeValue("MinerWorkGoal.canUse", this::canUseInternal);
+    }
+
+    private boolean canUseInternal() {
         if (!worker.getNavigation().isDone()) {
             return false;
         }
@@ -116,8 +121,13 @@ public class MinerWorkGoal extends Goal {
         pendingLoot = ItemStack.EMPTY;
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc.
     @Override
     public void tick() {
+        com.github.cerealklla.settlemynts.diagnostics.TickProfiler.time("MinerWorkGoal.tick", this::tickInternal);
+    }
+
+    private void tickInternal() {
         if (leg == null || !(worker.level() instanceof ServerLevel level)) {
             return;
         }

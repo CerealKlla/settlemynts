@@ -41,8 +41,13 @@ public class GuardGateOpenGoal extends Goal {
         this.guard = guard;
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc.
     @Override
     public boolean canUse() {
+        return com.github.cerealklla.settlemynts.diagnostics.TickProfiler.timeValue("GuardGateOpenGoal.canUse", this::canUseInternal);
+    }
+
+    private boolean canUseInternal() {
         if (!guard.horizontalCollision) {
             return false;
         }

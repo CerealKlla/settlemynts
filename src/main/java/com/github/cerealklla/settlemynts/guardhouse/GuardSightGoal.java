@@ -68,13 +68,17 @@ public class GuardSightGoal extends Goal {
             return false;
         }
         // Temporary diagnostic (2026-10-10, see diagnostics.LagDiagnostics' own doc) -- remove once
-        // the real lag cause is confirmed.
+        // the real lag cause is confirmed. Also feeds TickProfiler (2026-10-21) so many
+        // individually-under-threshold calls across a large Guard population still show up in a
+        // slow tick's aggregate breakdown, not just a single unusually slow one.
         long start = System.nanoTime();
         LivingEntity found = findNearestVisibleHostile(level);
-        long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
+        long elapsedNanos = System.nanoTime() - start;
+        long elapsedMs = elapsedNanos / 1_000_000L;
         if (elapsedMs >= 5) {
             com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info("[LagDiagnostics] GuardSightGoal.findNearestVisibleHostile took {}ms", elapsedMs);
         }
+        com.github.cerealklla.settlemynts.diagnostics.TickProfiler.record("GuardSightGoal.findNearestVisibleHostile", elapsedNanos);
         if (found != null) {
             guard.setTarget(found);
         }

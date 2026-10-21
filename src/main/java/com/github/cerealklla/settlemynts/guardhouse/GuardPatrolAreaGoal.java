@@ -121,8 +121,15 @@ public class GuardPatrolAreaGoal extends Goal {
     // "they still don't seem to arrive close enough to the actual road vertex").
     private static final double ARRIVE_DIST_SQ = 1.0;
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc. This is the
+    // real "runs every tick while active" hook for this goal (it has no tick() override at all).
     @Override
     public boolean canContinueToUse() {
+        return com.github.cerealklla.settlemynts.diagnostics.TickProfiler.timeValue(
+                "GuardPatrolAreaGoal.canContinueToUse", this::canContinueToUseInternal);
+    }
+
+    private boolean canContinueToUseInternal() {
         if (nextFinalDestination == null) {
             return false;
         }

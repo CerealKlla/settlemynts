@@ -32,8 +32,13 @@ public class ResidentPatrolGoal extends Goal {
         setFlags(EnumSet.of(Flag.MOVE));
     }
 
+    // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc.
     @Override
     public boolean canUse() {
+        return com.github.cerealklla.settlemynts.diagnostics.TickProfiler.timeValue("ResidentPatrolGoal.canUse", this::canUseInternal);
+    }
+
+    private boolean canUseInternal() {
         if (!resident.getNavigation().isDone()) {
             return false;
         }
