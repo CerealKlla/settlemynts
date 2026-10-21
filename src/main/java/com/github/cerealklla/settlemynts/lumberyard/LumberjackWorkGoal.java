@@ -63,15 +63,13 @@ public class LumberjackWorkGoal extends Goal {
     // Harvest-only. Was briefly widened to 225.0 (~15 blocks) on 2026-10-06 to work around a
     // teleport-onto-trunk edge case (LumberjackWorkerEntity#customServerAiStep's underground-escape
     // safety net could perch a worker high up a tall trunk, out of the old flat 2-block arrive
-    // radius). Set to 4.0, 2026-10-11, then widened to 9.0 (3 blocks), 2026-10-12 (explicit user
-    // spec, same live report that led to the reachable-approach fix just above: "walking up to the
-    // base of the tree, gets stuck on the leaves, and then gives up... should consider getting with
-    // 3 blocks of the target as success, and then chop the tree"). The reachable-approach fix fixed
-    // most cases, but a dense leaf canopy around the base can still block the final approach to
-    // within 2 blocks even when the worker can get close -- harvest() flood-fills the whole connected
-    // tree from wherever the worker ends up regardless of exact distance, so there's no reason to
-    // demand the tightest possible radius here.
-    private static final double HARVEST_ARRIVE_DIST_SQ = 9.0;
+    // radius). Set to 4.0, 2026-10-11, then widened to 9.0 (3 blocks), 2026-10-12, then to 16.0
+    // (4 blocks), 2026-10-21 (explicit user spec both times: "should consider getting within 3
+    // blocks of the target as success"; later "once it gets within 4 blocks of a tree it can then
+    // cut it down instead of insisting it touch the tree"). See pendingConnectedLogs's own doc for
+    // the real structural fix alongside this widening -- a single fixed target point, however
+    // generous the radius around it, was still the wrong thing to measure distance to.
+    private static final double HARVEST_ARRIVE_DIST_SQ = 16.0;
     // Randomized per scan (2026-10-05, explicit user request: "5-7 instead of flat 4") -- varies the
     // plot's planting pattern instead of a perfectly uniform grid.
     private static final int MIN_SAPLING_SPACING_BLOCKS = 5;
@@ -101,6 +99,18 @@ public class LumberjackWorkGoal extends Goal {
     // specifically so avoidance tracking stays keyed to the tree itself, not to wherever the worker
     // happened to be aiming for that attempt.
     private BlockPos pendingHarvestIdentity;
+    // Real report, 2026-10-21: "Lumberyard NPC is again just not cutting down trees... I can't
+    // belive how many iterations we are on and the NPCs are still having problems just walking
+    // places." Every prior round (findTrunkBase, nearestConnectedLog, successive
+    // HARVEST_ARRIVE_DIST_SQ widenings) kept trying to pick a SINGLE better fixed point to measure
+    // arrival against -- but a worker's actual approach angle to a dense/leafy/branchy tree can
+    // still end up closer to some OTHER member of the same connected structure than to whichever
+    // one log was picked once, back when the goal started. The real fix: measure arrival against
+    // the tree as a whole, not one arbitrarily-chosen log in it -- the full connected-log set
+    // (already computed once in findTarget, reused here instead of discarded) lets tick() check
+    // distance to the NEAREST log in the real structure every time, not a single stale point. Null
+    // for a plant target (no tree to measure against).
+    private Set<BlockPos> pendingConnectedLogs;
     private boolean pendingIsHarvest;
     private int repathCooldown;
     private int pursueTicks;
@@ -150,6 +160,7 @@ public class LumberjackWorkGoal extends Goal {
         pendingTarget = found.pos();
         pendingIsHarvest = found.isHarvest();
         pendingHarvestIdentity = found.identityBase();
+        pendingConnectedLogs = found.connectedLogs();
         return true;
     }
 
@@ -171,6 +182,7 @@ public class LumberjackWorkGoal extends Goal {
     public void stop() {
         pendingTarget = null;
         pendingHarvestIdentity = null;
+        pendingConnectedLogs = null;
     }
 
     @Override
@@ -179,7 +191,9 @@ public class LumberjackWorkGoal extends Goal {
             return;
         }
         double arriveDistSq = pendingIsHarvest ? HARVEST_ARRIVE_DIST_SQ : ARRIVE_DIST_SQ;
-        double currentDistSq = worker.blockPosition().distSqr(pendingTarget);
+        // Measured against the nearest log in the whole connected tree, not just pendingTarget --
+        // see pendingConnectedLogs's own field doc for why a single fixed point was never reliable.
+        double currentDistSq = nearestDistSqr(worker.blockPosition(), pendingConnectedLogs, pendingTarget);
         if (currentDistSq > arriveDistSq) {
             if (++pursueTicks > MAX_PURSUE_TICKS) {
                 // Keyed off the tree's stable identity (ground-level base), not pendingTarget itself --
@@ -250,8 +264,23 @@ public class LumberjackWorkGoal extends Goal {
         pendingHarvestIdentity = null;
     }
 
-    // identityBase is only meaningful when isHarvest is true -- null for a plant target.
-    private record WorkTarget(BlockPos pos, boolean isHarvest, BlockPos identityBase) {
+    // identityBase/connectedLogs are only meaningful when isHarvest is true -- both null for a plant target.
+    private record WorkTarget(BlockPos pos, boolean isHarvest, BlockPos identityBase, Set<BlockPos> connectedLogs) {
+    }
+
+    /** {@code from}'s squared distance to the nearest position in {@code logs}, or to {@code fallback} if {@code logs} is null/empty (a plant target, or a safety net). */
+    private static double nearestDistSqr(BlockPos from, Set<BlockPos> logs, BlockPos fallback) {
+        if (logs == null || logs.isEmpty()) {
+            return from.distSqr(fallback);
+        }
+        double nearest = Double.MAX_VALUE;
+        for (BlockPos pos : logs) {
+            double distSq = from.distSqr(pos);
+            if (distSq < nearest) {
+                nearest = distSq;
+            }
+        }
+        return nearest;
     }
 
     /** Prunes expired entries, then true if {@code pos} is within {@link #AVOID_RADIUS_BLOCKS} of a still-active one. */
@@ -335,13 +364,19 @@ public class LumberjackWorkGoal extends Goal {
                 continue;
             }
             if (scanned++ > MAX_COLUMNS_SCANNED) {
-                return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null);
+                return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null, null);
             }
             int topY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
             BlockPos topSolid = new BlockPos(x, topY - 1, z);
             BlockState topState = level.getBlockState(topSolid);
             if (topState.is(BlockTags.LOGS)) {
-                BlockPos base = findTrunkBase(level, topSolid);
+                // Computed once and reused for both the stable base identity and the nearest-
+                // approach point below (findTrunkBase/nearestConnectedLog used to each flood-fill
+                // this same connected structure independently) -- also now carried forward as
+                // pendingConnectedLogs, so tick()'s own arrival check can measure against the real
+                // tree instead of one fixed point (see that field's own doc).
+                Set<BlockPos> connected = findConnectedLogs(level, topSolid);
+                BlockPos base = lowestOf(connected, topSolid);
                 if (isRealTree(level, base) && !isAvoided(level, base)) {
                     // Real live report, 2026-10-12: "Lumberjacks are very clearly targeting the
                     // tops of trees... they just climb to the top and then stand there instead of
@@ -358,8 +393,8 @@ public class LumberjackWorkGoal extends Goal {
                     // that same connected structure is nearest the worker's OWN current position
                     // -- almost always something near the worker's own height, genuinely
                     // reachable on foot, not the base specifically.
-                    BlockPos approach = nearestConnectedLog(level, base, workerPos);
-                    return new WorkTarget(approach, true, base); // Harvest always wins immediately once found.
+                    BlockPos approach = nearestOf(connected, workerPos, base);
+                    return new WorkTarget(approach, true, base, connected); // Harvest always wins immediately once found.
                 }
                 // Not a real tree (no leaves anywhere nearby) -- almost certainly a player-built
                 // log structure (2026-10-05, real report: "destroyed the building to try to plant
@@ -378,7 +413,7 @@ public class LumberjackWorkGoal extends Goal {
                 firstPlantCandidate = topSolid.above();
             }
         }
-        return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null);
+        return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null, null);
     }
 
     /**
@@ -396,11 +431,13 @@ public class LumberjackWorkGoal extends Goal {
      * <p>Fixed by flood-filling the whole connected log structure first (same {@link
      * #findConnectedLogs} harvest itself already uses -- which member log it's started from doesn't
      * matter, connectivity finds the same full set either way) and taking its lowest log as the real
-     * base, rather than only ever looking straight down from one specific column.
+     * base, rather than only ever looking straight down from one specific column. Takes the already-
+     * computed connected set directly (2026-10-21) rather than re-flood-filling it a second time --
+     * see this method's own call site in {@code findTarget}.
      */
-    private static BlockPos findTrunkBase(ServerLevel level, BlockPos anyLog) {
+    private static BlockPos lowestOf(Set<BlockPos> connectedLogs, BlockPos anyLog) {
         BlockPos lowest = anyLog;
-        for (BlockPos pos : findConnectedLogs(level, anyLog)) {
+        for (BlockPos pos : connectedLogs) {
             if (pos.getY() < lowest.getY()) {
                 lowest = pos;
             }
@@ -409,15 +446,15 @@ public class LumberjackWorkGoal extends Goal {
     }
 
     /**
-     * Whichever log in {@code base}'s own connected structure sits closest to {@code workerPos} --
-     * see this method's own call site for why the navigation target and the stable tree-identity
-     * point ({@code base}) are deliberately kept separate now. Always includes {@code base} itself in
-     * the search, so a tree the worker can genuinely reach at ground level behaves exactly as before.
+     * Whichever log in {@code connectedLogs} sits closest to {@code workerPos} -- see this method's
+     * own call site for why the navigation target and the stable tree-identity point ({@code base})
+     * are deliberately kept separate now. Always includes {@code base} itself in the search, so a
+     * tree the worker can genuinely reach at ground level behaves exactly as before.
      */
-    private static BlockPos nearestConnectedLog(ServerLevel level, BlockPos base, BlockPos workerPos) {
+    private static BlockPos nearestOf(Set<BlockPos> connectedLogs, BlockPos workerPos, BlockPos base) {
         BlockPos nearest = base;
         double nearestDistSq = workerPos.distSqr(base);
-        for (BlockPos pos : findConnectedLogs(level, base)) {
+        for (BlockPos pos : connectedLogs) {
             double distSq = workerPos.distSqr(pos);
             if (distSq < nearestDistSq) {
                 nearest = pos;
