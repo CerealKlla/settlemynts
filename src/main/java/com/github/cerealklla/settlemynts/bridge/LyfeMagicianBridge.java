@@ -29,6 +29,11 @@ public final class LyfeMagicianBridge {
         return com.github.cerealklla.lyfe.api.Lyfe.isNatureStaff(stack);
     }
 
+    /** Whether {@code offhandStack} is a Focus (Lyfe's design doc Section 25) that rolled a granted spell -- lets {@code GuardEntity#reassessWeaponGoal} swap in spell-casting behavior off an off-hand item too, not just a mainhand Nature Staff. */
+    public static boolean hasOffhandSpell(ItemStack offhandStack) {
+        return com.github.cerealklla.lyfe.api.Lyfe.hasOffhandSpell(offhandStack);
+    }
+
     public static boolean canCastSparkOfLife(LivingEntity caster) {
         return com.github.cerealklla.lyfe.api.Lyfe.canCastSparkOfLife(caster);
     }

@@ -248,7 +248,8 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         this.goalSelector.removeGoal(this.spellCastGoal);
         if (getMainHandItem().getItem() instanceof BowItem) {
             this.goalSelector.addGoal(2, this.bowGoal);
-        } else if (LyfeMagicianBridge.isLoaded() && LyfeMagicianBridge.isNatureStaff(getMainHandItem())) {
+        } else if (LyfeMagicianBridge.isLoaded() && (LyfeMagicianBridge.isNatureStaff(getMainHandItem())
+                || LyfeMagicianBridge.hasOffhandSpell(getOffhandItem()))) {
             // Spell-cast at priority 2 (tried first); melee at priority 3 as a pure fallback -- the
             // GoalSelector itself handles "melee while on cooldown" for free, since spellCastGoal's
             // own canUse() returning false (nothing to heal, spell unavailable) lets the
@@ -263,7 +264,11 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     @Override
     public void onEquipItem(EquipmentSlot slot, ItemStack oldStack, ItemStack stack) {
         super.onEquipItem(slot, oldStack, stack);
-        if (slot == EquipmentSlot.MAINHAND) {
+        // Widened to OFFHAND, 2026-10-21 (Lyfe's new Focus item, design doc Section 25) --
+        // equipping/swapping a spell-granting Focus must retrigger reassessWeaponGoal() the same
+        // way a mainhand Nature Staff already does, or a Guard given one via its Kit Stand never
+        // picks up spell-casting behavior at all.
+        if (slot == EquipmentSlot.MAINHAND || slot == EquipmentSlot.OFFHAND) {
             reassessWeaponGoal();
         }
     }
