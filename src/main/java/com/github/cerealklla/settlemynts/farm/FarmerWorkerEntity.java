@@ -31,7 +31,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * see that class's own doc for why this mirrors {@code resident.ResidentVillagerEntity} but patrols/
  * works within the plot's *real* polygon, not its padded buffer.
  */
-public class FarmerWorkerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc {
+public class FarmerWorkerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
     private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
 
@@ -108,7 +108,6 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
 
     @Override
     protected void customServerAiStep(ServerLevel level) {
-        com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
         // See guardhouse.GuardEntity's own 2026-10-21 fix: a raw heightmap value here can land on a

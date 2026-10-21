@@ -62,7 +62,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * ResidentConversionGuard}, a {@code LivingConversionEvent.Pre} listener cancelling any conversion
  * targeting a {@code ResidentVillagerEntity}.
  */
-public class ResidentVillagerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc {
+public class ResidentVillagerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
     private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
 
@@ -124,7 +124,6 @@ public class ResidentVillagerEntity extends Villager implements com.github.cerea
     @Override
     protected void customServerAiStep(ServerLevel level) {
         // Deliberately never calls super.customServerAiStep (Villager's own) -- see class doc.
-        com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
         // See guardhouse.GuardEntity's own 2026-10-21 fix: a raw heightmap value here can land on a

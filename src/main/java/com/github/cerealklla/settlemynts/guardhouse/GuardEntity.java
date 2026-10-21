@@ -84,7 +84,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * calling {@link #reassessWeaponGoal()} again at the end of {@link #readAdditionalSaveData}, after
  * {@code super}'s call has actually populated real equipment from NBT.
  */
-public class GuardEntity extends PathfinderMob implements RangedAttackMob {
+public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
     // Safety-net threshold for the underground-correction check in customServerAiStep -- "don't want
     // them going underground intentionally" (GuardPatrolAreaGoal's own target-picking already only
@@ -365,7 +365,6 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob {
     @Override
     protected void customServerAiStep(ServerLevel level) {
         super.customServerAiStep(level);
-        com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
         if (homePos != null

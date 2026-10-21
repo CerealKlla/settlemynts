@@ -570,3 +570,11 @@ count on the shop, players don't need to know that." A plot's Planned Inventory 
 owner's own private restocking plan; the Sell column's gate/cap (`ShopCartMenu.SellSlot`/
 `confirmShopCart`) is unaffected, only the price-line display text changed. `./gradlew build`
 green.
+
+**NPCs now use Nuclyus's new generic floating stat-bar system, replacing the old nametag-hijacking
+health bar, 2026-10-21** (see Nuclyus's own CLAUDE.md/decisions.md for the full technical writeup)
+-- explicit user request for real floating Health/Mana indicators that don't block a future NPC
+name. `npc.NpcHealthBar` and `bridge.LyfeManaBridge` deleted outright; Guard/Resident/Farmer/
+Lumberjack/Miner each just `implements nuclyus.statbar.StatBarOwner` now. `./gradlew build` green,
+whole-suite (13 mods) rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested** -- the
+new client rendering code has only been confirmed to compile.

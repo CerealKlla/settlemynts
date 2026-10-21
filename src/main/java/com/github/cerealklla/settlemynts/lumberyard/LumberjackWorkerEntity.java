@@ -37,7 +37,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * "Town Proper" buffer {@code ResidentPatrolGoal} uses -- planting/harvesting must stay strictly
  * inside the plot itself, not its outer padding.
  */
-public class LumberjackWorkerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc {
+public class LumberjackWorkerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
     private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
 
@@ -148,7 +148,6 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
     @Override
     protected void customServerAiStep(ServerLevel level) {
         // Deliberately never calls super.customServerAiStep (Villager's own) -- see class doc.
-        com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
         int blockX = Mth.floor(getX());
         int blockZ = Mth.floor(getZ());
         // Real report, 2026-10-21: "more lumberyard NPCs suffocating in trees" -- a recurrence

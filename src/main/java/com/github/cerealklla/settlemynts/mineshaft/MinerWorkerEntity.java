@@ -35,7 +35,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * net here would misfire constantly against this entity's own intended design, the same way it once
  * misfired for the Lumberjack near a tall tree.
  */
-public class MinerWorkerEntity extends Villager implements PlotNpc {
+public class MinerWorkerEntity extends Villager implements PlotNpc, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
     private UUID settlementCoreId;
     private UUID plotId;
@@ -117,7 +117,6 @@ public class MinerWorkerEntity extends Villager implements PlotNpc {
     @Override
     protected void customServerAiStep(ServerLevel level) {
         // Deliberately never calls super.customServerAiStep (Villager's own) -- see class/method doc.
-        com.github.cerealklla.settlemynts.npc.NpcHealthBar.update(this);
         com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.check(this, level);
     }
 
