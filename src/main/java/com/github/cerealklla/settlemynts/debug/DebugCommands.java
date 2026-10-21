@@ -83,6 +83,9 @@ public final class DebugCommands {
                         .executes(ctx -> resyncProtection(ctx.getSource())))
                 .then(Commands.literal("resyncshop")
                         .executes(ctx -> resyncShop(ctx.getSource())))
+                .then(Commands.literal("removelisting")
+                        .then(Commands.argument("itemId", StringArgumentType.string())
+                                .executes(ctx -> removeListing(ctx.getSource(), StringArgumentType.getString(ctx, "itemId")))))
                 .then(Commands.literal("highwayinfo")
                         .then(Commands.argument("instanceId", StringArgumentType.string())
                                 .executes(ctx -> highwayInfo(ctx.getSource(), StringArgumentType.getString(ctx, "instanceId")))))
@@ -620,6 +623,71 @@ public final class DebugCommands {
             boolean suppressed = suppressedIds.contains(id);
             source.sendSuccess(() -> Component.literal("  - " + id + (suppressed ? " (SUPPRESSED)" : " (not suppressed -- should have just been added)")), false);
         }
+        return 1;
+    }
+
+    /**
+     * Forcibly removes one real Shop listing from whichever plot the player is standing in --
+     * real need, 2026-10-20: a Grocer catalog bug (see {@code lyfe.structure.ShopSeedCatalogs
+     * #grocerListings}' own fix) had already listed Gold Nugget/Ingot/Block for sale at a flat
+     * floor price before the catalog fix shipped -- a severe live exploit (an Ingot sold for 2 gold
+     * is worth 9 Nuggets melted down). The catalog fix alone only stops a *future* application from
+     * re-adding a listing; every catalog-driven apply path in this mod is additive-only by design
+     * (see {@code zone.ShopSeeding}'s own doc), so an already-created bad listing needs a direct,
+     * one-time removal rather than new generic removal-sweep code -- this command is that removal
+     * tool, generically useful for the same situation recurring with a different item later. Checks
+     * both a player-founded settlement's real plot (via its {@code GhostTownHallCoreEntity}) and a
+     * natural village's plot (via {@code NaturalSettlementPlotStore}, which has no core entity at
+     * all to search through) -- the Grocer this was built for is a natural-village shop.
+     */
+    private static int removeListing(CommandSourceStack source, String itemIdRaw) {
+        if (!(source.getEntity() instanceof net.minecraft.world.entity.player.Player player) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world (stand inside the target plot)."));
+            return 0;
+        }
+        Identifier itemId = Identifier.tryParse(itemIdRaw);
+        if (itemId == null) {
+            source.sendFailure(Component.literal("Not a valid item id: " + itemIdRaw));
+            return 0;
+        }
+        BlockPos pos = player.blockPosition();
+        PlotRecord foundPlot = null;
+
+        AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+            Optional<PlotRecord> plot = com.github.cerealklla.settlemynts.zone.PlotGeometry.findContainingPlot(level, core, pos.getX(), pos.getZ());
+            if (plot.isPresent()) {
+                foundPlot = plot.get();
+                break;
+            }
+        }
+        if (foundPlot == null) {
+            var store = com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore.get(level.getServer());
+            outer:
+            for (var entry : store.all().entrySet()) {
+                for (PlotRecord plot : entry.getValue()) {
+                    Optional<GeographicEntity> entity = Cartography.getEntity(level, new EntityId(plot.cartographyrPlotEntityId()));
+                    if (entity.isPresent() && entity.get().geometry() instanceof Geometry.Polygon polygon
+                            && polygon.contains(pos.getX(), pos.getZ())) {
+                        foundPlot = plot;
+                        break outer;
+                    }
+                }
+            }
+        }
+        if (foundPlot == null) {
+            source.sendFailure(Component.literal("You're not standing inside any finalized plot."));
+            return 0;
+        }
+        if (foundPlot.shopId().isEmpty()) {
+            source.sendFailure(Component.literal("Plot \"" + foundPlot.name() + "\" has no Shop -- nothing to remove."));
+            return 0;
+        }
+        com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.removeListing(level, foundPlot.shopId().get(),
+                com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(itemId));
+        String plotName = foundPlot.name();
+        source.sendSuccess(() -> Component.literal("Removed listing \"" + itemId + "\" from \"" + plotName + "\"'s Shop (if it existed)."), true);
         return 1;
     }
 
