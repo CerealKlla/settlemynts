@@ -96,20 +96,29 @@ public final class GuardSpellCastGoal extends Goal {
 
     private void engage(LivingEntity target) {
         double distanceSqr = guard.distanceToSqr(target);
-        if (distanceSqr > CAST_RANGE_SQR) {
-            guard.getNavigation().moveTo(target, 1.0);
-        } else {
-            guard.getNavigation().stop();
-        }
-        guard.getLookControl().setLookAt(target, 30.0F, 30.0F);
-        guard.lookAt(target, 30.0F, 30.0F);
+        boolean lineOfSight = guard.hasLineOfSight(target);
         // Real report, 2026-10-20: "shooting into walls, like they don't care if they can't hit
         // their target" -- this only ever gated on distance, never a clear shot, same bug a
         // straight-line projectile with no homing can't hide. Same line-of-sight check
         // GuardSightGoal already uses for target *acquisition* -- here it's needed again for the
         // actual firing moment, since a target can duck behind cover after being acquired. Applies
         // to both heal and attack casts -- a wall blocks a heal bolt exactly as well as a damage one.
-        if (distanceSqr <= CAST_RANGE_SQR && guard.hasLineOfSight(target)) {
+        //
+        // Real follow-up report, 2026-10-21: "the NPCs don't move to get line of sight when they
+        // can't hit their target, they just turn in place" -- the original fix above stopped the
+        // guard from firing through a wall, but still called getNavigation().stop() whenever within
+        // CAST_RANGE regardless of whether the shot was actually clear, so a blocked-but-in-range
+        // guard froze in place forever (only its look control moved). Now keeps moving toward the
+        // target whenever the shot isn't both in range AND clear -- lets the pathfinder route around
+        // whatever's blocking line of sight instead of standing still.
+        if (distanceSqr > CAST_RANGE_SQR || !lineOfSight) {
+            guard.getNavigation().moveTo(target, 1.0);
+        } else {
+            guard.getNavigation().stop();
+        }
+        guard.getLookControl().setLookAt(target, 30.0F, 30.0F);
+        guard.lookAt(target, 30.0F, 30.0F);
+        if (distanceSqr <= CAST_RANGE_SQR && lineOfSight) {
             LyfeMagicianBridge.attemptCastSparkOfLife(guard);
         }
     }
