@@ -24,7 +24,6 @@ import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
@@ -154,7 +153,15 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         int blockZ = Mth.floor(getZ());
         if (isActuallyTrappedUnderground(level, blockX, blockZ)) {
             getNavigation().stop();
-            int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
+            // Real report, 2026-10-20: "bouncing within a tree and slowly suffocating" -- the
+            // detection above (isActuallyTrappedUnderground) is correctly tree-aware, but this escape
+            // target never was: a raw heightmap lands on a branch log just as readily as real ground,
+            // teleporting the worker INTO the branch; npc.NpcTreetopEscape#check (also tree-aware)
+            // immediately sees it stranded there and sends it back down, repeat indefinitely -- the
+            // exact same heightmap-contamination bug already fixed for Guard/Resident/Farmer and for
+            // this same entity's own stuck-pathfinding rescue, just never caught here too since this
+            // method's *detection* half looked tree-aware enough to seem already fixed.
+            int surfaceY = com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.realSurfaceY(level, blockX, blockZ);
             teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
             return;
         }
