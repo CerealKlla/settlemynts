@@ -1,6 +1,8 @@
 package com.github.cerealklla.settlemynts.guardhouse;
 
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
@@ -64,6 +66,21 @@ public final class GuardhouseFoodAutoBuy {
      * (a single shop's real listing count), so it doesn't need further splitting.
      */
     public static void enqueueForSettlement(ServerLevel level, GhostTownHallCoreEntity core, MidnightWorkQueue queue) {
+        // Real lag report, 2026-10-20: this settlement's own GuardhouseFoodAutoBuy jobs were each
+        // taking 67-84ms, back to back -- traced to buyFromSellerPlot calling resolvePlotBoxes (a
+        // full-world GhostTownHallCoreEntity scan, see that method's own doc) fresh on every single
+        // job, once per (guardhouse, seller) pair. With more than one Guardhouse in a settlement, the
+        // exact same seller plot's boxes got re-scanned once per guardhouse, redundantly -- the same
+        // "resolve once, reuse" gap already fixed for zone.PlotCraftingTicker and
+        // PlannedInventoryClearing#executeCraftOne, just never applied here. Resolved once per
+        // settlement instead, for every seller-eligible plot (has a real Shop), shared across every
+        // guardhouse's own per-seller loop below.
+        Map<UUID, List<Container>> sellerBoxesByPlotId = new java.util.HashMap<>();
+        for (PlotRecord plot : core.getPlots()) {
+            if (plot.shopId().isPresent()) {
+                sellerBoxesByPlotId.put(plot.plotId(), Settlemynts.resolvePlotBoxes(level, plot.plotId()));
+            }
+        }
         for (PlotRecord plot : core.getPlots()) {
             if (!plot.zoneTypeId().equals(GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
                 continue;
@@ -71,29 +88,31 @@ public final class GuardhouseFoodAutoBuy {
             queue.enqueue(() -> GuardhouseIndex.get(level.getServer()).get(plot.plotId()).ifPresent(pos -> {
                 ServerLevel guardhouseLevel = level.getServer().getLevel(pos.dimension());
                 if (guardhouseLevel != null && guardhouseLevel.getBlockEntity(pos.pos()) instanceof GuardhouseBlockEntity guardhouse) {
-                    enqueueBuyForPlot(level, core, plot, guardhouse, queue);
+                    enqueueBuyForPlot(level, core, plot, guardhouse, queue, sellerBoxesByPlotId);
                 }
             }));
         }
     }
 
     private static void enqueueBuyForPlot(ServerLevel level, GhostTownHallCoreEntity core, PlotRecord guardhousePlot,
-                                           GuardhouseBlockEntity guardhouse, MidnightWorkQueue queue) {
+                                           GuardhouseBlockEntity guardhouse, MidnightWorkQueue queue,
+                                           Map<UUID, List<Container>> sellerBoxesByPlotId) {
         List<Container> paymentBoxes = Settlemynts.resolvePlotBoxes(level, guardhousePlot.plotId());
         for (PlotRecord sellerPlot : core.getPlots()) {
             if (sellerPlot.plotId().equals(guardhousePlot.plotId()) || sellerPlot.shopId().isEmpty()) {
                 continue;
             }
-            queue.enqueue(() -> buyFromSellerPlot(level, guardhouse, paymentBoxes, sellerPlot));
+            List<Container> sellerBoxes = sellerBoxesByPlotId.get(sellerPlot.plotId());
+            queue.enqueue(() -> buyFromSellerPlot(level, guardhouse, paymentBoxes, sellerPlot, sellerBoxes));
         }
     }
 
-    private static void buyFromSellerPlot(ServerLevel level, GuardhouseBlockEntity guardhouse, List<Container> paymentBoxes, PlotRecord sellerPlot) {
+    private static void buyFromSellerPlot(ServerLevel level, GuardhouseBlockEntity guardhouse, List<Container> paymentBoxes,
+                                           PlotRecord sellerPlot, List<Container> sellerBoxes) {
         int deficit = guardhouse.preferredFoodValue() - guardhouse.totalFoodValue();
         if (deficit <= 0) {
             return;
         }
-        List<Container> sellerBoxes = Settlemynts.resolvePlotBoxes(level, sellerPlot.plotId());
         for (YconomicsShopBridge.ShopListingView listing : YconomicsShopBridge.getListings(level, sellerPlot.shopId().get())) {
             if (deficit <= 0) {
                 break;
