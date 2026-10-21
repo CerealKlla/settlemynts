@@ -1349,14 +1349,23 @@ public class SettlemyntsMod {
         // nuggetsCharged above) and moves to the Town Hall, before the gold-total UI refresh below
         // so it reflects the post-tax amount immediately. See #resolveSalesTax's own doc for why
         // Guardhouses are naturally exempt with no special-casing needed here.
+        // Temporary instrumentation (2026-10-21) -- real report: "bought a ton of wheat, no ledger
+        // entry at all showed up, not even the base Sold line, on either side." Every code path here
+        // was re-read and looks correct on paper, so this logs the real values instead of guessing
+        // further -- remove once the live repro confirms (or disproves) the suspect branch.
+        LOGGER.info("[TAX-DEBUG] processBuyLine: owner={} filled={} nuggetsCharged={}",
+                shopContext.owner().getClass().getSimpleName(), filled, result.nuggetsCharged());
         if (shopContext.owner() instanceof GhostTownHallCoreEntity taxCore) {
             int tax = resolveSalesTax(taxCore, filled, result.nuggetsCharged());
+            LOGGER.info("[TAX-DEBUG] taxPerItem={} townHallPlotPresent={} resolvedTax={}",
+                    taxCore.taxPerItem(), taxCore.townHallPlot().isPresent(), tax);
             if (tax > 0) {
                 com.github.cerealklla.settlemynts.zone.ShopResource goldNuggets = com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(
                         net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET));
                 java.util.List<net.minecraft.world.item.ItemStack> withdrawnTax =
                         com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(boxes, goldNuggets, tax);
                 int actuallyTaxed = withdrawnTax.stream().mapToInt(net.minecraft.world.item.ItemStack::getCount).sum();
+                LOGGER.info("[TAX-DEBUG] withdrawnFromShopBoxes={} (wanted {})", actuallyTaxed, tax);
                 depositSalesTax(serverLevel, taxCore, shopContext.plot(), actuallyTaxed, player.getGameProfile().name());
             }
         }
@@ -1367,6 +1376,10 @@ public class SettlemyntsMod {
         // relocated -- see BlueprintsConstructionBridge#resolveLivePos's own doc) instead of the
         // temporary diagnostic this used to fall back to.
         if (ModList.get().isLoaded("blueprynts")) {
+            java.util.Optional<net.minecraft.core.BlockPos> livePos =
+                    com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveLivePos(serverLevel, shopContext.plot());
+            LOGGER.info("[TAX-DEBUG] plotId={} constructionBoxId={} resolvedLedgerBoxPos={}",
+                    shopContext.plot().plotId(), shopContext.plot().constructionBoxId(), livePos);
             com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.appendLedgerEntry(
                     serverLevel, shopContext.plot(),
                     "Sold " + filled + "x to " + player.getGameProfile().name() + " for " + result.nuggetsCharged() + " nuggets");
