@@ -45,7 +45,7 @@ public final class FoundingScreen extends Screen {
     private boolean showPlotPerimeters;
     private boolean showRoadwayStakes;
     private boolean boundaryVisible;
-    private final int initialTaxPerTransaction;
+    private final int initialTaxPerItem;
 
     private EditBox nameBox;
     private EditBox grantBox;
@@ -64,7 +64,7 @@ public final class FoundingScreen extends Screen {
         this.showPlotPerimeters = payload.showPlotPerimeters();
         this.hasTownHallPlot = payload.hasTownHallPlot();
         this.showRoadwayStakes = payload.showRoadwayStakes();
-        this.initialTaxPerTransaction = payload.taxPerTransaction();
+        this.initialTaxPerItem = payload.taxPerItem();
     }
 
     @Override
@@ -115,12 +115,13 @@ public final class FoundingScreen extends Screen {
 
             // Settlement sales tax (explicit user spec, 2026-10-17: "Taxes are applied any time an
             // item is sold within the settlement... paid by the Seller... a flat amount, defaulted
-            // to 1 nugget per transaction... paid directly to the Town Hall"). Same inline
+            // to 1 nugget per transaction... paid directly to the Town Hall" -- corrected 2026-10-21:
+            // "it shouldn't be 1 per transaction, it should be 1 per sold item"). Same inline
             // EditBox+button shape as the Name field above, not a submenu -- a single number needs
             // no dedicated screen the way Defense Spending's live Guardhouse list does.
-            taxBox = addRenderableWidget(new EditBox(font, centerX - 100, y, 150, 20, Component.literal("Tax per sale")));
+            taxBox = addRenderableWidget(new EditBox(font, centerX - 100, y, 150, 20, Component.literal("Tax per item sold")));
             taxBox.setMaxLength(9);
-            taxBox.setValue(Integer.toString(initialTaxPerTransaction));
+            taxBox.setValue(Integer.toString(initialTaxPerItem));
             addRenderableWidget(Button.builder(Component.literal("Set Tax"), b -> setTax())
                     .bounds(centerX + 55, y, 90, 20).build());
             y += 30;

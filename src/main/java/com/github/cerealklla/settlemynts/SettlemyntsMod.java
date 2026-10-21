@@ -275,7 +275,7 @@ public class SettlemyntsMod {
                     if (context.player() instanceof ServerPlayer player
                             && player.level().getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core
                             && core.isTownPlanner(player.getUUID())) {
-                        core.setTaxPerTransaction(payload.taxPerTransaction());
+                        core.setTaxPerItem(payload.taxPerItem());
                     }
                 });
 
@@ -1183,11 +1183,14 @@ public class SettlemyntsMod {
 
     /** "Buy N" click on the real Shop screen -- charges the buyer only for whatever was actually filled. */
     /**
-     * The flat per-transaction settlement sales tax to apply to a sale worth {@code transactionValue}
-     * (explicit user spec, 2026-10-17: "Taxes are applied any time an item is sold within the
-     * settlement... a flat amount, defaulted to 1 nugget per transaction"), clamped to never exceed
-     * the transaction's own value. 0 if {@code owner} isn't a real player-founded settlement (a
-     * natural village has no Town Hall to pay) or that settlement has no Town Hall plot yet.
+     * The settlement sales tax to apply to a sale of {@code quantity} items worth {@code
+     * transactionValue} total (explicit user spec, 2026-10-17: "Taxes are applied any time an item
+     * is sold within the settlement... a flat amount, defaulted to 1 nugget per transaction" --
+     * corrected 2026-10-21: "it shouldn't be 1 per transaction, it should be 1 per sold item," so
+     * this is now the per-unit rate times how many units actually changed hands, not a flat per-click
+     * fee), clamped to never exceed the transaction's own value (can't tax more than was actually
+     * paid). 0 if {@code owner} isn't a real player-founded settlement (a natural village has no Town
+     * Hall to pay) or that settlement has no Town Hall plot yet.
      *
      * <p><b>"Guardhouses do not pay taxes when buying or selling" holds with no special-case code
      * anywhere</b> -- a Guardhouse plot can never have a Shop at all ({@link #buyFromShop}/{@link
@@ -1198,11 +1201,11 @@ public class SettlemyntsMod {
      * all. Don't "fix" either of those paths to also collect tax later -- the exemption is
      * intentional, not a gap.
      */
-    private static int resolveSalesTax(com.github.cerealklla.settlemynts.zone.PlotOwner owner, int transactionValue) {
-        if (!(owner instanceof GhostTownHallCoreEntity core) || transactionValue <= 0 || core.townHallPlot().isEmpty()) {
+    private static int resolveSalesTax(com.github.cerealklla.settlemynts.zone.PlotOwner owner, int quantity, int transactionValue) {
+        if (!(owner instanceof GhostTownHallCoreEntity core) || quantity <= 0 || transactionValue <= 0 || core.townHallPlot().isEmpty()) {
             return 0;
         }
-        return Math.min(Math.max(0, core.taxPerTransaction()), transactionValue);
+        return Math.min(Math.max(0, core.taxPerItem()) * quantity, transactionValue);
     }
 
     /**
@@ -1347,7 +1350,7 @@ public class SettlemyntsMod {
         // so it reflects the post-tax amount immediately. See #resolveSalesTax's own doc for why
         // Guardhouses are naturally exempt with no special-casing needed here.
         if (shopContext.owner() instanceof GhostTownHallCoreEntity taxCore) {
-            int tax = resolveSalesTax(taxCore, result.nuggetsCharged());
+            int tax = resolveSalesTax(taxCore, filled, result.nuggetsCharged());
             if (tax > 0) {
                 com.github.cerealklla.settlemynts.zone.ShopResource goldNuggets = com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(
                         net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET));
@@ -1525,7 +1528,7 @@ public class SettlemyntsMod {
         // transaction, withheld straight out of their payout before it's ever minted/handed over (no
         // withdrawal needed, unlike buyFromShop's case, since this gold was never given to anyone yet).
         if (shopContext.owner() instanceof GhostTownHallCoreEntity taxCore) {
-            int tax = resolveSalesTax(taxCore, nuggetsOwed);
+            int tax = resolveSalesTax(taxCore, result.itemsSold(), nuggetsOwed);
             if (tax > 0) {
                 nuggetsOwed -= tax;
                 depositSalesTax(serverLevel, taxCore, null, tax, player.getGameProfile().name());

@@ -110,10 +110,14 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
 
     // Settlement sales tax (explicit user spec, 2026-10-17: "Taxes are applied any time an item is
     // sold within the settlement... paid by the Seller... a flat amount, defaulted to 1 nugget per
-    // transaction... paid directly to the Town Hall"). See SettlemyntsMod#buyFromShop/#sellToShop
-    // for where this is actually collected, and #collectSalesTax's own doc for why Guardhouses never
-    // pay it without any special-case code here.
-    private int taxPerTransaction = 1;
+    // transaction... paid directly to the Town Hall" -- corrected 2026-10-21: "it shouldn't be 1 per
+    // transaction, it should be 1 per sold item," so this is now a flat per-unit rate, multiplied by
+    // however many items actually changed hands, not a flat per-click fee). See
+    // SettlemyntsMod#processBuyLine/#processSellLine for where this is actually collected, and
+    // #resolveSalesTax's own doc for why Guardhouses never pay it without any special-case code here.
+    // Kept as "TaxPerTransaction" in persisted NBT (below) so already-placed settlements don't lose
+    // their configured rate across this rename.
+    private int taxPerItem = 1;
 
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
@@ -269,12 +273,12 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         this.showRoadwayStakes = showRoadwayStakes;
     }
 
-    public int taxPerTransaction() {
-        return taxPerTransaction;
+    public int taxPerItem() {
+        return taxPerItem;
     }
 
-    public void setTaxPerTransaction(int taxPerTransaction) {
-        this.taxPerTransaction = Math.max(0, taxPerTransaction);
+    public void setTaxPerItem(int taxPerItem) {
+        this.taxPerItem = Math.max(0, taxPerItem);
     }
 
     public boolean isFounder(UUID playerId) {
@@ -360,7 +364,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         }
         if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer && level() instanceof ServerLevel serverLevel) {
             PacketDistributor.sendToPlayer(serverPlayer, new OpenFoundingScreenPayload(
-                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters, finalized && findTownHallPlot(serverLevel).isPresent(), showRoadwayStakes, taxPerTransaction));
+                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters, finalized && findTownHallPlot(serverLevel).isPresent(), showRoadwayStakes, taxPerItem));
         }
         return InteractionResult.SUCCESS;
     }
@@ -394,7 +398,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         activePerimeterPlanner = input.read("ActivePerimeterPlanner", UUIDUtil.CODEC).orElse(null);
         showPlotPerimeters = input.getBooleanOr("ShowPlotPerimeters", false);
         showRoadwayStakes = input.getBooleanOr("ShowRoadwayStakes", false);
-        taxPerTransaction = Math.max(0, input.getIntOr("TaxPerTransaction", 1));
+        taxPerItem = Math.max(0, input.getIntOr("TaxPerTransaction", 1));
         plots.clear();
         plots.addAll(input.read("Plots", Codec.list(PlotRecord.CODEC)).orElse(List.of()));
     }
@@ -411,7 +415,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         output.storeNullable("ActivePerimeterPlanner", UUIDUtil.CODEC, activePerimeterPlanner);
         output.putBoolean("ShowPlotPerimeters", showPlotPerimeters);
         output.putBoolean("ShowRoadwayStakes", showRoadwayStakes);
-        output.putInt("TaxPerTransaction", taxPerTransaction);
+        output.putInt("TaxPerTransaction", taxPerItem);
         output.store("Plots", Codec.list(PlotRecord.CODEC), List.copyOf(plots));
     }
 }
