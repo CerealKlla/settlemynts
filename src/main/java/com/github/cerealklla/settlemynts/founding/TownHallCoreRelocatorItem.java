@@ -86,6 +86,7 @@ public class TownHallCoreRelocatorItem extends Item {
         core.discardBellMarker(serverLevel);
         core.setPos(target.getX() + 0.5, target.getY(), target.getZ() + 0.5);
         core.spawnBellMarker(serverLevel);
+        SettlementCoreIndex.get(serverLevel.getServer()).put(core.getUUID(), net.minecraft.core.GlobalPos.of(serverLevel.dimension(), core.blockPosition()));
         player.sendSystemMessage(Component.literal("Town Hall Core repositioned."));
         stack.shrink(1);
         return InteractionResult.SUCCESS_SERVER;

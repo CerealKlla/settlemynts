@@ -228,6 +228,7 @@ public class SettlemyntsMod {
         modEventBus.addListener(this::commonSetup);
         modEventBus.addListener(this::registerPayloads);
         modEventBus.addListener(this::registerAttributes);
+        modEventBus.addListener(com.github.cerealklla.settlemynts.zone.MidnightChunkWaker::registerController);
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {

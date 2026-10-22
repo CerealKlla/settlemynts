@@ -2,8 +2,13 @@ package com.github.cerealklla.settlemynts.zone;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
+
+import net.minecraft.server.level.ServerLevel;
 
 /**
  * Spreads the nightly midnight settlement pass's actual work across many server ticks instead of
@@ -31,8 +36,59 @@ public final class MidnightWorkQueue {
 
     private final Deque<Runnable> jobs = new ArrayDeque<>();
 
+    // Real requirement, 2026-10-22 (see decisions.md "Midnight settlement processing must force-load
+    // chunks"): a settlement's own midnight pipeline is many small jobs (one per resource, per plot
+    // target, per guardhouse pair, etc. -- scattered across PlannedInventoryClearing/
+    // GuardhouseFoodAutoBuy/DefenseSpendingTransfer), not one atomic unit, and those jobs interleave
+    // with every other settlement's own jobs in this same shared FIFO queue. A plain "enqueue one
+    // final release job" wouldn't work -- several of these jobs re-enqueue themselves as
+    // continuations (attemptOneCraftableUnit, attemptOneOwnStockCraft), which could land AFTER a
+    // naively-placed release. This is a reference count instead: every job enqueued for a settlement
+    // increments it, every job that finishes running decrements it, and whichever job happens to take
+    // it to zero (there's always exactly one, since jobs run strictly one at a time) triggers the
+    // real release right then.
+    //
+    // <p>{@code currentLevel}/{@code currentSettlementId} are the ambient context: whichever
+    // settlement-scoped job is actually executing right now sets these for the duration of its own
+    // {@code run()}. This means a PLAIN {@link #enqueue} call made synchronously from inside that
+    // job's own body -- or from a later continuation job re-enqueuing itself the same way -- is
+    // automatically folded into the same settlement's ref count, with zero changes needed at any of
+    // those call sites (PlannedInventoryClearing/GuardhouseFoodAutoBuy/DefenseSpendingTransfer all
+    // just keep calling {@code queue.enqueue(...)} exactly as before).
+    private final Map<UUID, Integer> settlementRefCounts = new HashMap<>();
+    private ServerLevel currentLevel;
+    private UUID currentSettlementId;
+
     public void enqueue(Runnable job) {
+        if (currentSettlementId != null) {
+            enqueueForSettlement(currentLevel, currentSettlementId, job);
+            return;
+        }
         jobs.add(job);
+    }
+
+    /** Only the top-level call (one per settlement, from {@code ShopMidnightRestockTicker}) needs to
+     * call this explicitly -- see this class's own doc for how everything nested under it inherits
+     * the same settlement automatically via {@link #enqueue}. */
+    public void enqueueForSettlement(ServerLevel level, UUID settlementId, Runnable job) {
+        settlementRefCounts.merge(settlementId, 1, Integer::sum);
+        jobs.add(() -> {
+            ServerLevel previousLevel = currentLevel;
+            UUID previousSettlementId = currentSettlementId;
+            currentLevel = level;
+            currentSettlementId = settlementId;
+            try {
+                job.run();
+            } finally {
+                currentLevel = previousLevel;
+                currentSettlementId = previousSettlementId;
+                int remaining = settlementRefCounts.merge(settlementId, -1, Integer::sum);
+                if (remaining <= 0) {
+                    settlementRefCounts.remove(settlementId);
+                    MidnightChunkWaker.sleep(level, settlementId);
+                }
+            }
+        });
     }
 
     public boolean isEmpty() {

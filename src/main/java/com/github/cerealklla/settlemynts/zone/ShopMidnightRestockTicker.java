@@ -1,27 +1,43 @@
 package com.github.cerealklla.settlemynts.zone;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import com.github.cerealklla.settlemynts.api.Settlemynts;
+import com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
-import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity;
+import com.github.cerealklla.settlemynts.founding.SettlementCoreIndex;
+import com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants;
+import com.github.cerealklla.settlemynts.guardhouse.GuardhouseIndex;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignIndex;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
  * Drives {@link ShopSeeding#restockAtMidnight} once per real in-game day boundary (added 2026-10-05,
  * explicit user request) -- same day-boundary detection shape as Yconomics' own {@code
  * bills.BillProcessingTicker} (a local, duplicated two-line day-number calculation rather than a new
- * cross-mod dependency for something this small/pure), and the same whole-suite "scan every known
- * Plot Config Sign" trigger shape as {@code guardhouse.GuardSpawnTicker}/{@code
- * resident.ResidentSpawnTicker}, via {@link PlotConfigSignIndex} -- no world-wide entity scan needed.
+ * cross-mod dependency for something this small/pure).
+ *
+ * <p><b>Rewritten 2026-10-22</b> for the "midnight settlement processing must run regardless of
+ * player proximity" requirement (see decisions.md) -- every known settlement is now discovered
+ * directly via {@link SettlementCoreIndex} (a flat, chunk-independent registry) instead of being
+ * derived indirectly by iterating every Plot Config Sign and hoping its chunk happens to already be
+ * loaded. Each settlement's own chunk, plus every position its midnight pipeline will touch, is
+ * force-loaded (see {@link MidnightChunkWaker}) for the duration of that settlement's own job
+ * sequence, then released -- "wake the whole settlement, do every transaction, let it rest on its
+ * own time," per the user's own explicit framing, rather than per-job force/unforce churn.
  */
 public final class ShopMidnightRestockTicker {
 
@@ -53,40 +69,62 @@ public final class ShopMidnightRestockTicker {
         if (!YconomicsShopBridge.isAvailable()) {
             return;
         }
-        // Real production incident, 2026-10-21: this whole method used to run every one of its steps
-        // fully synchronously the instant a day boundary was detected (the sign/core resolution loop
-        // below included) -- after three separate single-tick freezes were each traced to one
-        // unchunked step deeper in this same pipeline (see PlannedInventoryClearing/
-        // GuardhouseFoodAutoBuy/DefenseSpendingTransfer's own decisions.md entries), every remaining
-        // step here was audited and queued too, proactively, rather than waiting for a fourth
-        // incident to point at whichever one was still unchunked. `pipelinedCoreIds` dedupes so each
-        // settlement's heavy pipeline still runs exactly once even though several signs can resolve
-        // to the same core -- safe with no locking since queued jobs only ever run one at a time, on
-        // this same thread.
-        java.util.Set<UUID> pipelinedCoreIds = new java.util.HashSet<>();
-        for (Map.Entry<UUID, GlobalPos> entry : PlotConfigSignIndex.get(server).all().entrySet()) {
-            GlobalPos pos = entry.getValue();
-            ServerLevel level = server.getLevel(pos.dimension());
+        // One job per settlement, discovered directly from SettlementCoreIndex (flat, chunk-
+        // independent -- see this class's own doc) rather than derived indirectly from signs. Each
+        // job wakes its own settlement (see wakeAndPipelineSettlement) before doing anything else;
+        // MidnightWorkQueue's own ambient settlement-context propagation means every job this one
+        // goes on to enqueue (the restock loop, PlannedInventoryClearing, GuardhouseFoodAutoBuy,
+        // DefenseSpendingTransfer, and any of their own self-re-enqueued continuations) automatically
+        // stays tagged under this same settlement, with no changes needed in any of those classes.
+        for (Map.Entry<UUID, GlobalPos> entry : SettlementCoreIndex.get(server).all().entrySet()) {
+            UUID coreId = entry.getKey();
+            GlobalPos corePos = entry.getValue();
+            ServerLevel level = server.getLevel(corePos.dimension());
             if (level == null) {
                 continue;
             }
-            UUID plotId = entry.getKey();
-            BlockPos signPos = pos.pos();
-            workQueue.enqueue(() -> {
-                GhostTownHallCoreEntity core = restockPlot(level, plotId, signPos);
-                if (core != null && pipelinedCoreIds.add(core.getUUID())) {
-                    enqueueSettlementPipeline(level, core);
-                }
-            });
+            BlockPos coreBlockPos = corePos.pos();
+            workQueue.enqueueForSettlement(level, coreId, () -> wakeAndPipelineSettlement(level, coreId, coreBlockPos));
         }
         enqueueNaturalSettlementShops(server);
     }
 
     /**
+     * Force-loads this settlement's own core chunk, resolves its real plot list, force-loads every
+     * position that list implies (sign, every registered box, Construction Box, Guardhouse), then
+     * enqueues the rest of this settlement's midnight pipeline exactly as before. The two-step wake
+     * (core first, then everything else) is unavoidable -- the plot list itself only exists on the
+     * live core entity, so there's no way to know what else needs loading before that first chunk is.
+     */
+    private void wakeAndPipelineSettlement(ServerLevel level, UUID coreId, BlockPos coreBlockPos) {
+        MidnightChunkWaker.wake(level, coreId, List.of(coreBlockPos));
+        if (!(level.getEntity(coreId) instanceof GhostTownHallCoreEntity core)) {
+            return; // Shouldn't happen now that its own chunk is forced -- stay defensive, not fatal.
+        }
+
+        List<BlockPos> wakePositions = new ArrayList<>();
+        for (PlotRecord plot : core.getPlots()) {
+            PlotConfigSignIndex.get(level.getServer()).get(plot.plotId()).ifPresent(pos -> wakePositions.add(pos.pos()));
+            wakePositions.addAll(Settlemynts.resolvePlotBoxPositions(level, plot.plotId()));
+            if (ModList.get().isLoaded("blueprynts")) {
+                BlueprintsConstructionBridge.resolveLivePos(level, plot).ifPresent(wakePositions::add);
+            }
+            if (plot.zoneTypeId().equals(GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
+                GuardhouseIndex.get(level.getServer()).get(plot.plotId()).ifPresent(pos -> wakePositions.add(pos.pos()));
+            }
+        }
+        MidnightChunkWaker.wake(level, coreId, wakePositions);
+
+        for (PlotRecord plot : core.getPlots()) {
+            PlotConfigSignIndex.get(level.getServer()).get(plot.plotId())
+                    .ifPresent(signPos -> workQueue.enqueue(() -> ShopSeeding.restockAtMidnight(level, plot, signPos.pos())));
+        }
+        enqueueSettlementPipeline(level, core);
+    }
+
+    /**
      * The per-settlement midnight pipeline (Defense Spending, inter-plot trading, own-stock
-     * crafting, Guardhouse food buying, crafted-food auto-listing) -- extracted from {@link
-     * #onServerTick} so it can be invoked from inside an already-queued job (see that method's own
-     * doc for why resolving which core a sign belongs to is now itself deferred).
+     * crafting, Guardhouse food buying, crafted-food auto-listing).
      */
     private void enqueueSettlementPipeline(ServerLevel level, GhostTownHallCoreEntity core) {
         // "Defense Spending" (explicit user spec, 2026-10-16) -- transfers gold from the Town
@@ -128,29 +166,35 @@ public final class ShopMidnightRestockTicker {
      * restocked -- {@code api.Settlemynts#resolvePlotBoxes} resolves any of them to the exact same
      * underground vault anyway (see {@code zone.NaturalShopVault}).
      *
-     * <p>Calls {@link ShopSeeding#restockNaturalShop}, not {@link ShopSeeding#restockAtMidnight} --
-     * same real bug and reasoning as {@code ShopSeeding#seedNewPlotSharingShop}'s own doc: a shop
-     * with no owner needs plain goods actually restocked (and their listings kept alive), which
-     * {@code restockAtMidnight} deliberately no longer does for a player-owned plot's own good reason
-     * (an owner's own production should supply those, not a daily conjure). The gold-nugget floor is
-     * still the one piece both paths share verbatim.
+     * <p>Woken the same way a player-founded settlement is (explicit requirement, 2026-10-22) --
+     * every zone type's own underground vault position, from {@link NaturalShopVaultIndex} (flat,
+     * chunk-independent, same as every other index this feature relies on) -- keyed by the same
+     * deterministic settlement id {@code api.Settlemynts#findNaturalPlotAt} already derives for a
+     * natural village with no real core entity to use instead ({@code new UUID(worldSeed,
+     * settlementEntityId)}).
      */
     private void enqueueNaturalSettlementShops(MinecraftServer server) {
         ServerLevel level = server.overworld(); // Villages are overworld-only.
         if (level == null) {
             return;
         }
-        // One job per natural settlement, not a synchronous loop over all of them -- same
-        // proactive chunking as everything else in this pipeline, see onServerTick's own doc.
-        for (Map.Entry<SettlementKey, java.util.List<PlotRecord>> settlementEntry : NaturalSettlementPlotStore.get(server).all().entrySet()) {
-            java.util.List<PlotRecord> plots = settlementEntry.getValue();
+        for (Map.Entry<SettlementKey, List<PlotRecord>> settlementEntry : NaturalSettlementPlotStore.get(server).all().entrySet()) {
+            List<PlotRecord> plots = settlementEntry.getValue();
             SettlementKey settlementKey = settlementEntry.getKey();
-            workQueue.enqueue(() -> {
+            UUID settlementId = new UUID(settlementKey.worldSeed(), settlementKey.settlementEntityId());
+
+            Map<Identifier, PlotRecord> representativeByZone = new HashMap<>();
+            for (PlotRecord plot : plots) {
+                representativeByZone.putIfAbsent(plot.zoneTypeId(), plot);
+            }
+            List<BlockPos> wakePositions = new ArrayList<>();
+            for (Identifier zoneTypeId : representativeByZone.keySet()) {
+                NaturalShopVaultIndex.get(server).get(settlementKey, zoneTypeId).ifPresent(wakePositions::add);
+            }
+
+            workQueue.enqueueForSettlement(level, settlementId, () -> {
+                MidnightChunkWaker.wake(level, settlementId, wakePositions);
                 NaturalSettlementPlotOwner owner = new NaturalSettlementPlotOwner(server, settlementKey);
-                java.util.Map<net.minecraft.resources.Identifier, PlotRecord> representativeByZone = new java.util.HashMap<>();
-                for (PlotRecord plot : plots) {
-                    representativeByZone.putIfAbsent(plot.zoneTypeId(), plot);
-                }
                 for (PlotRecord representative : representativeByZone.values()) {
                     if (representative.shopId().isEmpty()) {
                         continue;
@@ -160,20 +204,5 @@ public final class ShopMidnightRestockTicker {
                 PlannedInventoryClearing.settleGroup(level, plots, workQueue);
             });
         }
-    }
-
-    /** Returns the resolved core (or {@code null}) so the caller can settle Planned Inventory once per settlement -- see this call site's own comment. */
-    private GhostTownHallCoreEntity restockPlot(ServerLevel level, UUID plotId, BlockPos signPos) {
-        if (!(level.getBlockEntity(signPos) instanceof PlotConfigSignBlockEntity sign)
-                || sign.settlementCoreId() == null
-                || !(level.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
-            return null; // Chunk not loaded, or the sign/core couldn't be resolved -- skip this day.
-        }
-        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
-        if (plot == null) {
-            return null;
-        }
-        ShopSeeding.restockAtMidnight(level, plot, signPos);
-        return core;
     }
 }

@@ -131,6 +131,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         core.townPlanners.add(founderId); // The founder is always a Town Planner (design doc Section 6).
         level.addFreshEntity(core);
         core.spawnBellMarker(level);
+        SettlementCoreIndex.get(level.getServer()).put(core.getUUID(), net.minecraft.core.GlobalPos.of(level.dimension(), core.blockPosition()));
         return core;
     }
 
