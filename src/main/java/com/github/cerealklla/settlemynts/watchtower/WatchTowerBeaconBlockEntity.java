@@ -25,6 +25,7 @@ import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ContainerData;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -69,6 +70,41 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         @Override
         public boolean canPlaceItem(int slot, ItemStack stack) {
             return canPlaceFuel(stack);
+        }
+    };
+
+    // Real report, 2026-10-22: "it just says 'Unlit' no matter what" -- even with plenty of fuel in
+    // the slot. The fuel SLOT itself was always live (ordinary vanilla container sync), but
+    // litTimeRemaining/litTotalTime were only ever sent once, in the extra-data payload at the exact
+    // moment the screen opened (a deliberate "snapshot, close/reopen to refresh" scope decision at
+    // the time) -- so depositing fuel while the screen was already open could never visibly change
+    // the status text or bar at all, no matter how long you waited. Mirrors vanilla's own
+    // AbstractFurnaceBlockEntity#dataAccess exactly (confirmed against the decompiled source): a real
+    // synced ContainerData, auto-broadcast by AbstractContainerMenu every tick a value actually
+    // changes, not a one-shot read.
+    private static final int DATA_LIT_TIME = 0;
+    private static final int DATA_LIT_DURATION = 1;
+    private final ContainerData dataAccess = new ContainerData() {
+        @Override
+        public int get(int index) {
+            return switch (index) {
+                case DATA_LIT_TIME -> litTimeRemaining;
+                case DATA_LIT_DURATION -> litTotalTime;
+                default -> 0;
+            };
+        }
+
+        @Override
+        public void set(int index, int value) {
+            switch (index) {
+                case DATA_LIT_TIME -> litTimeRemaining = value;
+                case DATA_LIT_DURATION -> litTotalTime = value;
+            }
+        }
+
+        @Override
+        public int getCount() {
+            return 2;
         }
     };
 
@@ -188,9 +224,15 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         int builtTier = resolveBuiltTier(level);
         boolean becameLit = false;
         if (manuallyEnabled && builtTier > 0) {
+            // Real correction, 2026-10-22: "it burns at that rate [10+Tier*10/min], no it shouldn't
+            // require that many to turn on the light" -- the rate itself is still the real spec
+            // (design doc: "10 + Tier*10 coal per minute"), but it's no longer an all-or-nothing
+            // threshold gating ignition entirely. Burns whatever's actually available, capped at the
+            // full per-minute rate -- any nonzero amount still lights the bonus for the full minute.
             int required = WatchTowerConstants.fuelCostForTier(builtTier);
-            if (countFuel() >= required) {
-                consumeFuel(required);
+            int toBurn = Math.min(countFuel(), required);
+            if (toBurn > 0) {
+                consumeFuel(toBurn);
                 litTimeRemaining = WatchTowerConstants.MINUTE_TICKS;
                 litTotalTime = WatchTowerConstants.MINUTE_TICKS;
                 becameLit = true;
@@ -221,18 +263,30 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         int builtTier = level instanceof ServerLevel serverLevel ? resolveBuiltTier(serverLevel) : 0;
         int requiredFuel = builtTier > 0 ? WatchTowerConstants.fuelCostForTier(builtTier) : 0;
         return new WatchTowerBeaconMenu(ModMenus.WATCH_TOWER_BEACON.get(), containerId, inventory, fuelContainer,
-                litTimeRemaining, litTotalTime, manuallyEnabled, canManage, getBlockPos(), requiredFuel);
+                dataAccess, manuallyEnabled, canManage, getBlockPos(), requiredFuel);
     }
 
     @Override
     public void writeClientSideData(AbstractContainerMenu menu, RegistryFriendlyByteBuf buf) {
         WatchTowerBeaconMenu beaconMenu = (WatchTowerBeaconMenu) menu;
-        buf.writeVarInt(beaconMenu.litTimeRemaining());
-        buf.writeVarInt(beaconMenu.litTotalTime());
         buf.writeBoolean(beaconMenu.manuallyEnabled());
         buf.writeBoolean(beaconMenu.canManage());
         buf.writeBlockPos(beaconMenu.beaconPos());
         buf.writeVarInt(beaconMenu.requiredFuel());
+    }
+
+    /** DEBUG ONLY, added 2026-10-22 while chasing a real "it just says Unlit no matter what" report
+     * -- real ground-truth dump instead of theorizing further. See {@code debug.DebugCommands
+     * #watchTowerInfo}. */
+    public String debugDump(ServerLevel level) {
+        int builtTier = resolveBuiltTier(level);
+        return "settlementCoreId=" + settlementCoreId + " plotId=" + plotId
+                + " builtTier=" + builtTier
+                + " manuallyEnabled=" + manuallyEnabled
+                + " litTimeRemaining=" + litTimeRemaining + " litTotalTime=" + litTotalTime
+                + " tickCounter=" + tickCounter
+                + " fuelCount=" + countFuel()
+                + " requiredFuel=" + (builtTier > 0 ? WatchTowerConstants.fuelCostForTier(builtTier) : -1);
     }
 
     /** Shared by {@link #createMenu} and {@code SettlemyntsMod#setWatchTowerEnabled}'s own re-validation. */

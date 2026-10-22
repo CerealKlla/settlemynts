@@ -31,6 +31,6 @@ public final class ModMenus {
     public static final DeferredHolder<MenuType<?>, MenuType<WatchTowerBeaconMenu>> WATCH_TOWER_BEACON = MENU_TYPES.register(
             "watch_tower_beacon",
             () -> IMenuTypeExtension.create((windowId, inventory, extraData) ->
-                    new WatchTowerBeaconMenu(null, windowId, inventory, extraData.readVarInt(), extraData.readVarInt(),
+                    new WatchTowerBeaconMenu(null, windowId, inventory,
                             extraData.readBoolean(), extraData.readBoolean(), extraData.readBlockPos(), extraData.readVarInt())));
 }

@@ -84,6 +84,8 @@ public final class DebugCommands {
                 .then(Commands.literal("checkavailable")
                         .then(Commands.argument("itemId", StringArgumentType.string())
                                 .executes(ctx -> checkAvailable(ctx.getSource(), StringArgumentType.getString(ctx, "itemId")))))
+                .then(Commands.literal("watchtowerinfo")
+                        .executes(ctx -> watchTowerInfo(ctx.getSource())))
                 .then(Commands.literal("naturalvillagers")
                         .executes(ctx -> naturalVillagers(ctx.getSource())))
                 .then(Commands.literal("resyncprotection")
@@ -806,5 +808,40 @@ public final class DebugCommands {
             source.sendSuccess(() -> Component.literal("false"), false);
         }
         return available ? 1 : 0;
+    }
+
+    /**
+     * {@code /settlemynts watchtowerinfo} -- added 2026-10-22, real report: "it just says Unlit no
+     * matter what" even with plenty of fuel and the bonus toggled on, close/reopen confirmed not a
+     * staleness issue. Dumps the nearest Beacon's own real internal state (within {@code SEARCH_RADIUS}
+     * blocks of the player) instead of continuing to theorize from code alone.
+     */
+    private static final int WATCH_TOWER_SEARCH_RADIUS = 12;
+
+    private static int watchTowerInfo(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof net.minecraft.world.entity.player.Player player) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world."));
+            return 0;
+        }
+        BlockPos center = player.blockPosition();
+        com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconBlockEntity found = null;
+        BlockPos foundPos = null;
+        for (BlockPos pos : BlockPos.betweenClosed(
+                center.offset(-WATCH_TOWER_SEARCH_RADIUS, -WATCH_TOWER_SEARCH_RADIUS, -WATCH_TOWER_SEARCH_RADIUS),
+                center.offset(WATCH_TOWER_SEARCH_RADIUS, WATCH_TOWER_SEARCH_RADIUS, WATCH_TOWER_SEARCH_RADIUS))) {
+            if (level.getBlockEntity(pos) instanceof com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconBlockEntity beacon) {
+                found = beacon;
+                foundPos = pos.immutable();
+                break;
+            }
+        }
+        if (found == null) {
+            source.sendFailure(Component.literal("No Watch Tower Beacon found within " + WATCH_TOWER_SEARCH_RADIUS + " blocks."));
+            return 0;
+        }
+        BlockPos finalFoundPos = foundPos;
+        com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconBlockEntity finalFound = found;
+        source.sendSuccess(() -> Component.literal("Beacon at " + finalFoundPos.toShortString() + ": " + finalFound.debugDump(level)), false);
+        return 1;
     }
 }
