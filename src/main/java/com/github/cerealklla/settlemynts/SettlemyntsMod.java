@@ -180,7 +180,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.plotsign.PlotConfigSignLocatorTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.plotsign.LocatorCancelListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.construction.NpcAutoFundingTicker());
-        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.bills.PlotRentTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.bills.PlotBillBoxListener());
         if (ModList.get().isLoaded("yconomics")) {
             com.github.cerealklla.settlemynts.zone.RentLedgerListener.register();
         }
@@ -3253,13 +3253,19 @@ public class SettlemyntsMod {
         }
 
         // Recurring rent bill (2026-10-05, see decisions.md) -- player-owned plots only ("NPC Owned
-        // plots will not have a recurring rent," explicit user decision). Registered with empty box
-        // lists; both the plot's own source box and the settlement's Town Hall destination box(es)
-        // are discovered live and kept in sync by bills.PlotRentTicker, not resolved here -- neither
-        // is guaranteed to exist yet at Finalize time (both are player-placed, whenever that happens).
+        // plots will not have a recurring rent," explicit user decision; Town Hall is npcOwnedOnly
+        // so it never reaches this branch at all). Box lists are kept in sync incrementally from
+        // here on by bills.PlotBillBoxListener (reworked 2026-10-22, see decisions.md) as boxes are
+        // placed/broken -- sourceBoxes starts empty since a just-finalized plot can't already have a
+        // box in it, but destinationBoxes is seeded once here from the settlement's Town Hall plot's
+        // *current* boxes, since no placement event will ever fire for a box that already existed
+        // before this bill did.
         Optional<UUID> billId = Optional.empty();
         if (owner.isPresent() && YconomicsBillBridge.isAvailable()) {
-            billId = Optional.of(YconomicsBillBridge.registerPlotBill(serverLevel, plotSessionId, List.of(), List.of(),
+            List<YconomicsBillBridge.BoxRef> destinationBoxes = core.townHallPlot()
+                    .map(townHall -> com.github.cerealklla.settlemynts.bills.PlotBoxDiscovery.findBoxes(serverLevel, townHall.cartographyrPlotEntityId()))
+                    .orElse(List.of());
+            billId = Optional.of(YconomicsBillBridge.registerPlotBill(serverLevel, plotSessionId, List.of(), destinationBoxes,
                     Map.of(Identifier.withDefaultNamespace("gold_nugget"), 1), 1L));
         }
 

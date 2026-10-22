@@ -44,9 +44,17 @@ public final class YconomicsBillBridge {
                 cost, periodDays, Optional.of(plotId));
     }
 
-    /** Refreshes a bill's box lists to whatever the caller currently finds occupying the areas it cares about -- see {@code bills.PlotRentTicker}. */
+    /** Overwrites a bill's box lists outright -- see {@code bills.PlotBillBoxListener}, which reads {@link #getBillBoxes} first and writes back an incrementally add/removed copy, never a full rediscovery. */
     public static void updateBillBoxes(ServerLevel level, UUID billId, List<BoxRef> sourceBoxes, List<BoxRef> destinationBoxes) {
         Yconomics.setRecurringBillBoxes(level, billId, toYconomics(sourceBoxes), toYconomics(destinationBoxes));
+    }
+
+    /** A bill's current source/destination box lists -- added 2026-10-22 for {@code bills.PlotBillBoxListener}'s own event-driven incremental add/remove (reads the current list, then writes back the one changed entry via {@link #updateBillBoxes}). */
+    public record BillBoxes(List<BoxRef> sourceBoxes, List<BoxRef> destinationBoxes) {
+    }
+
+    public static Optional<BillBoxes> getBillBoxes(ServerLevel level, UUID billId) {
+        return Yconomics.getRecurringBill(level, billId).map(bill -> new BillBoxes(fromYconomics(bill.sourceBoxes()), fromYconomics(bill.destinationBoxes())));
     }
 
     /** Local mirror of Yconomics' own outcome enum -- same no-leaking-Yconomics-types-out boundary as {@link BoxRef}. */
@@ -68,6 +76,10 @@ public final class YconomicsBillBridge {
 
     private static List<RecurringBill.BoxRef> toYconomics(List<BoxRef> refs) {
         return refs.stream().map(r -> new RecurringBill.BoxRef(r.id(), r.pos())).toList();
+    }
+
+    private static List<BoxRef> fromYconomics(List<RecurringBill.BoxRef> refs) {
+        return refs.stream().map(r -> new BoxRef(r.id(), r.pos())).toList();
     }
 
     /** Settlemynts' own translated shape of {@code bills.BillEvents.BillProcessedListener} -- see its own doc. */

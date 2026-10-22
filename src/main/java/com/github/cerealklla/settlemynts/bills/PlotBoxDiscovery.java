@@ -15,17 +15,19 @@ import net.minecraft.server.level.ServerLevel;
 
 /**
  * Finds every Box-Identity-tracked container (Cartographyr's feature, not Blueprynts' unrelated
- * Construction Box) currently sitting inside a plot's real polygon -- used by {@link
- * PlotRentTicker} for both a plot's own rent source and the settlement's shared Town Hall
- * destination, since both are "whatever box(es) a player happens to have placed in this area"
- * (explicit user decision, 2026-10-05: "it's up to players to place these boxes").
+ * Construction Box) currently sitting inside a plot's real polygon -- a one-time full rediscovery,
+ * used only for seeding a brand-new bill's {@code destinationBoxes} at Finalize time (see
+ * {@code SettlemyntsMod#finalizePlot}) against boxes that already existed before the bill did.
+ * Every ongoing update after that point is incremental (see {@link PlotBillBoxListener}), never a
+ * rescan like this one -- this is deliberately not reused for that (2026-10-22, see decisions.md,
+ * supersedes the old {@code PlotRentTicker} which called this every 20 ticks for every settlement).
  */
-final class PlotBoxDiscovery {
+public final class PlotBoxDiscovery {
 
     private PlotBoxDiscovery() {
     }
 
-    static List<YconomicsBillBridge.BoxRef> findBoxes(ServerLevel level, long cartographyrEntityId) {
+    public static List<YconomicsBillBridge.BoxRef> findBoxes(ServerLevel level, long cartographyrEntityId) {
         Optional<GeographicEntity> entity = Cartography.getEntity(level, new EntityId(cartographyrEntityId));
         if (entity.isEmpty()) {
             return List.of();
