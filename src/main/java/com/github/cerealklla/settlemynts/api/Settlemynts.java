@@ -17,6 +17,7 @@ import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
+import com.github.cerealklla.settlemynts.zone.ContainerDeposit;
 import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
 import com.github.cerealklla.settlemynts.zone.PlotGeometry;
 import com.github.cerealklla.settlemynts.zone.PlotPermissions;
@@ -521,6 +522,27 @@ public final class Settlemynts {
             total += stack.getCount();
         }
         return total;
+    }
+
+    /**
+     * Deposits {@code stacks} into whichever of {@code plotId}'s own boxes have room (splitting
+     * across several boxes the same way {@link ContainerDeposit#depositIntoAny} already does for a
+     * single stack) -- returns whatever didn't fit, unmodified, for the caller to handle itself
+     * (e.g. piling it on the ground). Added 2026-10-22 for Blueprynts' Construction Box, which
+     * refunds its own already-supplied materials back into the plot this way whenever a bound
+     * Blueprint is changed mid-build ("only the resources actually used so far").
+     */
+    public static List<ItemStack> depositItemsIntoPlot(ServerLevel level, UUID plotId, List<ItemStack> stacks) {
+        List<Container> boxes = resolvePlotBoxes(level, plotId);
+        List<ItemStack> leftover = new ArrayList<>();
+        for (ItemStack stack : stacks) {
+            ItemStack copy = stack.copy();
+            ContainerDeposit.depositIntoAny(boxes, copy);
+            if (!copy.isEmpty()) {
+                leftover.add(copy);
+            }
+        }
+        return leftover;
     }
 
     /**
