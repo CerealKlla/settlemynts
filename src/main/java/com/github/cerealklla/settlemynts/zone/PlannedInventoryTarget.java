@@ -27,18 +27,37 @@ import net.minecraft.resources.Identifier;
  * (`SettlemyntsMod#setPlannedInventory`) preserves every existing {@code true} entry verbatim instead
  * of replacing the whole list, since a manual save only ever submits the entries it showed in the
  * first place. Defaults to {@code false} (including every pre-existing saved plot).
+ *
+ * <p>{@code derivedFromConstructionBox} (added 2026-10-22, same shape/governance as {@code
+ * derivedFromGuardKitStand} above) marks an entry as owned by Blueprynts' own Construction Box
+ * funding rework ({@code bridge.BlueprintsConstructionBridge}/{@code
+ * construction.ConstructionMaterialDemand}, pushed via {@code
+ * api.Settlemynts#setConstructionMaterialTargets}) -- whatever real item the bound Blueprint is
+ * still short of, after the box's own free pull from the plot's boxes. Also never shown/editable on
+ * {@code client.PlannedInventoryScreen}, and also preserved verbatim by a manual save.
  */
-public record PlannedInventoryTarget(Identifier resourceKey, boolean isTag, int targetCount, boolean derivedFromGuardKitStand) {
+public record PlannedInventoryTarget(Identifier resourceKey, boolean isTag, int targetCount, boolean derivedFromGuardKitStand, boolean derivedFromConstructionBox) {
 
     public static final Codec<PlannedInventoryTarget> CODEC = RecordCodecBuilder.create(i -> i.group(
             Identifier.CODEC.fieldOf("resource_key").forGetter(PlannedInventoryTarget::resourceKey),
             Codec.BOOL.fieldOf("is_tag").forGetter(PlannedInventoryTarget::isTag),
             Codec.INT.fieldOf("target_count").forGetter(PlannedInventoryTarget::targetCount),
-            Codec.BOOL.optionalFieldOf("derived_from_guard_kit_stand", false).forGetter(PlannedInventoryTarget::derivedFromGuardKitStand)
+            Codec.BOOL.optionalFieldOf("derived_from_guard_kit_stand", false).forGetter(PlannedInventoryTarget::derivedFromGuardKitStand),
+            Codec.BOOL.optionalFieldOf("derived_from_construction_box", false).forGetter(PlannedInventoryTarget::derivedFromConstructionBox)
     ).apply(i, PlannedInventoryTarget::new));
 
-    /** Convenience for the common manual-entry case (every existing call site before this field existed). */
+    /** Convenience for the common manual-entry case (every existing call site before either derived flag existed). */
     public PlannedInventoryTarget(Identifier resourceKey, boolean isTag, int targetCount) {
-        this(resourceKey, isTag, targetCount, false);
+        this(resourceKey, isTag, targetCount, false, false);
+    }
+
+    /** Convenience for the existing Guard Kit Stand call site (unchanged signature). */
+    public PlannedInventoryTarget(Identifier resourceKey, boolean isTag, int targetCount, boolean derivedFromGuardKitStand) {
+        this(resourceKey, isTag, targetCount, derivedFromGuardKitStand, false);
+    }
+
+    /** {@code true} if this entry is owned by any automatic system, not a player's own manual edit -- the one check {@code client.PlannedInventoryScreen}'s own row-filtering and a manual save's own preserve-logic actually need. */
+    public boolean isDerived() {
+        return derivedFromGuardKitStand || derivedFromConstructionBox;
     }
 }

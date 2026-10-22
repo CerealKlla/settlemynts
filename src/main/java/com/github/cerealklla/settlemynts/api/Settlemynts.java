@@ -15,10 +15,9 @@ import com.github.cerealklla.cartographyr.geo.EntityId;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
-import com.github.cerealklla.settlemynts.construction.ConstructionRequirements;
-import com.github.cerealklla.settlemynts.construction.ZoneTierConstructionConfig;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
+import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
 import com.github.cerealklla.settlemynts.zone.PlotGeometry;
 import com.github.cerealklla.settlemynts.zone.PlotPermissions;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
@@ -73,11 +72,6 @@ public final class Settlemynts {
 
     public static Collection<ZoneType> getRegisteredZoneTypes() {
         return ZoneTypeRegistry.all();
-    }
-
-    /** A Zone Type + Tier's construction cost/time table (Section 14a, captured 2026-09-29) -- see {@link ConstructionRequirements}'s own doc. */
-    public static ConstructionRequirements getConstructionRequirements(Identifier zoneTypeId, int tier) {
-        return ZoneTierConstructionConfig.get(zoneTypeId, tier);
     }
 
     /** Registers a {@link ShopSeedCatalog} for a Zone Type (design doc Section 14a, 2026-10-05) -- see {@code zone.ShopSeeding}'s own doc for when/how this gets used. Same open, replace-on-reregister governance as {@link #registerZoneType}. */
@@ -507,6 +501,37 @@ public final class Settlemynts {
             return com.github.cerealklla.settlemynts.zone.NaturalShopVault.resolveBoxesForPlot(level, plotId);
         }
         return resolveBoxesForPolygon(level, polygon.get());
+    }
+
+    /**
+     * Withdraws up to {@code maxAmount} of the real item {@code itemId} from {@code plotId}'s own
+     * boxes -- added 2026-10-22 for Blueprynts' Construction Box funding rework ({@code
+     * bridge.SettlemyntsPlotBoxBridge#withdrawFromPlot}, "the construction box should automatically
+     * suck up needed materials from within the plot as soon as they are added to the inventories,"
+     * same precedent as {@code watchtower.WatchTowerBeaconBlockEntity}'s own fuel pull). Returns the
+     * amount actually removed, 0 if {@code itemId} doesn't resolve to a real item or none was found.
+     */
+    public static int withdrawItemFromPlot(ServerLevel level, UUID plotId, Identifier itemId, int maxAmount) {
+        if (maxAmount <= 0) {
+            return 0;
+        }
+        List<ItemStack> taken = ContainerWithdraw.drain(resolvePlotBoxes(level, plotId), ShopResource.ofItem(itemId), maxAmount);
+        int total = 0;
+        for (ItemStack stack : taken) {
+            total += stack.getCount();
+        }
+        return total;
+    }
+
+    /**
+     * Wholesale-replaces {@code plotId}'s {@code derivedFromConstructionBox} Planned Inventory
+     * targets with {@code missing} -- added 2026-10-22 for Blueprynts' Construction Box funding
+     * rework ({@code bridge.SettlemyntsPlotBoxBridge#syncMissingMaterials}), see {@code
+     * construction.ConstructionMaterialDemand}'s own doc. A no-op if {@code settlementCoreId}/
+     * {@code plotId} don't resolve to a real settlement/plot.
+     */
+    public static void setConstructionMaterialTargets(ServerLevel level, UUID settlementCoreId, UUID plotId, Map<Identifier, Integer> missing) {
+        com.github.cerealklla.settlemynts.construction.ConstructionMaterialDemand.recalculate(level, settlementCoreId, plotId, missing);
     }
 
     /**

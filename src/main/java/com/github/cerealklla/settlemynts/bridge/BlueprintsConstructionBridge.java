@@ -55,11 +55,15 @@ public final class BlueprintsConstructionBridge {
      * @param zoneTypeId this plot's own Zone Type id, passed straight through to {@code
      *                    api.Blueprynts#createConstructionBox} so the box's own Blueprint picker can
      *                    be constrained to matching Blueprint Types -- user request, 2026-09-29.
+     * @param settlementCoreId and @param plotId -- the owning settlement/plot's own real identity
+     *                    (added 2026-10-22 for the Construction Box funding rework, see {@code
+     *                    api.Blueprynts#createConstructionBox}'s own doc for why this is passed at
+     *                    creation rather than resolved later from the box's own world position).
      */
-    public static Placement placeConstructionBox(ServerLevel level, PlotSitePlacement.Site site, Identifier zoneTypeId) {
+    public static Placement placeConstructionBox(ServerLevel level, PlotSitePlacement.Site site, Identifier zoneTypeId, UUID settlementCoreId, UUID plotId) {
         BuildableArea buildableArea = blueBoundingBox(site.grid(), site.minX(), site.minZ(), site.maxX(), site.maxZ());
         PlotArea plotArea = plotInteriorArea(site.grid(), site.minX(), site.minZ(), site.maxX(), site.maxZ());
-        UUID constructionId = Blueprynts.createConstructionBox(level, site.pos(), site.towardBlue().getOpposite(), zoneTypeId, buildableArea, plotArea);
+        UUID constructionId = Blueprynts.createConstructionBox(level, site.pos(), site.towardBlue().getOpposite(), zoneTypeId, buildableArea, plotArea, settlementCoreId, plotId);
         return new Placement(site.pos(), constructionId);
     }
 
@@ -109,6 +113,18 @@ public final class BlueprintsConstructionBridge {
     /** {@link #appendLedgerEntry(ServerLevel, BlockPos, String)}, resolving the box's live position from the plot itself -- see {@link #resolveLivePos}'s own doc. No-op if this plot has no Construction Box at all. */
     public static void appendLedgerEntry(ServerLevel level, PlotRecord plot, String line) {
         resolveLivePos(level, plot).ifPresent(pos -> Blueprynts.appendLedgerEntry(level, pos, line));
+    }
+
+    /**
+     * Notifies {@code plot}'s own Construction Box (if any, and if currently loaded) that the plot's
+     * boxes just changed -- the construction-funding half of the same notification {@code
+     * zone.PlannedInventoryClearing} already sends {@code watchtower.WatchTowerRefuelNotifier} for,
+     * added 2026-10-22 for the Construction Box funding rework ({@code
+     * api.Blueprynts#notifyPlotBoxesChanged}). No-op if this plot has no Construction Box, or it
+     * isn't currently loaded.
+     */
+    public static void notifyPlotBoxesChanged(ServerLevel level, PlotRecord plot) {
+        resolveLivePos(level, plot).ifPresent(pos -> Blueprynts.notifyPlotBoxesChanged(level, pos));
     }
 
     /** A plot's current Construction Box Tier -- added 2026-10-05 for {@code zone.ShopSeeding}, which needs to know how far up a Zone Type's seed catalog it's allowed to reach. */

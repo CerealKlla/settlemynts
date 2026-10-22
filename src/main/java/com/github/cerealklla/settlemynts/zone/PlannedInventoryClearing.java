@@ -464,6 +464,11 @@ public final class PlannedInventoryClearing {
                 // no-op unless this buyer plot happens to have a dark Watch Tower Beacon waiting on
                 // exactly this kind of delivery.
                 com.github.cerealklla.settlemynts.watchtower.WatchTowerRefuelNotifier.notifyPlotBoxesChanged(level, buyer.participant().plot().plotId());
+                // Same trigger, for a Construction Box still short on materials (2026-10-22, see
+                // ConstructionMaterialDemand's own doc) -- also a cheap no-op otherwise.
+                if (net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
+                    com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.notifyPlotBoxesChanged(level, buyer.participant().plot());
+                }
                 List<ItemStack> payment = ContainerWithdraw.drain(buyer.participant().boxes(), GOLD_NUGGETS, (int) split.totalCost());
                 for (ItemStack stack : payment) {
                     ContainerDeposit.depositIntoAny(seller.participant().boxes(), stack);
@@ -866,6 +871,9 @@ public final class PlannedInventoryClearing {
                 ContainerDeposit.depositIntoAny(buyer.boxes(), stack);
             }
             com.github.cerealklla.settlemynts.watchtower.WatchTowerRefuelNotifier.notifyPlotBoxesChanged(level, buyer.plot().plotId());
+            if (net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
+                com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.notifyPlotBoxesChanged(level, buyer.plot());
+            }
             for (ItemStack stack : ContainerWithdraw.drain(buyer.boxes(), GOLD_NUGGETS, realPrice.get())) {
                 ContainerDeposit.depositIntoAny(seller.boxes(), stack);
             }

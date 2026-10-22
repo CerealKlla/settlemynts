@@ -179,7 +179,6 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(this);
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.plotsign.PlotConfigSignLocatorTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.plotsign.LocatorCancelListener());
-        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.construction.NpcAutoFundingTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.bills.PlotBillBoxListener());
         if (ModList.get().isLoaded("yconomics")) {
             com.github.cerealklla.settlemynts.zone.RentLedgerListener.register();
@@ -2118,10 +2117,10 @@ public class SettlemyntsMod {
         java.util.Map<net.minecraft.resources.Identifier, com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget> targetsByItem = new java.util.LinkedHashMap<>();
         java.util.List<com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget> tagTargets = new java.util.ArrayList<>();
         for (com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget target : plot.plannedInventory()) {
-            // Guard Kit Stand overhaul (2026-10-16) -- a derived entry is fully automatic (recomputed
-            // from the plot's own stands, see GuardKitStandPreferredInventory), never shown/editable
-            // on this screen.
-            if (target.derivedFromGuardKitStand()) {
+            // Guard Kit Stand overhaul (2026-10-16)/Construction Box funding rework (2026-10-22) --
+            // a derived entry is fully automatic (recomputed from the plot's own stands or its
+            // Construction Box's own shortfall), never shown/editable on this screen.
+            if (target.isDerived()) {
                 continue;
             }
             if (target.isTag()) {
@@ -2178,11 +2177,11 @@ public class SettlemyntsMod {
                         update.resourceKey(), update.isTag(), Math.max(0, update.targetCount())));
             }
         }
-        // Guard Kit Stand overhaul (2026-10-16) -- this screen never shows a
-        // derivedFromGuardKitStand entry, so a manual save only ever submits the non-derived
+        // Guard Kit Stand overhaul (2026-10-16)/Construction Box funding rework (2026-10-22) -- this
+        // screen never shows a derived entry, so a manual save only ever submits the non-derived
         // portion; preserve every existing derived entry verbatim rather than silently dropping it.
         for (com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget existing : resolved.get().plot().plannedInventory()) {
-            if (existing.derivedFromGuardKitStand()) {
+            if (existing.isDerived()) {
                 targets.add(existing);
             }
         }
@@ -3223,7 +3222,7 @@ public class SettlemyntsMod {
         Optional<BlockPos> boxPos = Optional.empty();
         Optional<UUID> constructionBoxId = Optional.empty();
         if (site != null && ModList.get().isLoaded("blueprynts")) {
-            BlueprintsConstructionBridge.Placement placement = BlueprintsConstructionBridge.placeConstructionBox(serverLevel, site, zoneTypeId);
+            BlueprintsConstructionBridge.Placement placement = BlueprintsConstructionBridge.placeConstructionBox(serverLevel, site, zoneTypeId, core.getUUID(), plotSessionId);
             if (placement != null) {
                 boxPos = Optional.of(placement.pos());
                 constructionBoxId = Optional.of(placement.constructionId());
