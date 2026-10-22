@@ -148,7 +148,7 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
     }
 
     /** Resolves this Beacon's plot's own bound Blueprint Tier (0 if unbound or Blueprynts isn't loaded) -- same guarded pattern {@code guardhouse.GuardEntity#fundFastRespawn} already uses. */
-    private int resolveBuiltTier(ServerLevel level) {
+    public int resolveBuiltTier(ServerLevel level) {
         if (settlementCoreId == null || !(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
             return 0;
         }
@@ -214,8 +214,14 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
     @Override
     public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
         boolean canManage = canManage(player);
+        // Real report, 2026-10-22: "nothing I'm doing is lighting the tower" -- turned out to just be
+        // not enough fuel (the burn check needs the FULL per-minute amount up front, 10 + Tier*10,
+        // minimum 20 even at Tier 1), with zero indication anywhere of what that number actually is.
+        // Resolved here and shipped down so the screen can finally show it.
+        int builtTier = level instanceof ServerLevel serverLevel ? resolveBuiltTier(serverLevel) : 0;
+        int requiredFuel = builtTier > 0 ? WatchTowerConstants.fuelCostForTier(builtTier) : 0;
         return new WatchTowerBeaconMenu(ModMenus.WATCH_TOWER_BEACON.get(), containerId, inventory, fuelContainer,
-                litTimeRemaining, litTotalTime, manuallyEnabled, canManage, getBlockPos());
+                litTimeRemaining, litTotalTime, manuallyEnabled, canManage, getBlockPos(), requiredFuel);
     }
 
     @Override
@@ -226,6 +232,7 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         buf.writeBoolean(beaconMenu.manuallyEnabled());
         buf.writeBoolean(beaconMenu.canManage());
         buf.writeBlockPos(beaconMenu.beaconPos());
+        buf.writeVarInt(beaconMenu.requiredFuel());
     }
 
     /** Shared by {@link #createMenu} and {@code SettlemyntsMod#setWatchTowerEnabled}'s own re-validation. */

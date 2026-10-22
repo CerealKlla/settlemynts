@@ -33,10 +33,12 @@ public class WatchTowerBeaconMenu extends AbstractContainerMenu {
     private final boolean manuallyEnabled;
     private final boolean canManage;
     private final BlockPos beaconPos;
+    private final int requiredFuel;
 
     /** Server-side: a real Beacon backs this menu. */
     public WatchTowerBeaconMenu(MenuType<?> type, int containerId, Inventory inventory, Container fuelContainer,
-                                 int litTimeRemaining, int litTotalTime, boolean manuallyEnabled, boolean canManage, BlockPos beaconPos) {
+                                 int litTimeRemaining, int litTotalTime, boolean manuallyEnabled, boolean canManage,
+                                 BlockPos beaconPos, int requiredFuel) {
         super(type, containerId);
         this.fuelContainer = fuelContainer;
         this.litTimeRemaining = litTimeRemaining;
@@ -44,13 +46,15 @@ public class WatchTowerBeaconMenu extends AbstractContainerMenu {
         this.manuallyEnabled = manuallyEnabled;
         this.canManage = canManage;
         this.beaconPos = beaconPos;
+        this.requiredFuel = requiredFuel;
         layoutSlots(inventory);
     }
 
     /** Client-side reconstruction (see {@code registration.ModMenus}) -- extra fields arrive via the extra-data channel. */
     public WatchTowerBeaconMenu(MenuType<?> type, int containerId, Inventory inventory,
-                                 int litTimeRemaining, int litTotalTime, boolean manuallyEnabled, boolean canManage, BlockPos beaconPos) {
-        this(type, containerId, inventory, new SimpleContainer(1), litTimeRemaining, litTotalTime, manuallyEnabled, canManage, beaconPos);
+                                 int litTimeRemaining, int litTotalTime, boolean manuallyEnabled, boolean canManage,
+                                 BlockPos beaconPos, int requiredFuel) {
+        this(type, containerId, inventory, new SimpleContainer(1), litTimeRemaining, litTotalTime, manuallyEnabled, canManage, beaconPos, requiredFuel);
     }
 
     public int litTimeRemaining() {
@@ -67,6 +71,13 @@ public class WatchTowerBeaconMenu extends AbstractContainerMenu {
 
     public boolean canManage() {
         return canManage;
+    }
+
+    /** Real report, 2026-10-22: "nothing I'm doing is lighting the tower" -- the burn check needs
+     * this much Coal/Charcoal in the slot at once (10 + builtTier*10), with no indication anywhere
+     * of the actual number; 0 if nothing's built yet. Resolved server-side, shown by the Screen. */
+    public int requiredFuel() {
+        return requiredFuel;
     }
 
     public BlockPos beaconPos() {

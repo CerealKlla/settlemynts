@@ -32,5 +32,5 @@ public final class ModMenus {
             "watch_tower_beacon",
             () -> IMenuTypeExtension.create((windowId, inventory, extraData) ->
                     new WatchTowerBeaconMenu(null, windowId, inventory, extraData.readVarInt(), extraData.readVarInt(),
-                            extraData.readBoolean(), extraData.readBoolean(), extraData.readBlockPos())));
+                            extraData.readBoolean(), extraData.readBoolean(), extraData.readBlockPos(), extraData.readVarInt())));
 }
