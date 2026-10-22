@@ -409,6 +409,33 @@ public final class ShopSeeding {
         owner.updatePlot(plot.withPlannedInventory(merged));
     }
 
+    // A single stack -- a reasonable "keep enough on hand" starting point, flagged tunable like
+    // every other such default stock number in this suite (e.g. ShopSeedCatalog's own listings).
+    private static final int WATCH_TOWER_DEFAULT_COAL_TARGET = 64;
+
+    /**
+     * Watch Tower-specific default (explicit user request, 2026-10-22: "the plot needs to default to
+     * wanting to buy any kind of Coal") -- unlike every other Zone Type above, Watch Tower has no
+     * {@link ShopSeedCatalog} at all (it doesn't sell anything, it's a passive structure, not a
+     * shop), so it never goes through {@link #seedNewPlot}'s own catalog-driven paths. Seeds a single
+     * tag-based ({@link net.minecraft.tags.ItemTags#COALS}, covering both Coal and Charcoal -- the
+     * same two items the Beacon's own fuel slot accepts) Planned Inventory target directly, for any
+     * owner, so the midnight trading engine actively tries to keep the plot's boxes stocked with fuel
+     * regardless of whether a player remembers to set one manually. Idempotent -- a no-op if a target
+     * for this tag already exists (matches {@link #autoPopulatePlannedInventory}'s own dedup shape).
+     */
+    public static void seedWatchTowerDefaults(PlotOwner owner, PlotRecord plot) {
+        Identifier coalsTag = net.minecraft.tags.ItemTags.COALS.location();
+        boolean alreadyPresent = plot.plannedInventory().stream()
+                .anyMatch(target -> target.isTag() && target.resourceKey().equals(coalsTag));
+        if (alreadyPresent) {
+            return;
+        }
+        List<PlannedInventoryTarget> merged = new java.util.ArrayList<>(plot.plannedInventory());
+        merged.add(new PlannedInventoryTarget(coalsTag, true, WATCH_TOWER_DEFAULT_COAL_TARGET));
+        owner.updatePlot(plot.withPlannedInventory(merged));
+    }
+
     /**
      * Default listing/Planned Inventory seeding for a catalog with real Tier progression
      * (Armorer/Blacksmith/Restaurant -- see {@link ShopSeedCatalog#hasTierProgression}'s own doc),

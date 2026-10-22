@@ -3294,10 +3294,13 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.guardhouse.GuardhouseSpawner.spawn(serverLevel, core.getUUID(), plotSessionId, site);
         }
 
-        // Watch Tower Plot Type (explicit user spec, 2026-10-22) -- its own Beacon structure, only
-        // for a Watch-Tower-typed plot, spawned alongside the Plot Config Sign above.
-        if (site != null && zoneTypeId.equals(com.github.cerealklla.settlemynts.watchtower.WatchTowerConstants.WATCH_TOWER_ZONE_TYPE_ID)) {
-            com.github.cerealklla.settlemynts.watchtower.WatchTowerSpawner.spawn(serverLevel, core.getUUID(), plotSessionId, site);
+        // Watch Tower's own Beacon is NOT spawned here (real correction, 2026-10-22 -- "I wanted the
+        // custom block to be placed within the blueprynt itself, like a light at the top of a
+        // Lighthouse") -- it's just an ordinary block the Ancestors Blueprint places, and
+        // self-resolves its own plot/settlement identity once pasted -- see
+        // WatchTowerBeaconBlockEntity#tryResolveIdentity's own doc.
+        if (zoneTypeId.equals(com.github.cerealklla.settlemynts.watchtower.WatchTowerConstants.WATCH_TOWER_ZONE_TYPE_ID)) {
+            com.github.cerealklla.settlemynts.zone.ShopSeeding.seedWatchTowerDefaults(core, plotRecord);
         }
 
         // Optional dependency, 2026-09-29 (design discussion): Cartographyr's own registration above

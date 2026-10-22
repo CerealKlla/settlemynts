@@ -19,10 +19,13 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.phys.BlockHitResult;
 
 /**
- * The Watch Tower's own structure marker -- indestructible, never player-placed, same shape as
- * {@code guardhouse.GuardhouseBlock}. Auto-spawned by {@link WatchTowerSpawner} at plot Finalize
- * time, only for a Watch-Tower-typed plot. Right-clicking opens the fuel UI
- * ({@link WatchTowerBeaconMenu}). Visually a plain cube (no facing needed) reusing vanilla's own
+ * The Watch Tower's own structure marker -- indestructible, never player-placed. Placed directly
+ * inside the Watch Tower Ancestors Blueprints themselves (real report, 2026-10-22: "I wanted the
+ * custom block to be placed within the blueprynt itself, like a light at the top of a Lighthouse"),
+ * pasted like any other block by Blueprynts' own construction pipeline -- it has no plot/settlement
+ * identity at all until {@link WatchTowerBeaconBlockEntity#tryResolveIdentity} self-resolves it a
+ * few seconds after existing. Right-clicking opens the fuel UI ({@link WatchTowerBeaconMenu}).
+ * Visually a plain cube (no facing needed) reusing vanilla's own
  * Furnace side/top textures plus Glowstone on the top face -- see the block model JSON.
  */
 public class WatchTowerBeaconBlock extends Block implements EntityBlock {

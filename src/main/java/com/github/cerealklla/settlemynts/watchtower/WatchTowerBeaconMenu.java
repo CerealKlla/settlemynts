@@ -16,9 +16,16 @@ import net.minecraft.world.item.ItemStack;
  */
 public class WatchTowerBeaconMenu extends AbstractContainerMenu {
 
-    private static final int FUEL_SLOT_X = 80;
-    private static final int FUEL_SLOT_Y = 35;
-    private static final int PLAYER_INV_Y = 84;
+    // Real report, 2026-10-22: "shift clicking into the container shows the inventory slots don't
+    // line up with the visual areas for them." Root cause: the screen's own background used to blit
+    // vanilla's `generic_54` chest texture's first *9-slot* row as decoration (copy-pasted from
+    // guardhouse.GuardhouseFoodMenu/Screen, which is correct THERE because it really has 9 food
+    // slots in a row) even though this menu only ever had 1 real slot -- the drawn boxes and the
+    // real interactive slot never had anything to do with each other. The Screen now draws exactly
+    // one slot sprite at this exact position instead of borrowing that mismatched 9-wide strip.
+    public static final int FUEL_SLOT_X = 80;
+    public static final int FUEL_SLOT_Y = 18;
+    public static final int PLAYER_INV_Y = 110;
 
     private final Container fuelContainer;
     private final int litTimeRemaining;

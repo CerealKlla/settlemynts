@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModBlockEntities;
@@ -12,6 +13,7 @@ import com.github.cerealklla.settlemynts.zone.PlotPermissions;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
@@ -86,11 +88,32 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         return plotId;
     }
 
-    /** Only ever called once, immediately after placement -- see {@link WatchTowerSpawner}. */
     public void setIdentity(UUID settlementCoreId, UUID plotId) {
         this.settlementCoreId = settlementCoreId;
         this.plotId = plotId;
         setChanged();
+    }
+
+    // Real report, 2026-10-22: "I wanted the custom block to be placed within the blueprynt itself,
+    // like a light at the top of a Lighthouse" -- this block used to be externally spawned beside
+    // the Plot Config Sign at Finalize time (WatchTowerSpawner, now deleted). Now it's just an
+    // ordinary block an Ancestors Blueprint places wherever it wants (the tower's own lookout deck),
+    // pasted by Blueprynts' real construction pipeline like any other block -- which means it starts
+    // life with no plotId/settlementCoreId at all. It self-resolves those from its own world
+    // position instead, the same way a Guard Kit Stand or worker NPC would -- a few seconds after
+    // existing (not every tick -- see RESOLVE_RETRY_TICKS), via Settlemynts#findPlotAt, which is
+    // real but bounded work (it iterates loaded Town Hall Cores, not every entity on the server --
+    // confirmed safe before reusing it here, unlike ShopWishlist#computeDeficits' own real crash
+    // earlier tonight). Finalize already registers the plot with Cartographyr before construction
+    // ever starts, so by the time this block is actually pasted into the world the plot it's
+    // standing on is always already resolvable.
+    private static final int RESOLVE_RETRY_TICKS = 100; // 5 real seconds.
+
+    private void tryResolveIdentity(ServerLevel level) {
+        Settlemynts.findPlotAt(level, getBlockPos()).ifPresent(handle -> {
+            setIdentity(handle.settlementCoreId(), handle.plotId());
+            WatchTowerIndex.get(level.getServer()).put(handle.plotId(), GlobalPos.of(level.dimension(), getBlockPos()));
+        });
     }
 
     public Container fuelContainer() {
@@ -145,6 +168,14 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
     }
 
     public void serverTick(ServerLevel level) {
+        if (settlementCoreId == null) {
+            tickCounter++;
+            if (tickCounter >= RESOLVE_RETRY_TICKS) {
+                tickCounter = 0;
+                tryResolveIdentity(level);
+            }
+            return; // Nothing else to do until this Beacon knows which plot it's standing on.
+        }
         if (litTimeRemaining > 0) {
             litTimeRemaining--;
         }
