@@ -205,6 +205,15 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         return litTimeRemaining > 0 ? baseRadius * 2 : baseRadius;
     }
 
+    // Real correction, 2026-10-22: "ping handlers are supposed to specify how frequently they
+    // respond to pings" -- Nuclyus' own ping.Pingable doc is explicit that the interface carries no
+    // throttle of its own precisely so each implementation designs its own ("it's up to the mod
+    // registering the pingable to also design its own PingHandler"). A global cooldown, not per-
+    // player (via PingCooldown) -- recompute() is shared Beacon state, not something that benefits
+    // from running again just because a second player happens to be standing nearby too.
+    private static final long PING_RECOMPUTE_COOLDOWN_TICKS = 200; // 10 real seconds.
+    private long lastPingRecomputeGameTime = Long.MIN_VALUE;
+
     /**
      * Explicit user request, 2026-10-22: "leverage the pingable implementation [Nuclyus'
      * {@code ping.Pingable}] for when a player is near one of these [Beacons] to force it to recheck
@@ -214,13 +223,20 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
      * continuously-fed tower. No registration/networking needed here at all -- implementing this
      * interface is the entire integration; Nuclyus' own {@code ping.client.ClientPingScanner}/
      * {@code ping.PingDispatcher} already find and re-validate every nearby {@code Pingable}
-     * automatically.
+     * automatically, dispatching up to 2x/sec per nearby player -- throttled here so standing near
+     * a Beacon doesn't force a full grid recompute that often for no reason.
      */
     @Override
     public void onPing(com.github.cerealklla.nuclyus.ping.PingPacket ping) {
-        if (settlementCoreId != null && level instanceof ServerLevel serverLevel) {
-            WatchTowerLightController.recompute(serverLevel, this, currentRadius(serverLevel));
+        if (settlementCoreId == null || !(level instanceof ServerLevel serverLevel)) {
+            return;
         }
+        long now = serverLevel.getGameTime();
+        if (now - lastPingRecomputeGameTime < PING_RECOMPUTE_COOLDOWN_TICKS) {
+            return;
+        }
+        lastPingRecomputeGameTime = now;
+        WatchTowerLightController.recompute(serverLevel, this, currentRadius(serverLevel));
     }
 
     private int countFuel() {
