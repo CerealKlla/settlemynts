@@ -69,6 +69,29 @@ public class GhostPlotWallEntity extends Display.BlockDisplay {
         return ownerCoreId;
     }
 
+    private boolean selfCleaned = false;
+
+    /**
+     * Self-discards once this wall piece's chunk loads, if "Show Plot Perimeters" is no longer on --
+     * same real bug and fix as {@code founding.GhostBoundaryWallEntity#tick}, see its own doc. A
+     * piece that unloads while the toggle is on and reloads after it's been turned back off is never
+     * reached by {@code findByOwnerCore}'s discard loop (loaded-entities-only), so it would otherwise
+     * persist forever.
+     */
+    @Override
+    public void tick() {
+        super.tick();
+        if (!selfCleaned && level() instanceof ServerLevel serverLevel) {
+            boolean shouldExist = ownerCoreId != null
+                    && serverLevel.getEntity(ownerCoreId) instanceof GhostTownHallCoreEntity core
+                    && core.isShowPlotPerimeters();
+            if (!shouldExist) {
+                selfCleaned = true;
+                discard();
+            }
+        }
+    }
+
     @Override
     public boolean broadcastToPlayer(ServerPlayer player) {
         if (!(level() instanceof ServerLevel serverLevel) || ownerCoreId == null) {

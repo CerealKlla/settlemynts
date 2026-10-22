@@ -3,6 +3,7 @@ package com.github.cerealklla.settlemynts.registration;
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.guardhouse.GuardhouseFoodMenu;
 import com.github.cerealklla.settlemynts.plotsign.ShopCartMenu;
+import com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconMenu;
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.inventory.MenuType;
@@ -26,4 +27,10 @@ public final class ModMenus {
     public static final DeferredHolder<MenuType<?>, MenuType<ShopCartMenu>> SHOP_CART = MENU_TYPES.register(
             "shop_cart",
             () -> IMenuTypeExtension.create((windowId, inventory, extraData) -> ShopCartMenu.fromNetwork(windowId, inventory, extraData)));
+
+    public static final DeferredHolder<MenuType<?>, MenuType<WatchTowerBeaconMenu>> WATCH_TOWER_BEACON = MENU_TYPES.register(
+            "watch_tower_beacon",
+            () -> IMenuTypeExtension.create((windowId, inventory, extraData) ->
+                    new WatchTowerBeaconMenu(null, windowId, inventory, extraData.readVarInt(), extraData.readVarInt(),
+                            extraData.readBoolean(), extraData.readBoolean(), extraData.readBlockPos())));
 }

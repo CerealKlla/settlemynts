@@ -4,6 +4,7 @@ import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity;
 import com.github.cerealklla.settlemynts.rope.RopeFencePostBlockEntity;
+import com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconBlockEntity;
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -29,4 +30,8 @@ public final class ModBlockEntities {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<GuardhouseBlockEntity>> GUARDHOUSE =
             BLOCK_ENTITIES.register("guardhouse",
                     () -> new BlockEntityType<>(GuardhouseBlockEntity::new, ModBlocks.GUARDHOUSE.get()));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<WatchTowerBeaconBlockEntity>> WATCH_TOWER_BEACON =
+            BLOCK_ENTITIES.register("watch_tower_beacon",
+                    () -> new BlockEntityType<>(WatchTowerBeaconBlockEntity::new, ModBlocks.WATCH_TOWER_BEACON.get()));
 }

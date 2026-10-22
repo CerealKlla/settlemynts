@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.registration;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlock;
+import com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconBlock;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlock;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignRelocatorItem;
 import com.github.cerealklla.settlemynts.rope.RopeFencePostBlock;
@@ -73,6 +74,17 @@ public final class ModBlocks {
     public static final DeferredBlock<GuardhouseBlock> GUARDHOUSE = BLOCKS.register(
             "guardhouse",
             id -> new GuardhouseBlock(BlockBehaviour.Properties.of()
+                    .mapColor(MapColor.STONE)
+                    .strength(-1.0F, 3600000.0F)
+                    .sound(SoundType.STONE)
+                    .setId(ResourceKey.create(Registries.BLOCK, id))));
+
+    // The Watch Tower's own Beacon structure (explicit user spec, 2026-10-22) -- indestructible/
+    // never player-placed, same shape as PLOT_CONFIG_SIGN/GUARDHOUSE above; no default BlockItem,
+    // only WatchTowerSpawner ever places one.
+    public static final DeferredBlock<WatchTowerBeaconBlock> WATCH_TOWER_BEACON = BLOCKS.register(
+            "watch_tower_beacon",
+            id -> new WatchTowerBeaconBlock(BlockBehaviour.Properties.of()
                     .mapColor(MapColor.STONE)
                     .strength(-1.0F, 3600000.0F)
                     .sound(SoundType.STONE)

@@ -212,6 +212,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerRespawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerShopInteractListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.diagnostics.LagDiagnostics());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.watchtower.WatchTowerChunkLoadListener());
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.RegisterCommandsEvent event) ->
                 com.github.cerealklla.settlemynts.debug.DebugCommands.register(event.getDispatcher()));
 
@@ -696,6 +697,11 @@ public class SettlemyntsMod {
         registrar.playToServer(com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload.TYPE,
                 com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload.STREAM_CODEC,
                 (payload, context) -> requestAutoDrop(payload, context));
+
+        // "Enable/Disable" toggle on the Watch Tower Beacon's own fuel screen (2026-10-22).
+        registrar.playToServer(com.github.cerealklla.settlemynts.watchtower.SetWatchTowerEnabledPayload.TYPE,
+                com.github.cerealklla.settlemynts.watchtower.SetWatchTowerEnabledPayload.STREAM_CODEC,
+                (payload, context) -> setWatchTowerEnabled(payload, context));
     }
 
     private static void requestAutoDrop(com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload payload, IPayloadContext context) {
@@ -842,6 +848,18 @@ public class SettlemyntsMod {
             return;
         }
         guardhouse.setPreferredFoodValue(payload.preferredFoodValue());
+    }
+
+    /** "Enable/Disable" on {@code watchtower.client.WatchTowerBeaconScreen} -- re-checks {@code watchtower.WatchTowerBeaconBlockEntity#canManage} directly, never trusts the client's earlier flag. */
+    private static void setWatchTowerEnabled(com.github.cerealklla.settlemynts.watchtower.SetWatchTowerEnabledPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.beaconPos()) instanceof com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconBlockEntity beacon)
+                || !beacon.canManage(player)) {
+            return;
+        }
+        beacon.setManuallyEnabled(payload.enabled());
     }
 
     /** Shared permission + live-entity re-check for every Kit Menu action -- resolves the stand by UUID (via {@link com.github.cerealklla.settlemynts.guardhouse.GuardKitStandIndex}) and re-checks {@code zone.PlotPermissions#canManage} against its own plot, never trusting the client's earlier flag. */
@@ -3274,6 +3292,12 @@ public class SettlemyntsMod {
         // Guardhouse-typed plot, spawned alongside the Plot Config Sign above.
         if (site != null && zoneTypeId.equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
             com.github.cerealklla.settlemynts.guardhouse.GuardhouseSpawner.spawn(serverLevel, core.getUUID(), plotSessionId, site);
+        }
+
+        // Watch Tower Plot Type (explicit user spec, 2026-10-22) -- its own Beacon structure, only
+        // for a Watch-Tower-typed plot, spawned alongside the Plot Config Sign above.
+        if (site != null && zoneTypeId.equals(com.github.cerealklla.settlemynts.watchtower.WatchTowerConstants.WATCH_TOWER_ZONE_TYPE_ID)) {
+            com.github.cerealklla.settlemynts.watchtower.WatchTowerSpawner.spawn(serverLevel, core.getUUID(), plotSessionId, site);
         }
 
         // Optional dependency, 2026-09-29 (design discussion): Cartographyr's own registration above

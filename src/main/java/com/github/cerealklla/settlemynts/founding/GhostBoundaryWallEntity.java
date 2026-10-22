@@ -72,6 +72,34 @@ public class GhostBoundaryWallEntity extends Display.BlockDisplay {
         return ownerCoreId;
     }
 
+    private boolean selfCleaned = false;
+
+    /**
+     * Self-discards the moment this wall piece's chunk loads, if the toggle is no longer on --
+     * real live report, 2026-10-22: toggling the boundary on, walking far enough away for some wall
+     * pieces to unload, then toggling off again leaves those pieces behind forever. {@code
+     * SettlemyntsMod#setBoundaryVisible}'s discard loop (via {@link #findByOwnerCore}) only ever
+     * reaches currently-loaded entities -- vanilla has no way to touch an entity sitting in an
+     * unloaded chunk at all -- so a wall point that's out of render range at the exact moment the
+     * toggle flips off is silently skipped and never cleaned up, no matter how long the server runs.
+     * Unlike {@code HighwayConnectionMarkerEntity}'s identical fix, this needs no new persisted
+     * "pending hide" flag of its own -- {@link GhostTownHallCoreEntity#isBoundaryVisible} is already
+     * durably persisted on the owning core, so a late-loading piece can just read it directly.
+     */
+    @Override
+    public void tick() {
+        super.tick();
+        if (!selfCleaned && level() instanceof ServerLevel serverLevel) {
+            boolean shouldExist = ownerCoreId != null
+                    && serverLevel.getEntity(ownerCoreId) instanceof GhostTownHallCoreEntity core
+                    && core.isBoundaryVisible();
+            if (!shouldExist) {
+                selfCleaned = true;
+                discard();
+            }
+        }
+    }
+
     /** Every currently-loaded wall point belonging to {@code coreId} -- used to discard the whole wall when toggled off. Same bounded-search-box approach as {@code GhostPerimeterStakeEntity#findByOwnerCore}. */
     public static List<GhostBoundaryWallEntity> findByOwnerCore(ServerLevel level, UUID coreId) {
         Entity core = level.getEntity(coreId);

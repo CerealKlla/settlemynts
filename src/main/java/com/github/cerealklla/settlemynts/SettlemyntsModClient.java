@@ -135,6 +135,7 @@ public class SettlemyntsModClient {
     static void onRegisterMenuScreens(RegisterMenuScreensEvent event) {
         event.register(ModMenus.GUARDHOUSE_FOOD.get(), GuardhouseFoodScreen::new);
         event.register(ModMenus.SHOP_CART.get(), ShopCartScreen::new);
+        event.register(ModMenus.WATCH_TOWER_BEACON.get(), com.github.cerealklla.settlemynts.watchtower.client.WatchTowerBeaconScreen::new);
     }
 
     @SubscribeEvent
