@@ -2,11 +2,10 @@ package com.github.cerealklla.settlemynts.watchtower;
 
 import com.mojang.serialization.MapCodec;
 
-import com.github.cerealklla.settlemynts.registration.ModBlockEntities;
-
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
@@ -14,8 +13,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityTicker;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.phys.BlockHitResult;
 
 /**
@@ -46,16 +43,19 @@ public class WatchTowerBeaconBlock extends Block implements EntityBlock {
         return new WatchTowerBeaconBlockEntity(pos, state);
     }
 
+    /**
+     * Real correction, 2026-10-22 (standing rule: "at all costs avoid non-event-driven chron jobs")
+     * -- this block has no {@code BlockEntityTicker} of any kind. {@link #tick} (vanilla's own
+     * scheduled-tick callback, the same mechanism {@code RedstoneLampBlock} uses for its delayed
+     * turn-off, confirmed against the decompiled source) fires only at an exact future tick this
+     * block entity itself explicitly scheduled -- either "retry identity resolution" or "the current
+     * fuel batch just ran out" -- never on a continuous per-tick basis.
+     */
     @Override
-    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
-        if (level.isClientSide() || type != ModBlockEntities.WATCH_TOWER_BEACON.get()) {
-            return null;
+    protected void tick(BlockState state, ServerLevel level, BlockPos pos, RandomSource random) {
+        if (level.getBlockEntity(pos) instanceof WatchTowerBeaconBlockEntity beacon) {
+            beacon.onScheduledTick(level);
         }
-        return (lvl, pos, st, be) -> {
-            if (be instanceof WatchTowerBeaconBlockEntity beacon && lvl instanceof ServerLevel serverLevel) {
-                beacon.serverTick(serverLevel);
-            }
-        };
     }
 
     /**

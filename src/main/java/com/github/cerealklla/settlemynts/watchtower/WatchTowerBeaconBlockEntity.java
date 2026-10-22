@@ -44,16 +44,19 @@ import net.neoforged.neoforge.common.extensions.IMenuProviderExtension;
  * flame-progress bar -- {@code litTimeRemaining > 0} is also literally "is the doubling bonus
  * currently active," no separate flag needed.
  *
- * <p>Burn model mirrors vanilla's own {@code AbstractFurnaceBlockEntity} exactly (real correction,
- * 2026-10-22, second round -- the original once-a-minute lump-sum design is gone): every tick, if
- * dark and {@link #manuallyEnabled} and the fuel slot holds any Coal/Charcoal for a built plot,
- * burn exactly one piece for {@code MINUTE_TICKS / fuelCostForTier(tier)} ticks -- long enough that
- * burning that many pieces back to back adds up to one real minute lit, so the per-tier number
- * stays a true "coal per minute" rate, just paid out incrementally instead of up front. Reacts the
- * same tick fuel is deposited or the toggle flips on (there is no separate poll/cadence -- this is
- * the ordinary per-tick {@code serverTick}, same as a furnace's own). The base (un-doubled) radius
- * is always free, scaled by the same Tier -- see {@link WatchTowerLightController#recompute},
- * called only when the lit/dark state actually flips.
+ * <p>Burn model, final form (2026-10-22, several real corrections -- see decisions.md for the full
+ * arc): fully event-driven, no tick method of any kind (standing rule: "at all costs avoid
+ * non-event-driven chron jobs"). Igniting a batch consumes however much fuel is actually in the slot
+ * right then (pulling a fresh stack from the plot's own boxes first if empty) in one lump, burning
+ * for {@code available * (MINUTE_TICKS / fuelCostForTier(tier))} ticks -- long enough that this
+ * still averages out to the real "coal per minute" rate, just paid in whatever batch size was
+ * actually available rather than one piece or a fixed amount. The exact future tick that duration
+ * will run out on is scheduled explicitly ({@code level.scheduleTick}) rather than counted down
+ * every tick -- see {@link #onScheduledTick}/{@link #tryIgniteNextBatch} for the real mechanism, and
+ * {@link #onPlotBoxesChanged} for how a delivery anywhere else on the plot (not just this slot)
+ * wakes a genuinely-starved Beacon back up. The base (un-doubled) radius is always free, scaled by
+ * the same Tier -- see {@link WatchTowerLightController#recompute}, called only when the lit/dark
+ * state actually flips.
  */
 public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProvider, IMenuProviderExtension, com.github.cerealklla.nuclyus.ping.Pingable, com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingRecipient {
 
@@ -62,7 +65,6 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
     private boolean manuallyEnabled = true;
     private int litTimeRemaining;
     private int litTotalTime;
-    private int tickCounter;
     // "Defense Spending" eligibility (explicit user request, 2026-10-22, alongside making this Plot
     // Type NPC-owned-only) -- mirrors guardhouse.GuardhouseBlockEntity#defenseSpendingAllocation
     // exactly: set only via SettlemyntsMod#setDefenseSpending (Town Hall Core's own screen), moved
@@ -77,11 +79,22 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
      * what I placed, revert exactly that" discipline {@code roadway.RoadwayPaver} uses for terrain. */
     private List<BlockPos> desiredLightPositions = new ArrayList<>();
 
-    /** Only accepts Coal/Charcoal -- see {@link #canPlaceFuel(ItemStack)}. */
+    /** Only accepts Coal/Charcoal -- see {@link #canPlaceFuel(ItemStack)}. A deposit through the real
+     * menu slot calls {@code setChanged()} (vanilla's own {@code Slot} does this on every click/drag
+     * -- confirmed against the decompiled source), which is this Beacon's event-driven trigger to
+     * try igniting immediately if it's currently dark -- no polling needed to notice a deposit here. */
     private final Container fuelContainer = new SimpleContainer(1) {
         @Override
         public boolean canPlaceItem(int slot, ItemStack stack) {
             return canPlaceFuel(stack);
+        }
+
+        @Override
+        public void setChanged() {
+            super.setChanged();
+            if (level instanceof ServerLevel serverLevel) {
+                tryIgniteNextBatch(serverLevel);
+            }
         }
     };
 
@@ -148,14 +161,29 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
     // ordinary block an Ancestors Blueprint places wherever it wants (the tower's own lookout deck),
     // pasted by Blueprynts' real construction pipeline like any other block -- which means it starts
     // life with no plotId/settlementCoreId at all. It self-resolves those from its own world
-    // position instead, the same way a Guard Kit Stand or worker NPC would -- a few seconds after
-    // existing (not every tick -- see RESOLVE_RETRY_TICKS), via Settlemynts#findPlotAt, which is
-    // real but bounded work (it iterates loaded Town Hall Cores, not every entity on the server --
-    // confirmed safe before reusing it here, unlike ShopWishlist#computeDeficits' own real crash
-    // earlier tonight). Finalize already registers the plot with Cartographyr before construction
-    // ever starts, so by the time this block is actually pasted into the world the plot it's
-    // standing on is always already resolvable.
-    private static final int RESOLVE_RETRY_TICKS = 100; // 5 real seconds.
+    // position instead, the same way a Guard Kit Stand or worker NPC would, via
+    // Settlemynts#findPlotAt, which is real but bounded work (it iterates loaded Town Hall Cores,
+    // not every entity on the server -- confirmed safe before reusing it here, unlike
+    // ShopWishlist#computeDeficits' own real crash earlier tonight). Finalize already registers the
+    // plot with Cartographyr before construction ever starts, so by the time this block is actually
+    // pasted into the world the plot it's standing on is always already resolvable.
+    //
+    // <p>Real correction, 2026-10-22 (standing rule, not just this feature -- "at all costs avoid
+    // non-event-driven chron jobs"): this used to poll via a per-tick counter. {@link #setLevel} is
+    // the real event that replaces it -- it fires exactly once whenever this block entity actually
+    // becomes attached to a live Level, which covers both "just pasted by construction" and "this
+    // chunk just loaded back in" uniformly, with zero cost in between. If resolution still fails
+    // (plot registration hasn't caught up yet), {@link #onScheduledTick} reschedules itself via
+    // {@code level.scheduleTick} rather than falling back to a poll.
+    static final int RESOLVE_RETRY_TICKS = 100; // 5 real seconds.
+
+    @Override
+    public void setLevel(net.minecraft.world.level.Level level) {
+        super.setLevel(level);
+        if (settlementCoreId == null && level instanceof ServerLevel serverLevel) {
+            serverLevel.scheduleTick(getBlockPos(), com.github.cerealklla.settlemynts.registration.ModBlocks.WATCH_TOWER_BEACON.get(), RESOLVE_RETRY_TICKS);
+        }
+    }
 
     private void tryResolveIdentity(ServerLevel level) {
         Settlemynts.findPlotAt(level, getBlockPos()).ifPresent(handle -> {
@@ -172,10 +200,16 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         return manuallyEnabled;
     }
 
-    /** "Enable/Disable" toggle on {@code client.WatchTowerBeaconScreen} -- see {@code SettlemyntsMod#setWatchTowerEnabled}, the only caller (already re-checks {@link #canManage} itself). */
+    /** "Enable/Disable" toggle on {@code client.WatchTowerBeaconScreen}, and (2026-10-22) the real
+     * redstone input ({@code WatchTowerBeaconBlock#neighborChanged}) -- both callers just flip this
+     * flag, already re-checking permissions/signal state themselves. Flipping to enabled attempts an
+     * immediate ignition right here -- this is the event, no separate poll needed to notice it. */
     public void setManuallyEnabled(boolean manuallyEnabled) {
         this.manuallyEnabled = manuallyEnabled;
         setChanged();
+        if (manuallyEnabled && level instanceof ServerLevel serverLevel) {
+            tryIgniteNextBatch(serverLevel);
+        }
     }
 
     @Override
@@ -206,7 +240,7 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         setChanged();
     }
 
-    /** Resolves this Beacon's plot's own bound Blueprint Tier (0 if unbound or Blueprynts isn't loaded) -- same guarded pattern {@code guardhouse.GuardEntity#fundFastRespawn} already uses. */
+    /** Resolves this Beacon's plot's own bound Blueprint Tier (0 if unbound or Blueprynts isn't loaded) -- same guarded pattern {@code guardhouse.GuardEntity#fundFastRespawn} already uses. Only ever called from a real event now (see {@link #tryIgniteNextBatch}), never a per-tick poll -- no cache needed. */
     public int resolveBuiltTier(ServerLevel level) {
         if (settlementCoreId == null || !(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
             return 0;
@@ -218,7 +252,7 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         return ModList.get().isLoaded("blueprynts") ? BlueprintsConstructionBridge.resolveTier(level, plot) : 0;
     }
 
-    /** This Beacon's currently-desired illumination radius -- shared by {@link #serverTick} and {@link #onPing}. */
+    /** This Beacon's currently-desired illumination radius -- shared by {@link #tryIgniteNextBatch}/{@link #onScheduledTick} and {@link #onPing}. */
     public int currentRadius(ServerLevel level) {
         int baseRadius = WatchTowerConstants.baseRadiusForTier(resolveBuiltTier(level));
         return litTimeRemaining > 0 ? baseRadius * 2 : baseRadius;
@@ -271,14 +305,10 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
 
     /**
      * Explicit user request, 2026-10-22: "when the stack runs out, check the plot and auto-pull in a
-     * new stack... should be very low on ticks that way, but want to prevent light flickering." Only
-     * ever called from {@link #serverTick} at the exact moment a fresh piece of fuel is actually
-     * needed (the same per-tick check that decides whether to ignite) -- not a separate periodic
-     * poll, so it's naturally as infrequent as the burn rate itself (every {@code burnTicks}, at most
-     * once a real minute even at Tier 5) with no extra throttle needed. Pulls a full stack at once
-     * (not just one piece), so most future ignitions for a long while don't need to repeat this at
-     * all. Runs BEFORE the ignite check in the same tick the old piece would otherwise expire, so a
-     * plot with any Coal/Charcoal stocked never actually goes dark for even one tick.
+     * new stack." Only ever called from {@link #tryIgniteNextBatch}, itself only ever called from a
+     * real event (never a per-tick poll) -- see that method's own doc for the full list of triggers.
+     * Pulls a full stack at once (not just one piece), so most future ignitions for a long while
+     * don't need to repeat this at all.
      */
     private void pullFuelFromPlot(ServerLevel level) {
         if (plotId == null) {
@@ -291,49 +321,87 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         }
     }
 
-    public void serverTick(ServerLevel level) {
+    /**
+     * Real correction, 2026-10-22 (standing rule: "at all costs avoid non-event-driven chron jobs"):
+     * this block entity has no tick method of any kind -- no {@code BlockEntityTicker}, no per-tick
+     * polling anywhere. Called from exactly two places instead:
+     * <ul>
+     *   <li>{@code WatchTowerBeaconBlock#tick} -- a {@code level.scheduleTick} callback fires at the
+     *       exact tick a previously-ignited batch was always going to run out (the duration was
+     *       known up front at ignition time, see {@link #tryIgniteNextBatch}), or at the exact tick
+     *       a previous identity-resolution attempt said to retry.</li>
+     * </ul>
+     * If identity still isn't resolved, retries and reschedules itself (bounded, event-driven
+     * retries -- not a continuous poll). Otherwise, the previously-scheduled burn duration has
+     * elapsed: try to ignite the next batch; if nothing's available, shrink the light back down and
+     * go fully idle (no further scheduling) until a real external event -- the GUI toggle, redstone,
+     * a direct fuel-slot deposit, or {@link #onPlotBoxesChanged} -- wakes it again.
+     */
+    public void onScheduledTick(ServerLevel level) {
         if (settlementCoreId == null) {
-            tickCounter++;
-            if (tickCounter >= RESOLVE_RETRY_TICKS) {
-                tickCounter = 0;
-                tryResolveIdentity(level);
+            tryResolveIdentity(level);
+            if (settlementCoreId == null) {
+                level.scheduleTick(getBlockPos(), com.github.cerealklla.settlemynts.registration.ModBlocks.WATCH_TOWER_BEACON.get(), RESOLVE_RETRY_TICKS);
             }
-            return; // Nothing else to do until this Beacon knows which plot it's standing on.
+            return;
         }
-        boolean wasLit = litTimeRemaining > 0;
-        if (wasLit) {
-            litTimeRemaining--;
+        litTimeRemaining = 0; // The scheduled duration from the last ignition has now fully elapsed.
+        if (!tryIgniteNextBatch(level)) {
+            WatchTowerLightController.recompute(level, this, currentRadius(level)); // Shrinks to base/off.
+            setChanged();
         }
+        // On success, tryIgniteNextBatch already recomputed, rescheduled, and marked this changed.
+    }
 
-        // Real production incident, 2026-10-22: this used to call resolveBuiltTier(level)
-        // unconditionally every tick -- it bottoms out in Blueprynts#getConstructionBoxTier, a live
-        // level.getBlockEntity(boxPos) read, not a flat index. That's fine once a minute (the old
-        // cadence), but every tick for every Beacon caused an 8 TPS server-wide stall from the moment
-        // the fix shipped -- confirmed via "neoforge tps" (8.1 TPS) and the fact that every slow tick
-        // was unaccounted for in TickProfiler's own named categories (this code was never wrapped in
-        // one). Only resolve it when actually dark and enabled -- once lit, this is skipped entirely
-        // until the next time fuel runs out, same cadence the pre-regression code had.
-        if (litTimeRemaining <= 0 && manuallyEnabled) {
-            int builtTier = resolveBuiltTier(level);
-            if (builtTier > 0) {
-                if (countFuel() <= 0) {
-                    pullFuelFromPlot(level);
-                }
-                if (countFuel() > 0) {
-                    int required = WatchTowerConstants.fuelCostForTier(builtTier);
-                    int burnTicks = Math.max(1, WatchTowerConstants.MINUTE_TICKS / required);
-                    consumeFuel(1);
-                    litTimeRemaining = burnTicks;
-                    litTotalTime = burnTicks;
-                }
-            }
-        }
+    /**
+     * Called by {@code watchtower.WatchTowerRefuelNotifier} right after a successful midnight
+     * Planned Inventory delivery into any of this plot's own boxes -- the one real "fuel might now
+     * be available" event this Beacon can't otherwise observe directly (unlike its own fuel slot,
+     * the GUI toggle, or redstone, all of which already call {@link #tryIgniteNextBatch} themselves).
+     * Per explicit design: a plot that's genuinely out of Coal is *supposed* to stay dark until the
+     * settlement's own Planned Inventory target brings more in (or a player deposits some directly)
+     * -- this is that notification, not a poll.
+     */
+    public void onPlotBoxesChanged(ServerLevel level) {
+        tryIgniteNextBatch(level);
+    }
 
-        boolean nowLit = litTimeRemaining > 0;
-        if (nowLit != wasLit) {
-            WatchTowerLightController.recompute(level, this, currentRadius(level));
+    /**
+     * The one shared ignition attempt, called from every real event that could plausibly make fuel
+     * newly available: the GUI toggle turning on, redstone turning on, a direct fuel-slot deposit,
+     * and {@link #onPlotBoxesChanged}. Also called from {@link #onScheduledTick} when the previous
+     * batch's known duration elapses. No-op (returns {@code false}) if already lit, disabled, not
+     * built, or genuinely no fuel anywhere -- in which case the caller is responsible for leaving the
+     * Beacon dark and idle, not retrying. On success, consumes whatever's actually in the fuel slot
+     * right then in one batch (explicit user design: "I know there are 64 pieces, so check back when
+     * all 64 should be consumed," not once per individual piece) and schedules the single future tick
+     * for exactly when that batch will run out.
+     */
+    private boolean tryIgniteNextBatch(ServerLevel level) {
+        if (litTimeRemaining > 0 || !manuallyEnabled || settlementCoreId == null) {
+            return false;
         }
+        int builtTier = resolveBuiltTier(level);
+        if (builtTier <= 0) {
+            return false;
+        }
+        if (countFuel() <= 0) {
+            pullFuelFromPlot(level);
+        }
+        int available = countFuel();
+        if (available <= 0) {
+            return false;
+        }
+        int required = WatchTowerConstants.fuelCostForTier(builtTier);
+        int burnTicksPerPiece = Math.max(1, WatchTowerConstants.MINUTE_TICKS / required);
+        consumeFuel(available);
+        int totalDuration = available * burnTicksPerPiece;
+        litTimeRemaining = totalDuration;
+        litTotalTime = totalDuration;
+        WatchTowerLightController.recompute(level, this, currentRadius(level));
+        level.scheduleTick(getBlockPos(), com.github.cerealklla.settlemynts.registration.ModBlocks.WATCH_TOWER_BEACON.get(), totalDuration);
         setChanged();
+        return true;
     }
 
     @Override
@@ -368,7 +436,6 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
                 + " builtTier=" + builtTier
                 + " manuallyEnabled=" + manuallyEnabled
                 + " litTimeRemaining=" + litTimeRemaining + " litTotalTime=" + litTotalTime
-                + " tickCounter=" + tickCounter
                 + " fuelCount=" + countFuel()
                 + " requiredFuel=" + (builtTier > 0 ? WatchTowerConstants.fuelCostForTier(builtTier) : -1);
     }

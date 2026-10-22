@@ -460,6 +460,10 @@ public final class PlannedInventoryClearing {
                 for (ItemStack stack : split.toDeliver()) {
                     ContainerDeposit.depositIntoAny(buyer.participant().boxes(), stack);
                 }
+                // Explicit event-driven wake-up, 2026-10-22 (see that class's own doc) -- a cheap
+                // no-op unless this buyer plot happens to have a dark Watch Tower Beacon waiting on
+                // exactly this kind of delivery.
+                com.github.cerealklla.settlemynts.watchtower.WatchTowerRefuelNotifier.notifyPlotBoxesChanged(level, buyer.participant().plot().plotId());
                 List<ItemStack> payment = ContainerWithdraw.drain(buyer.participant().boxes(), GOLD_NUGGETS, (int) split.totalCost());
                 for (ItemStack stack : payment) {
                     ContainerDeposit.depositIntoAny(seller.participant().boxes(), stack);
@@ -861,6 +865,7 @@ public final class PlannedInventoryClearing {
             for (ItemStack stack : goods) {
                 ContainerDeposit.depositIntoAny(buyer.boxes(), stack);
             }
+            com.github.cerealklla.settlemynts.watchtower.WatchTowerRefuelNotifier.notifyPlotBoxesChanged(level, buyer.plot().plotId());
             for (ItemStack stack : ContainerWithdraw.drain(buyer.boxes(), GOLD_NUGGETS, realPrice.get())) {
                 ContainerDeposit.depositIntoAny(seller.boxes(), stack);
             }
