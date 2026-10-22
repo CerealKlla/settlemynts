@@ -58,6 +58,26 @@ public class WatchTowerBeaconBlock extends Block implements EntityBlock {
         };
     }
 
+    /**
+     * Explicit user request, 2026-10-22: "if I use redstone can I toggle it remotely? ... it should
+     * toggle the same way as the UI button" -- powered sets {@code manuallyEnabled} true, unpowered
+     * sets it false, the exact same flag/method {@code SetWatchTowerEnabledPayload}'s own handler
+     * flips, so whichever happened most recently (a redstone change or a GUI click) simply wins; no
+     * separate "locked by redstone" concept. Immediate, no delayed-off quirk -- that's specific to
+     * {@code RedstoneLampBlock}'s own visual choice (confirmed against the decompiled source before
+     * writing this), not something asked for here.
+     */
+    @Override
+    protected void neighborChanged(BlockState state, Level level, BlockPos pos, Block neighborBlock,
+                                    net.minecraft.world.level.redstone.Orientation orientation, boolean movedByPiston) {
+        if (!level.isClientSide() && level.getBlockEntity(pos) instanceof WatchTowerBeaconBlockEntity beacon) {
+            boolean powered = level.hasNeighborSignal(pos);
+            if (powered != beacon.manuallyEnabled()) {
+                beacon.setManuallyEnabled(powered);
+            }
+        }
+    }
+
     @Override
     public InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hit) {
         if (level.isClientSide() || !(player instanceof ServerPlayer serverPlayer)
