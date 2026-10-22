@@ -55,7 +55,7 @@ import net.neoforged.neoforge.common.extensions.IMenuProviderExtension;
  * is always free, scaled by the same Tier -- see {@link WatchTowerLightController#recompute},
  * called only when the lit/dark state actually flips.
  */
-public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProvider, IMenuProviderExtension {
+public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProvider, IMenuProviderExtension, com.github.cerealklla.nuclyus.ping.Pingable {
 
     private UUID settlementCoreId;
     private UUID plotId;
@@ -153,7 +153,6 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         Settlemynts.findPlotAt(level, getBlockPos()).ifPresent(handle -> {
             setIdentity(handle.settlementCoreId(), handle.plotId());
             WatchTowerIndex.get(level.getServer()).put(handle.plotId(), GlobalPos.of(level.dimension(), getBlockPos()));
-            WatchTowerBeaconSync.broadcastAll(level.getServer());
         });
     }
 
@@ -200,11 +199,28 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         return ModList.get().isLoaded("blueprynts") ? BlueprintsConstructionBridge.resolveTier(level, plot) : 0;
     }
 
-    /** This Beacon's currently-desired illumination radius -- shared by {@link #serverTick} and the
-     * on-demand recompute triggered by {@code WatchTowerRecomputePingPayload}'s handler. */
+    /** This Beacon's currently-desired illumination radius -- shared by {@link #serverTick} and {@link #onPing}. */
     public int currentRadius(ServerLevel level) {
         int baseRadius = WatchTowerConstants.baseRadiusForTier(resolveBuiltTier(level));
         return litTimeRemaining > 0 ? baseRadius * 2 : baseRadius;
+    }
+
+    /**
+     * Explicit user request, 2026-10-22: "leverage the pingable implementation [Nuclyus'
+     * {@code ping.Pingable}] for when a player is near one of these [Beacons] to force it to recheck
+     * its own height." A grid column skipped during {@link WatchTowerLightController#recompute}
+     * (unloaded chunk at the time) or left stale by terrain changing underneath it would otherwise
+     * only get fixed on this Beacon's next lit/dark flip, which could be a long time away for a
+     * continuously-fed tower. No registration/networking needed here at all -- implementing this
+     * interface is the entire integration; Nuclyus' own {@code ping.client.ClientPingScanner}/
+     * {@code ping.PingDispatcher} already find and re-validate every nearby {@code Pingable}
+     * automatically.
+     */
+    @Override
+    public void onPing(com.github.cerealklla.nuclyus.ping.PingPacket ping) {
+        if (settlementCoreId != null && level instanceof ServerLevel serverLevel) {
+            WatchTowerLightController.recompute(serverLevel, this, currentRadius(serverLevel));
+        }
     }
 
     private int countFuel() {
