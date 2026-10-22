@@ -2574,18 +2574,12 @@ public class SettlemyntsMod {
         }
         List<com.github.cerealklla.settlemynts.founding.DefenseSpendingEntry> entries = new ArrayList<>();
         for (PlotRecord p : core.getPlots()) {
-            if (!p.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
+            if (!com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingTransfer.isEligible(p)) {
                 continue;
             }
-            int allocation = com.github.cerealklla.settlemynts.guardhouse.GuardhouseIndex.get(serverLevel.getServer()).get(p.plotId())
-                    .flatMap(pos -> {
-                        ServerLevel guardhouseLevel = serverLevel.getServer().getLevel(pos.dimension());
-                        if (guardhouseLevel != null && guardhouseLevel.getBlockEntity(pos.pos())
-                                instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse) {
-                            return java.util.Optional.of(guardhouse.defenseSpendingAllocation());
-                        }
-                        return java.util.Optional.<Integer>empty();
-                    }).orElse(0);
+            int allocation = com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingTransfer.resolveRecipient(serverLevel, p)
+                    .map(com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingRecipient::defenseSpendingAllocation)
+                    .orElse(0);
             entries.add(new com.github.cerealklla.settlemynts.founding.DefenseSpendingEntry(p.plotId(), p.name(), allocation));
         }
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.founding.OpenDefenseSpendingMenuPayload(payload.coreEntityId(), entries));
@@ -2605,21 +2599,15 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
             return;
         }
-        PlotRecord guardhousePlot = core.getPlots().stream().filter(p -> p.plotId().equals(payload.guardhousePlotId())
-                && p.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID))
+        PlotRecord recipientPlot = core.getPlots().stream().filter(p -> p.plotId().equals(payload.guardhousePlotId())
+                && com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingTransfer.isEligible(p))
                 .findFirst().orElse(null);
-        if (guardhousePlot == null) {
-            player.sendSystemMessage(Component.literal("Couldn't resolve that Guardhouse anymore."));
+        if (recipientPlot == null) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve that plot anymore."));
             return;
         }
-        com.github.cerealklla.settlemynts.guardhouse.GuardhouseIndex.get(serverLevel.getServer()).get(guardhousePlot.plotId())
-                .ifPresent(pos -> {
-                    ServerLevel guardhouseLevel = serverLevel.getServer().getLevel(pos.dimension());
-                    if (guardhouseLevel != null && guardhouseLevel.getBlockEntity(pos.pos())
-                            instanceof com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity guardhouse) {
-                        guardhouse.setDefenseSpendingAllocation(payload.allocation());
-                    }
-                });
+        com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingTransfer.resolveRecipient(serverLevel, recipientPlot)
+                .ifPresent(recipient -> recipient.setDefenseSpendingAllocation(payload.allocation()));
     }
 
     /**

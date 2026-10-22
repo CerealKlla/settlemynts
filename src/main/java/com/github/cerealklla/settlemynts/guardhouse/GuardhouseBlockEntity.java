@@ -53,7 +53,7 @@ import net.neoforged.neoforge.common.extensions.IMenuProviderExtension;
  * menu-open packet has no room for extra data otherwise. See {@link GuardhouseFoodAutoBuy} for the
  * midnight purchase logic this threshold drives.
  */
-public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider, IMenuProviderExtension {
+public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider, IMenuProviderExtension, DefenseSpendingRecipient {
 
     private UUID settlementCoreId;
     private UUID plotId;
@@ -105,6 +105,7 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider, 
         setChanged();
     }
 
+    @Override
     public int defenseSpendingAllocation() {
         return defenseSpendingAllocation;
     }
@@ -116,6 +117,7 @@ public class GuardhouseBlockEntity extends BlockEntity implements MenuProvider, 
      * {@code SettlemyntsMod#setDefenseSpending}, which re-checks {@code zone.PlotPermissions#canManage}
      * against the Town Hall plot itself (not this Guardhouse's own, which is always NPC-owned).
      */
+    @Override
     public void setDefenseSpendingAllocation(int defenseSpendingAllocation) {
         this.defenseSpendingAllocation = Math.max(0, defenseSpendingAllocation);
         setChanged();

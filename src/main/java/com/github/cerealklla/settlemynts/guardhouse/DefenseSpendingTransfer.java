@@ -1,16 +1,21 @@
 package com.github.cerealklla.settlemynts.guardhouse;
 
 import java.util.List;
+import java.util.Optional;
 
 import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
+import com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconBlockEntity;
+import com.github.cerealklla.settlemynts.watchtower.WatchTowerConstants;
+import com.github.cerealklla.settlemynts.watchtower.WatchTowerIndex;
 import com.github.cerealklla.settlemynts.zone.ContainerDeposit;
 import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
 import com.github.cerealklla.settlemynts.zone.MidnightWorkQueue;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 import com.github.cerealklla.settlemynts.zone.ShopResource;
 
+import net.minecraft.core.GlobalPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
@@ -61,21 +66,17 @@ public final class DefenseSpendingTransfer {
             return;
         }
         for (PlotRecord plot : core.getPlots()) {
-            if (!plot.zoneTypeId().equals(GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
+            if (!isEligible(plot)) {
                 continue;
             }
-            queue.enqueue(() -> GuardhouseIndex.get(level.getServer()).get(plot.plotId()).ifPresent(pos -> {
-                ServerLevel guardhouseLevel = level.getServer().getLevel(pos.dimension());
-                if (guardhouseLevel != null && guardhouseLevel.getBlockEntity(pos.pos()) instanceof GuardhouseBlockEntity guardhouse) {
-                    transferToGuardhouse(level, townHall, townHallBoxes, plot, guardhouse);
-                }
-            }));
+            queue.enqueue(() -> resolveRecipient(level, plot).ifPresent(recipient ->
+                    transferToRecipient(level, townHall, townHallBoxes, plot, recipient)));
         }
     }
 
-    private static void transferToGuardhouse(ServerLevel level, PlotRecord townHall, List<Container> townHallBoxes,
-                                              PlotRecord guardhousePlot, GuardhouseBlockEntity guardhouse) {
-        int amount = guardhouse.defenseSpendingAllocation();
+    private static void transferToRecipient(ServerLevel level, PlotRecord townHall, List<Container> townHallBoxes,
+                                              PlotRecord recipientPlot, DefenseSpendingRecipient recipient) {
+        int amount = recipient.defenseSpendingAllocation();
         if (amount <= 0) {
             return;
         }
@@ -84,15 +85,42 @@ public final class DefenseSpendingTransfer {
         if (actuallyMoved <= 0) {
             return;
         }
-        List<Container> guardhouseBoxes = Settlemynts.resolvePlotBoxes(level, guardhousePlot.plotId());
+        List<Container> recipientBoxes = Settlemynts.resolvePlotBoxes(level, recipientPlot.plotId());
         for (ItemStack stack : withdrawn) {
-            ContainerDeposit.depositIntoAny(guardhouseBoxes, stack);
+            ContainerDeposit.depositIntoAny(recipientBoxes, stack);
         }
         if (ModList.get().isLoaded("blueprynts")) {
             BlueprintsConstructionBridge.appendLedgerEntry(level, townHall,
-                    "Defense Spending -" + actuallyMoved + " to " + guardhousePlot.name());
-            BlueprintsConstructionBridge.appendLedgerEntry(level, guardhousePlot,
+                    "Defense Spending -" + actuallyMoved + " to " + recipientPlot.name());
+            BlueprintsConstructionBridge.appendLedgerEntry(level, recipientPlot,
                     "Defense Spending +" + actuallyMoved + " from Town Hall");
         }
+    }
+
+    /** Every Zone Type "Defense Spending" can currently fund -- Guardhouse and Watch Tower today, easily extended by adding one more branch here and to {@link #resolveRecipient}. */
+    public static boolean isEligible(PlotRecord plot) {
+        return plot.zoneTypeId().equals(GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)
+                || plot.zoneTypeId().equals(WatchTowerConstants.WATCH_TOWER_ZONE_TYPE_ID);
+    }
+
+    /** Resolves {@code plot}'s own {@link DefenseSpendingRecipient} block entity, if its Zone Type is eligible (see {@link #isEligible}) and its chunk is actually loaded. */
+    public static Optional<DefenseSpendingRecipient> resolveRecipient(ServerLevel level, PlotRecord plot) {
+        if (plot.zoneTypeId().equals(GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
+            return GuardhouseIndex.get(level.getServer()).get(plot.plotId())
+                    .flatMap(pos -> resolveAt(level, pos, GuardhouseBlockEntity.class));
+        }
+        if (plot.zoneTypeId().equals(WatchTowerConstants.WATCH_TOWER_ZONE_TYPE_ID)) {
+            return WatchTowerIndex.get(level.getServer()).get(plot.plotId())
+                    .flatMap(pos -> resolveAt(level, pos, WatchTowerBeaconBlockEntity.class));
+        }
+        return Optional.empty();
+    }
+
+    private static <T extends DefenseSpendingRecipient> Optional<T> resolveAt(ServerLevel level, GlobalPos pos, Class<T> type) {
+        ServerLevel targetLevel = level.getServer().getLevel(pos.dimension());
+        if (targetLevel == null) {
+            return Optional.empty();
+        }
+        return type.isInstance(targetLevel.getBlockEntity(pos.pos())) ? Optional.of(type.cast(targetLevel.getBlockEntity(pos.pos()))) : Optional.empty();
     }
 }

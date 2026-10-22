@@ -55,7 +55,7 @@ import net.neoforged.neoforge.common.extensions.IMenuProviderExtension;
  * is always free, scaled by the same Tier -- see {@link WatchTowerLightController#recompute},
  * called only when the lit/dark state actually flips.
  */
-public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProvider, IMenuProviderExtension, com.github.cerealklla.nuclyus.ping.Pingable {
+public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProvider, IMenuProviderExtension, com.github.cerealklla.nuclyus.ping.Pingable, com.github.cerealklla.settlemynts.guardhouse.DefenseSpendingRecipient {
 
     private UUID settlementCoreId;
     private UUID plotId;
@@ -63,6 +63,14 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
     private int litTimeRemaining;
     private int litTotalTime;
     private int tickCounter;
+    // "Defense Spending" eligibility (explicit user request, 2026-10-22, alongside making this Plot
+    // Type NPC-owned-only) -- mirrors guardhouse.GuardhouseBlockEntity#defenseSpendingAllocation
+    // exactly: set only via SettlemyntsMod#setDefenseSpending (Town Hall Core's own screen), moved
+    // at midnight by guardhouse.DefenseSpendingTransfer into this plot's own regular boxes (not the
+    // fuel slot, which only ever accepts Coal/Charcoal) -- from there the existing Planned Inventory
+    // midnight-trading engine can spend it buying Coal from another plot's Shop, same as any other
+    // resource target, with zero new buy logic needed.
+    private int defenseSpendingAllocation;
 
     /** Every grid column this Beacon currently wants lit -- real placed positions, persisted so a
      * later radius shrink/removal can find and revert exactly what was placed, same "track exactly
@@ -170,6 +178,17 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         setChanged();
     }
 
+    @Override
+    public int defenseSpendingAllocation() {
+        return defenseSpendingAllocation;
+    }
+
+    @Override
+    public void setDefenseSpendingAllocation(int defenseSpendingAllocation) {
+        this.defenseSpendingAllocation = Math.max(0, defenseSpendingAllocation);
+        setChanged();
+    }
+
     public int litTimeRemaining() {
         return litTimeRemaining;
     }
@@ -247,6 +266,31 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         fuelContainer.getItem(0).shrink(amount);
     }
 
+    private static final com.github.cerealklla.settlemynts.zone.ShopResource FUEL_RESOURCE =
+            com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.ItemTags.COALS);
+
+    /**
+     * Explicit user request, 2026-10-22: "when the stack runs out, check the plot and auto-pull in a
+     * new stack... should be very low on ticks that way, but want to prevent light flickering." Only
+     * ever called from {@link #serverTick} at the exact moment a fresh piece of fuel is actually
+     * needed (the same per-tick check that decides whether to ignite) -- not a separate periodic
+     * poll, so it's naturally as infrequent as the burn rate itself (every {@code burnTicks}, at most
+     * once a real minute even at Tier 5) with no extra throttle needed. Pulls a full stack at once
+     * (not just one piece), so most future ignitions for a long while don't need to repeat this at
+     * all. Runs BEFORE the ignite check in the same tick the old piece would otherwise expire, so a
+     * plot with any Coal/Charcoal stocked never actually goes dark for even one tick.
+     */
+    private void pullFuelFromPlot(ServerLevel level) {
+        if (plotId == null) {
+            return;
+        }
+        List<Container> plotBoxes = Settlemynts.resolvePlotBoxes(level, plotId);
+        List<ItemStack> pulled = com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(plotBoxes, FUEL_RESOURCE, 64);
+        for (ItemStack stack : pulled) {
+            com.github.cerealklla.settlemynts.zone.ContainerDeposit.depositIntoAny(List.of(fuelContainer), stack);
+        }
+    }
+
     public void serverTick(ServerLevel level) {
         if (settlementCoreId == null) {
             tickCounter++;
@@ -262,12 +306,17 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         }
 
         int builtTier = resolveBuiltTier(level);
-        if (litTimeRemaining <= 0 && manuallyEnabled && builtTier > 0 && countFuel() > 0) {
-            int required = WatchTowerConstants.fuelCostForTier(builtTier);
-            int burnTicks = Math.max(1, WatchTowerConstants.MINUTE_TICKS / required);
-            consumeFuel(1);
-            litTimeRemaining = burnTicks;
-            litTotalTime = burnTicks;
+        if (litTimeRemaining <= 0 && manuallyEnabled && builtTier > 0) {
+            if (countFuel() <= 0) {
+                pullFuelFromPlot(level);
+            }
+            if (countFuel() > 0) {
+                int required = WatchTowerConstants.fuelCostForTier(builtTier);
+                int burnTicks = Math.max(1, WatchTowerConstants.MINUTE_TICKS / required);
+                consumeFuel(1);
+                litTimeRemaining = burnTicks;
+                litTotalTime = burnTicks;
+            }
         }
 
         boolean nowLit = litTimeRemaining > 0;
@@ -333,6 +382,7 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         manuallyEnabled = input.getBooleanOr("ManuallyEnabled", true);
         litTimeRemaining = input.getIntOr("LitTimeRemaining", 0);
         litTotalTime = input.getIntOr("LitTotalTime", 0);
+        defenseSpendingAllocation = input.getIntOr("DefenseSpendingAllocation", 0);
         desiredLightPositions = new ArrayList<>(input.listOrEmpty("DesiredLightPositions", BlockPos.CODEC).stream().toList());
     }
 
@@ -345,6 +395,7 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         output.putBoolean("ManuallyEnabled", manuallyEnabled);
         output.putInt("LitTimeRemaining", litTimeRemaining);
         output.putInt("LitTotalTime", litTotalTime);
+        output.putInt("DefenseSpendingAllocation", defenseSpendingAllocation);
         ValueOutput.TypedOutputList<BlockPos> list = output.list("DesiredLightPositions", BlockPos.CODEC);
         for (BlockPos pos : desiredLightPositions) {
             list.add(pos);
