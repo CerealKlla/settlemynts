@@ -16,6 +16,7 @@ import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
+import com.github.cerealklla.settlemynts.founding.SettlementCoreIndex;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.zone.ContainerDeposit;
 import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
@@ -29,6 +30,7 @@ import com.github.cerealklla.settlemynts.zone.ZoneType;
 import com.github.cerealklla.settlemynts.zone.ZoneTypeRegistry;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
@@ -56,10 +58,44 @@ import net.neoforged.fml.ModList;
 public final class Settlemynts {
 
     // Same large-AABB "it's never removed, only (rarely) moved" scan shape as
-    // founding.TownHallCoreRelocatorItem#findCore -- no chunk-independent settlement index exists.
+    // founding.TownHallCoreRelocatorItem#findCore. Still used by the handful of callers below that
+    // are explicitly documented as one-shot/debounced (findPlotRecord, applyPlotUpgradeFromQuest) --
+    // genuinely fine there. A real chunk-independent settlement index (founding.SettlementCoreIndex)
+    // was added 2026-10-22 for the midnight-pass force-load fix, closing the gap this comment used to
+    // describe; findPlotAt/canManagePlotAt now use it instead (see finalizedCoresIn's own doc) after
+    // a live JFR profile confirmed those two periodic-feeling call sites were a real, measurable cost.
     private static final double WORLD_SCAN_RADIUS = 3.0E7;
 
     private Settlemynts() {
+    }
+
+    /**
+     * Every loaded, finalized settlement core in {@code level}'s own dimension -- added 2026-10-22,
+     * replacing a full-world {@code Level#getEntities} AABB scan in {@link #findPlotAt}/{@link
+     * #canManagePlotAt}. Real incident: a live JFR profile of Production (prompted by a "server keeps
+     * pausing every few seconds" report) showed ~42% of all sampled server-thread CPU time inside
+     * {@code fastutil}'s {@code LongAVLTreeSet} reached via {@code findPlotAt} -- called every 5
+     * seconds per player with a bound Recallcinite Totem ({@code lyfe.recallcinite.RecallciniteListener
+     * #refreshBoundPlotTier}), the exact same scan-every-settlement-in-memory cost class already found
+     * and fixed earlier the same day for {@code construction.NpcAutoFundingTicker}/{@code
+     * bills.PlotRentTicker} (both now gone) and {@code guardhouse.GuardSpawnTicker} (see that class's
+     * own fix). {@link SettlementCoreIndex} is a flat, save-wide {@code UUID -> GlobalPos} map (no
+     * spatial scan at all, just however many settlements actually exist) -- resolving each entry's
+     * live entity by UUID is the same "chunk not loaded -> skip" simplification every other
+     * index-backed lookup in this mod already accepts.
+     */
+    private static List<GhostTownHallCoreEntity> finalizedCoresIn(ServerLevel level) {
+        List<GhostTownHallCoreEntity> cores = new ArrayList<>();
+        for (Map.Entry<UUID, GlobalPos> entry : SettlementCoreIndex.get(level.getServer()).all().entrySet()) {
+            GlobalPos pos = entry.getValue();
+            if (!pos.dimension().equals(level.dimension())) {
+                continue;
+            }
+            if (level.getEntity(entry.getKey()) instanceof GhostTownHallCoreEntity core && core.isFinalized()) {
+                cores.add(core);
+            }
+        }
+        return cores;
     }
 
     /** Registers a {@link ZoneType}, no MinecraftServer/ServerLevel param -- same startup-time, in-memory-registry shape as Cartographyr's {@code registerLayer}/{@code registerProtectionLevel}. */
@@ -102,10 +138,8 @@ public final class Settlemynts {
      * there's no plot there at all, same as every other negative case here.
      */
     public static boolean canManagePlotAt(ServerLevel level, BlockPos pos, UUID playerId) {
-        AABB worldBounds = new AABB(-WORLD_SCAN_RADIUS, level.getMinY(), -WORLD_SCAN_RADIUS,
-                WORLD_SCAN_RADIUS, level.getMaxY(), WORLD_SCAN_RADIUS);
         int coreCount = 0;
-        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+        for (GhostTownHallCoreEntity core : finalizedCoresIn(level)) {
             coreCount++;
             Optional<PlotRecord> plot = PlotGeometry.findContainingPlot(level, core, pos.getX(), pos.getZ());
             if (plot.isPresent()) {
@@ -131,9 +165,7 @@ public final class Settlemynts {
      * construction.NpcAutoFundingTicker} already has.
      */
     public static Optional<PlotHandle> findPlotAt(ServerLevel level, BlockPos pos) {
-        AABB worldBounds = new AABB(-WORLD_SCAN_RADIUS, level.getMinY(), -WORLD_SCAN_RADIUS,
-                WORLD_SCAN_RADIUS, level.getMaxY(), WORLD_SCAN_RADIUS);
-        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+        for (GhostTownHallCoreEntity core : finalizedCoresIn(level)) {
             Optional<PlotRecord> plot = PlotGeometry.findContainingPlot(level, core, pos.getX(), pos.getZ());
             if (plot.isPresent()) {
                 Optional<Geometry.Polygon> polygon = resolvePolygon(level, plot.get());

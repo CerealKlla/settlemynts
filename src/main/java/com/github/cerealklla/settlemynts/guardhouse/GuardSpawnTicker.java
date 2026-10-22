@@ -95,7 +95,7 @@ public final class GuardSpawnTicker {
             // alive, same assumption the old early-return here already made) -- top up any gear
             // still missing now that the plot's boxes may have changed since it last equipped.
             if (level.getEntity(stand.assignedGuardId().get()) instanceof GuardEntity guard) {
-                guard.equipMissingFromLoadoutUsingBoxes(record.get(), Settlemynts.resolvePlotBoxes(level, plot.plotId()));
+                guard.equipMissingFromLoadoutUsingBoxes(record.get(), resolvePlotBoxes(level, plot));
             }
             return;
         }
@@ -106,12 +106,30 @@ public final class GuardSpawnTicker {
         GuardEntity guard = new GuardEntity(ModEntities.GUARD.get(), level);
         BlockPos spawnPos = stand.blockPosition();
         guard.setPos(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
-        List<net.minecraft.world.Container> plotBoxes = Settlemynts.resolvePlotBoxes(level, plot.plotId());
+        List<net.minecraft.world.Container> plotBoxes = resolvePlotBoxes(level, plot);
         guard.equipFromLoadoutUsingBoxes(record.get(), plotBoxes);
         guard.setPlotIdentity(stand.settlementCoreId(), stand.plotId());
         guard.setAssignedStandId(standId);
         guard.setHomePos(spawnPos);
         level.addFreshEntity(guard);
         stand.setAssignedGuardId(guard.getUUID());
+    }
+
+    /**
+     * Real live incident, 2026-10-22: a JFR profile of Production showed 49% of all sampled CPU time
+     * on the server thread inside {@code fastutil}'s {@code LongAVLTreeSet}, reached from here (via
+     * {@code Settlemynts#resolvePlotBoxes(ServerLevel, UUID)}'s own full-world {@code
+     * GhostTownHallCoreEntity} scan) every single 5-second scan, for every Guard Kit Stand -- the
+     * exact "resolve once, reuse" gap {@code Settlemynts#resolvePolygonDirect}/{@code
+     * #resolveBoxesForPolygon} were already built to close for other callers (see those methods' own
+     * docs -- {@code mineshaft.MinerWorkGoal} had the identical bug fixed 2026-10-21) just never
+     * applied here. This method already has the real {@code PlotRecord} in hand (resolved a few lines
+     * above, from {@code core.getPlots()}) at both call sites, so there was never a reason to
+     * re-derive it from scratch via a plot-id lookup.
+     */
+    private static List<net.minecraft.world.Container> resolvePlotBoxes(ServerLevel level, com.github.cerealklla.settlemynts.zone.PlotRecord plot) {
+        return Settlemynts.resolvePolygonDirect(level, plot)
+                .map(polygon -> Settlemynts.resolveBoxesForPolygon(level, polygon))
+                .orElse(List.of());
     }
 }
