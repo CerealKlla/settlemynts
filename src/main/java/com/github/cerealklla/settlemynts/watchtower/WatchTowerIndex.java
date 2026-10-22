@@ -75,4 +75,9 @@ public final class WatchTowerIndex extends SavedData {
     public Optional<GlobalPos> get(UUID plotId) {
         return Optional.ofNullable(beacons.get(plotId));
     }
+
+    /** Every known Beacon's position -- see {@code WatchTowerBeaconSync}, the only caller. */
+    public List<GlobalPos> all() {
+        return List.copyOf(beacons.values());
+    }
 }

@@ -153,6 +153,7 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         Settlemynts.findPlotAt(level, getBlockPos()).ifPresent(handle -> {
             setIdentity(handle.settlementCoreId(), handle.plotId());
             WatchTowerIndex.get(level.getServer()).put(handle.plotId(), GlobalPos.of(level.dimension(), getBlockPos()));
+            WatchTowerBeaconSync.broadcastAll(level.getServer());
         });
     }
 
@@ -199,6 +200,13 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
         return ModList.get().isLoaded("blueprynts") ? BlueprintsConstructionBridge.resolveTier(level, plot) : 0;
     }
 
+    /** This Beacon's currently-desired illumination radius -- shared by {@link #serverTick} and the
+     * on-demand recompute triggered by {@code WatchTowerRecomputePingPayload}'s handler. */
+    public int currentRadius(ServerLevel level) {
+        int baseRadius = WatchTowerConstants.baseRadiusForTier(resolveBuiltTier(level));
+        return litTimeRemaining > 0 ? baseRadius * 2 : baseRadius;
+    }
+
     private int countFuel() {
         return fuelContainer.getItem(0).getCount();
     }
@@ -232,9 +240,7 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
 
         boolean nowLit = litTimeRemaining > 0;
         if (nowLit != wasLit) {
-            int baseRadius = WatchTowerConstants.baseRadiusForTier(builtTier);
-            int radius = nowLit ? baseRadius * 2 : baseRadius;
-            WatchTowerLightController.recompute(level, this, radius);
+            WatchTowerLightController.recompute(level, this, currentRadius(level));
         }
         setChanged();
     }

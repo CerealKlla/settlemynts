@@ -213,6 +213,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerShopInteractListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.diagnostics.LagDiagnostics());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.watchtower.WatchTowerChunkLoadListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconSync());
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.RegisterCommandsEvent event) ->
                 com.github.cerealklla.settlemynts.debug.DebugCommands.register(event.getDispatcher()));
 
@@ -702,6 +703,30 @@ public class SettlemyntsMod {
         registrar.playToServer(com.github.cerealklla.settlemynts.watchtower.SetWatchTowerEnabledPayload.TYPE,
                 com.github.cerealklla.settlemynts.watchtower.SetWatchTowerEnabledPayload.STREAM_CODEC,
                 (payload, context) -> setWatchTowerEnabled(payload, context));
+
+        // Watch Tower Beacon position sync + proximity-triggered recompute (2026-10-22) -- see
+        // watchtower.client.ClientWatchTowerPinger's own doc.
+        registrar.playToClient(com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconListPayload.TYPE,
+                com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconListPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.watchtower.client.WatchTowerClientState.update(payload.beacons()));
+        registrar.playToServer(com.github.cerealklla.settlemynts.watchtower.WatchTowerRecomputePingPayload.TYPE,
+                com.github.cerealklla.settlemynts.watchtower.WatchTowerRecomputePingPayload.STREAM_CODEC,
+                (payload, context) -> handleWatchTowerRecomputePing(payload, context));
+    }
+
+    /** See {@code watchtower.WatchTowerRecomputePingPayload}'s own doc. */
+    private static final double WATCH_TOWER_RECOMPUTE_PING_RADIUS_SQ = 36.0 * 36.0; // Client's own 32-block check, +4 buffer for latency.
+
+    private static void handleWatchTowerRecomputePing(com.github.cerealklla.settlemynts.watchtower.WatchTowerRecomputePingPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (player.blockPosition().distSqr(payload.beaconPos()) > WATCH_TOWER_RECOMPUTE_PING_RADIUS_SQ) {
+            return;
+        }
+        if (serverLevel.getBlockEntity(payload.beaconPos()) instanceof com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconBlockEntity beacon) {
+            com.github.cerealklla.settlemynts.watchtower.WatchTowerLightController.recompute(serverLevel, beacon, beacon.currentRadius(serverLevel));
+        }
     }
 
     private static void requestAutoDrop(com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload payload, IPayloadContext context) {

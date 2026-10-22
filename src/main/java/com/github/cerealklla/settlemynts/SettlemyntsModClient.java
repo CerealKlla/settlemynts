@@ -154,6 +154,8 @@ public class SettlemyntsModClient {
         // Client-side proximity scan (2026-10-12) -- see ClientProximityScanner's own doc. Replaces
         // the old server-side PlotShopProximityTicker poll with a client-triggered one.
         ClientProximityScanner.tick();
+        // Watch Tower Beacon light-grid recheck ping (2026-10-22) -- see its own doc.
+        com.github.cerealklla.settlemynts.watchtower.client.ClientWatchTowerPinger.tick();
 
         ClientFoundingRequests.takePendingFoundingScreen().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
