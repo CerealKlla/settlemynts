@@ -27,18 +27,24 @@ import net.minecraft.world.level.storage.ValueOutput;
 /**
  * A Mineshaft plot's worker NPC (added 2026-10-11, explicit user request) -- same shape as {@code
  * lumberyard.LumberjackWorkerEntity} (plain profession-less {@code Villager}, Brain never ticked,
- * works via a plain {@code goalSelector} goal instead) <b>minus</b> that class's underground-escape
- * {@code customServerAiStep} override: a Lumberjack free-roams scanning tree columns and genuinely
- * can end up buried by accident, but a Miner's own two waypoints ({@code MinerWorkGoal}'s mine
- * entrance and chest) are both explicit fixed targets, and the entrance waypoint legitimately sits
- * below ground (a Mineshaft's own Tier footprint extends down to -8 blocks) -- reusing that safety
- * net here would misfire constantly against this entity's own intended design, the same way it once
- * misfired for the Lumberjack near a tall tree.
+ * works via a plain {@code goalSelector} goal instead). Used to deliberately skip the suite's old
+ * heightmap-scan-based underground-escape safety net entirely -- this entity's two waypoints
+ * ({@code MinerWorkGoal}'s mine entrance and chest) are explicit fixed targets, and the entrance
+ * waypoint legitimately sits below ground (a Mineshaft's own Tier footprint extends down to -8
+ * blocks), so a Y-position-based "am I underground?" check would misfire constantly against this
+ * entity's own intended design. The 2026-10-22 {@link
+ * com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog} replacement doesn't have that problem at
+ * all -- it never looks at Y position or block state, only whether the worker is actually making
+ * progress toward wherever it's currently navigating -- so this entity now gets the same generic
+ * stuck-rescue every other ground NPC does, safely.
  */
 public class MinerWorkerEntity extends Villager implements PlotNpc, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
+    private final com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog stuckWatchdog = new com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog();
+
     private UUID settlementCoreId;
     private UUID plotId;
+    private net.minecraft.core.BlockPos spawnPos;
 
     public MinerWorkerEntity(EntityType<? extends Villager> type, Level level) {
         super(type, level);
@@ -62,6 +68,11 @@ public class MinerWorkerEntity extends Villager implements PlotNpc, com.github.c
     @Override
     public UUID settlementCoreId() {
         return settlementCoreId;
+    }
+
+    /** Called once by {@link MineshaftSpawnTicker} right after construction -- this worker's own spawn point (its Plot Config Sign's position), the rescue destination {@link #stuckWatchdog} teleports back to if this worker ever gets stuck. */
+    public void setSpawnPos(net.minecraft.core.BlockPos spawnPos) {
+        this.spawnPos = spawnPos;
     }
 
     /** Same resolution chain as {@code lumberyard.LumberjackWorkerEntity#resolvePatrolArea}. */
@@ -117,7 +128,7 @@ public class MinerWorkerEntity extends Villager implements PlotNpc, com.github.c
     @Override
     protected void customServerAiStep(ServerLevel level) {
         // Deliberately never calls super.customServerAiStep (Villager's own) -- see class/method doc.
-        com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.check(this, level);
+        stuckWatchdog.tick(this, spawnPos);
     }
 
     @Override
@@ -125,6 +136,7 @@ public class MinerWorkerEntity extends Villager implements PlotNpc, com.github.c
         super.addAdditionalSaveData(output);
         output.storeNullable("SettlementCoreId", UUIDUtil.CODEC, settlementCoreId);
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
+        output.storeNullable("SpawnPos", net.minecraft.core.BlockPos.CODEC, spawnPos);
     }
 
     @Override
@@ -132,5 +144,6 @@ public class MinerWorkerEntity extends Villager implements PlotNpc, com.github.c
         super.readAdditionalSaveData(input);
         settlementCoreId = input.read("SettlementCoreId", UUIDUtil.CODEC).orElse(null);
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
+        spawnPos = input.read("SpawnPos", net.minecraft.core.BlockPos.CODEC).orElse(null);
     }
 }

@@ -234,27 +234,18 @@ public class LumberjackWorkGoal extends Goal {
                 }
                 stuckGiveUpPos = currentPos;
                 if (consecutiveStuckGiveUps >= STUCK_RESCUE_THRESHOLD) {
-                    // Real report, 2026-10-20: workers kept "suffocating in a wall" at the exact same
-                    // coordinates across many respawns -- this teleport's target column is the tree
-                    // itself, so the raw heightmap (which only ignores LEAVES, not LOGS) landed workers
-                    // inside the trunk/canopy almost every time, same heightmap-contamination bug
-                    // already found and fixed for Guard/Resident/Farmer (see npc.NpcTreetopEscape's own
-                    // doc) but never propagated to this, a separate rescue path built the same day.
-                    //
-                    // Real follow-up report, 2026-10-21 (confirmed live, five separate deaths logged
-                    // the same session): "watched a lumberyard NPC teleport 5 blocks into the center of
-                    // a tree where it then died." realSurfaceY fixed the heightmap-contamination half,
-                    // but it only ever finds the real ground BELOW the tree material at pendingTarget's
-                    // own column -- it says nothing about whether the tree's own un-harvested trunk is
-                    // still physically standing in that exact spot. Since the whole-tree arrival rework
-                    // the same day, pendingTarget is routinely a log inside the trunk itself (see
-                    // nearestOf), so "real ground right under the trunk" is still inside the trunk's own
-                    // footprint -- the worker materializes jammed into solid wood. Fixed by actually
-                    // checking the landing spot is clear before trusting it, searching outward to the
-                    // nearest column that is.
-                    BlockPos rescuePos = findRescueLandingSpot(level, pendingTarget);
+                    // 2026-10-22: used to teleport to a freshly-computed "real surface" at the tree's
+                    // own column, which went through two real live-incident rounds of its own (landing
+                    // workers inside a trunk/canopy, then inside the un-harvested tree itself) before
+                    // ever being made reliable -- see this class's own history, now superseded. Every
+                    // one of those bugs came from trying to compute a new safe landing spot on the fly;
+                    // teleporting to the worker's own known-safe spawn point instead needs no
+                    // computation (or tree-awareness) at all.
+                    BlockPos rescuePos = worker.spawnPos();
                     worker.getNavigation().stop();
-                    worker.teleportTo(rescuePos.getX() + 0.5, rescuePos.getY(), rescuePos.getZ() + 0.5);
+                    if (rescuePos != null) {
+                        worker.teleportTo(rescuePos.getX() + 0.5, rescuePos.getY(), rescuePos.getZ() + 0.5);
+                    }
                     consecutiveStuckGiveUps = 0;
                     stuckGiveUpPos = null;
                 }
@@ -293,48 +284,6 @@ public class LumberjackWorkGoal extends Goal {
 
     // identityBase/connectedLogs are only meaningful when isHarvest is true -- both null for a plant target.
     private record WorkTarget(BlockPos pos, boolean isHarvest, BlockPos identityBase, Set<BlockPos> connectedLogs) {
-    }
-
-    // Matches HARVEST_ARRIVE_DIST_SQ's own 4-block radius -- a rescue landing this far from the
-    // original stuck target is still "arrived" by the same standard the normal (non-rescue) path
-    // already uses.
-    private static final int RESCUE_SEARCH_RADIUS_BLOCKS = 4;
-
-    /**
-     * The rescue teleport's own target column is very often the tree's trunk itself (see this
-     * method's call site's own doc) -- real ground directly beneath an un-harvested trunk is still
-     * inside the trunk's own footprint, since the trunk's lowest log sits right on top of it. Checks
-     * the two blocks a worker actually occupies at {@code realSurfaceY}'s computed landing spot before
-     * trusting it; if either is solid, searches outward ring-by-ring (nearest first) for the first
-     * nearby column whose own surface is genuinely clear, so the rescue always lands beside the tree,
-     * never inside it. Falls back to the original (possibly unsafe) spot only if nothing within range
-     * is clear -- strictly better than guaranteed suffocation, and should be vanishingly rare given a
-     * real tree's own footprint is never more than a couple of blocks wide.
-     */
-    private static BlockPos findRescueLandingSpot(ServerLevel level, BlockPos target) {
-        for (int radius = 0; radius <= RESCUE_SEARCH_RADIUS_BLOCKS; radius++) {
-            for (int dx = -radius; dx <= radius; dx++) {
-                for (int dz = -radius; dz <= radius; dz++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) {
-                        continue; // Only the current ring -- keeps the search nearest-first.
-                    }
-                    int x = target.getX() + dx;
-                    int z = target.getZ() + dz;
-                    int surfaceY = com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.realSurfaceY(level, x, z);
-                    BlockPos feet = new BlockPos(x, surfaceY, z);
-                    if (isClear(level, feet) && isClear(level, feet.above())) {
-                        return feet;
-                    }
-                }
-            }
-        }
-        return new BlockPos(target.getX(),
-                com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.realSurfaceY(level, target.getX(), target.getZ()),
-                target.getZ());
-    }
-
-    private static boolean isClear(ServerLevel level, BlockPos pos) {
-        return level.getBlockState(pos).getCollisionShape(level, pos).isEmpty();
     }
 
     /** {@code from}'s squared distance to the nearest position in {@code logs}, or to {@code fallback} if {@code logs} is null/empty (a plant target, or a safety net). */

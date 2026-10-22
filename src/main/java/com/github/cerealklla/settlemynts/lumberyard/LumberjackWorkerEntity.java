@@ -39,10 +39,16 @@ import net.minecraft.world.level.storage.ValueOutput;
  */
 public class LumberjackWorkerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
+    // How many blocks of genuine, scanned-from-this-worker's-own-position solid ceiling (tree
+    // material excluded -- see isActuallyTrappedUnderground) count as "really trapped," not just
+    // standing under a low branch.
     private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
+
+    private final com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog stuckWatchdog = new com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog();
 
     private UUID settlementCoreId;
     private UUID plotId;
+    private net.minecraft.core.BlockPos spawnPos;
 
     public LumberjackWorkerEntity(EntityType<? extends Villager> type, Level level) {
         super(type, level);
@@ -58,10 +64,11 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         // Left at neutral (0.0F, no preference either way, same as plain ground) for this entity only
         // -- the "stuck up in a tree" concern the harsh malus was originally fixing is independently
         // covered now by this class's own isActuallyTrappedUnderground (a real-ceiling check, ignores
-        // tree material) and npc.NpcTreetopEscape (now fixed to scan past tree material for genuine
-        // stranding, see its own doc), so a Lumberjack no longer needs the pathfinder itself to avoid
-        // leaves pre-emptively. Every other ground NPC (Guard/Resident/Farmer/Miner) keeps the harsh
-        // -1.0F -- none of them have a job that requires walking up to a tree's own trunk.
+        // tree material) and the generic npc.NpcStuckWatchdog (rescues to spawnPos if genuinely
+        // stranded with nowhere to go, regardless of cause), so a Lumberjack no longer needs the
+        // pathfinder itself to avoid leaves pre-emptively. Every other ground NPC
+        // (Guard/Resident/Farmer/Miner) keeps the harsh -1.0F -- none of them have a job that requires
+        // walking up to a tree's own trunk.
         this.setPathfindingMalus(net.minecraft.world.level.pathfinder.PathType.LEAVES, 0.0F);
     }
 
@@ -79,6 +86,15 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
     @Override
     public UUID settlementCoreId() {
         return settlementCoreId;
+    }
+
+    /** Called once by {@link LumberjackSpawnTicker} right after construction -- this worker's own spawn point (its Plot Config Sign's position), the rescue destination {@link #stuckWatchdog} (and {@link LumberjackWorkGoal}'s own pathfinding-give-up rescue) teleport back to if this worker ever gets stuck. */
+    public net.minecraft.core.BlockPos spawnPos() {
+        return spawnPos;
+    }
+
+    public void setSpawnPos(net.minecraft.core.BlockPos spawnPos) {
+        this.spawnPos = spawnPos;
     }
 
     /** Same resolution chain as {@code resident.ResidentVillagerEntity#resolvePatrolArea}, but the real plot polygon, not the buffer. */
@@ -161,21 +177,17 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         // exactly the "ceiling above is fine, but I'm suffocating right now" case this check always
         // missed. Tree material counts here too, unlike the ceiling scan below -- being embedded in
         // a log is exactly as suffocating as being embedded in stone.
-        if (isEmbeddedInSolid(level, blockX, blockZ) || isActuallyTrappedUnderground(level, blockX, blockZ)) {
+        if (spawnPos != null && (isEmbeddedInSolid(level, blockX, blockZ) || isActuallyTrappedUnderground(level, blockX, blockZ))) {
+            // 2026-10-22: used to teleport to a freshly-computed "real surface" at this same column
+            // (via the now-deleted npc.NpcTreetopEscape#realSurfaceY) -- that computed destination is
+            // exactly what kept going wrong (a branch log misread as ground, re-stranding the worker
+            // right back where it started). Teleporting to the worker's own known-safe spawn point
+            // instead needs no surface-guessing at all.
             getNavigation().stop();
-            // Real report, 2026-10-20: "bouncing within a tree and slowly suffocating" -- the
-            // detection above (isActuallyTrappedUnderground) is correctly tree-aware, but this escape
-            // target never was: a raw heightmap lands on a branch log just as readily as real ground,
-            // teleporting the worker INTO the branch; npc.NpcTreetopEscape#check (also tree-aware)
-            // immediately sees it stranded there and sends it back down, repeat indefinitely -- the
-            // exact same heightmap-contamination bug already fixed for Guard/Resident/Farmer and for
-            // this same entity's own stuck-pathfinding rescue, just never caught here too since this
-            // method's *detection* half looked tree-aware enough to seem already fixed.
-            int surfaceY = com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.realSurfaceY(level, blockX, blockZ);
-            teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
+            teleportTo(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
             return;
         }
-        com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.check(this, level);
+        stuckWatchdog.tick(this, spawnPos);
     }
 
     /**
@@ -228,6 +240,7 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         super.addAdditionalSaveData(output);
         output.storeNullable("SettlementCoreId", UUIDUtil.CODEC, settlementCoreId);
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
+        output.storeNullable("SpawnPos", net.minecraft.core.BlockPos.CODEC, spawnPos);
     }
 
     @Override
@@ -235,5 +248,6 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         super.readAdditionalSaveData(input);
         settlementCoreId = input.read("SettlementCoreId", UUIDUtil.CODEC).orElse(null);
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
+        spawnPos = input.read("SpawnPos", net.minecraft.core.BlockPos.CODEC).orElse(null);
     }
 }

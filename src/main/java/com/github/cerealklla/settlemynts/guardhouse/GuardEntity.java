@@ -20,7 +20,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.util.Mth;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -86,26 +85,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  */
 public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
-    // Safety-net threshold for the underground-correction check in customServerAiStep -- "don't want
-    // them going underground intentionally" (GuardPatrolAreaGoal's own target-picking already only
-    // ever aims at the surface) plus "teleport back if more than 5 blocks underground" (this field),
-    // explicit user request, both halves of the same ask.
-    private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
-
-    // Real live bug, 2026-10-16 (Guard Kit Stand overhaul): "when guards spawn they aren't spawning
-    // on the actual armor stand, they're spawning on the roof." Root cause -- a Guard Kit Stand is
-    // explicitly meant to be placed INSIDE a real Guardhouse building, under its own roof, but the
-    // underground-correction check above was written back when every guard only ever patrolled open
-    // outdoor terrain (the "Town Proper" buffer / Roadway network): `Heightmap.Types
-    // .MOTION_BLOCKING_NO_LEAVES` reads a real building's own roof as "the surface," so a guard
-    // standing on its own stand's indoor floor was being judged "5+ blocks underground" and
-    // immediately teleported up onto that roof, on its very first AI step after spawning. Fixed by
-    // skipping this whole check within a generous horizontal radius of the guard's own spawn point
-    // (its assigned stand, see {@link #homePos}) -- comfortably covers even the largest Guardhouse
-    // Tier's real footprint (5x5 up to 13x13, see this mod's own "Ancients" test Blueprint series),
-    // while leaving the real cave/hole-falling protection fully intact everywhere else a guard
-    // actually patrols outdoors.
-    private static final int UNDERGROUND_CHECK_HOME_RADIUS_BLOCKS = 10;
+    private final com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog stuckWatchdog = new com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog();
 
     private final RangedBowAttackGoal<GuardEntity> bowGoal = new RangedBowAttackGoal<>(this, 1.0, 20, 15.0F);
     private final MeleeAttackGoal meleeGoal = new MeleeAttackGoal(this, 1.0, false);
@@ -154,7 +134,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         this.assignedStandId = assignedStandId;
     }
 
-    /** Called once by {@link GuardSpawnTicker} right after construction -- this guard's own spawn point (its assigned stand's position), used only to suppress the underground-correction safety net near home. See that field's own doc. */
+    /** Called once by {@link GuardSpawnTicker} right after construction -- this guard's own spawn point (its assigned stand's position), the rescue destination {@link #stuckWatchdog} teleports back to if this guard ever gets stuck. */
     public void setHomePos(net.minecraft.core.BlockPos homePos) {
         this.homePos = homePos;
     }
@@ -367,38 +347,20 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         return funded ? GuardRespawnFunding.FUNDED_RESPAWN_TICKS : GuardRespawnFunding.NO_FOOD_RESPAWN_TICKS;
     }
 
+    /**
+     * All the old heightmap-scan-based rescue logic (underground-correction via a raw
+     * {@code MOTION_BLOCKING_NO_LEAVES} read, the home-radius exemption that workaround needed, and
+     * {@code npc.NpcTreetopEscape}'s own treetop-stranding check) is gone, 2026-10-22 -- see {@link
+     * com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog}'s own doc for why: every one of those
+     * checks could, and eventually did, misfire and teleport a guard UP onto a roof or tree canopy
+     * instead of rescuing it from one. This instead just asks "has this guard gone anywhere lately
+     * while it's supposedly trying to," with a rescue destination (its own assigned stand) that's
+     * always known-safe rather than freshly (and fallibly) computed.
+     */
     @Override
     protected void customServerAiStep(ServerLevel level) {
         super.customServerAiStep(level);
-        int blockX = Mth.floor(getX());
-        int blockZ = Mth.floor(getZ());
-        if (homePos != null
-                && Math.max(Math.abs(blockX - homePos.getX()), Math.abs(blockZ - homePos.getZ())) <= UNDERGROUND_CHECK_HOME_RADIUS_BLOCKS) {
-            return; // Near its own (possibly indoor, under-a-roof) spawn point -- see this field's own doc.
-        }
-        // Real report, 2026-10-21: a guard found bouncing between a branch log and real ground
-        // forever -- this used to take the raw heightmap at face value, which (like
-        // npc.NpcTreetopEscape's own identical past bug) can land on a tree branch instead of real
-        // ground, fighting that class's own corrected check in an endless loop. See
-        // NpcTreetopEscape#realSurfaceY's own doc for the full writeup.
-        int surfaceY = com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.realSurfaceY(level, blockX, blockZ);
-        if (surfaceY - getY() > UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS) {
-            getNavigation().stop();
-            teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
-            return;
-        }
-        // Real report, 2026-10-19: guards still getting stuck in trees despite the 2026-10-17
-        // PathType.LEAVES malus fix. That malus only stops the pathfinder from CHOOSING to route
-        // through a tree's dense interior -- it does nothing to stop one from walking UP ONTO the
-        // canopy's own top surface, which reads as perfectly ordinary walkable ground (a leaf block
-        // is solid-for-standing-on, same as any other block), stranding the guard with no way back
-        // down. The underground check above can't catch this -- it only ever fires when BELOW the
-        // real surface, never above it. Extracted into the shared com.github.cerealklla.settlemynts.npc.NpcTreetopEscape
-        // 2026-10-20 after a real report confirmed the SAME gap in another NPC type -- this was
-        // originally fixed here only, with the other four NPC types explicitly flagged "known gap,
-        // not yet fixed," which was the wrong scope for the user's actual request ("fix it for all
-        // NPCs, not guards specifically").
-        com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.check(this, level);
+        stuckWatchdog.tick(this, homePos);
     }
 
     @Override

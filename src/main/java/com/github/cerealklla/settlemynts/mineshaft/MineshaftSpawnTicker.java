@@ -72,6 +72,7 @@ public final class MineshaftSpawnTicker {
 
         MinerWorkerEntity worker = new MinerWorkerEntity(ModEntities.MINER_WORKER.get(), level);
         worker.setPos(signPos.getX() + 0.5, signPos.getY(), signPos.getZ() + 0.5);
+        worker.setSpawnPos(signPos);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
         level.addFreshEntity(worker);
         sign.setMinerWorkerId(worker.getUUID());

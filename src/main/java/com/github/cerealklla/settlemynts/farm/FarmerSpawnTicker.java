@@ -81,6 +81,7 @@ public final class FarmerSpawnTicker {
         FarmerWorkerEntity worker = new FarmerWorkerEntity(ModEntities.FARMER_WORKER.get(), level);
         worker.setPos(signPos.getX() + 0.5, signPos.getY(), signPos.getZ() + 0.5);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
+        worker.setSpawnPos(signPos);
         // Cosmetic only (2026-10-09, explicit request) -- the zone here is always Farm, so the
         // profession is just the matching vanilla robe, not a job-site-claim (this worker's Brain is
         // never ticked -- same reasoning as resident.ResidentVillagerEntity's own class doc).

@@ -108,6 +108,7 @@ public final class ResidentSpawnTicker {
         ResidentVillagerEntity resident = new ResidentVillagerEntity(ModEntities.RESIDENT_VILLAGER.get(), level);
         resident.setPos(signPos.getX() + 0.5, signPos.getY(), signPos.getZ() + 0.5);
         resident.setPlotIdentity(sign.settlementCoreId(), plotId);
+        resident.setSpawnPos(signPos);
         com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator.representativeProfessionFor(plot.zoneTypeId())
                 .ifPresent(profession -> resident.setVillagerData(resident.getVillagerData().withProfession(level.registryAccess(), profession)));
         level.addFreshEntity(resident);

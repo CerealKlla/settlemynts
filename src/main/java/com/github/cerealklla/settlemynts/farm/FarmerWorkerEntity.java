@@ -12,7 +12,6 @@ import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
@@ -33,10 +32,11 @@ import net.minecraft.world.level.storage.ValueOutput;
  */
 public class FarmerWorkerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
-    private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
+    private final com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog stuckWatchdog = new com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog();
 
     private UUID settlementCoreId;
     private UUID plotId;
+    private net.minecraft.core.BlockPos spawnPos;
 
     public FarmerWorkerEntity(EntityType<? extends Villager> type, Level level) {
         super(type, level);
@@ -60,6 +60,11 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
     @Override
     public UUID settlementCoreId() {
         return settlementCoreId;
+    }
+
+    /** Called once by {@link FarmerSpawnTicker} right after construction -- this worker's own spawn point (its Plot Config Sign's position), the rescue destination {@link #stuckWatchdog} teleports back to if this worker ever gets stuck. */
+    public void setSpawnPos(net.minecraft.core.BlockPos spawnPos) {
+        this.spawnPos = spawnPos;
     }
 
     public Optional<Geometry.Polygon> resolvePatrolArea(ServerLevel level) {
@@ -106,20 +111,10 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
         this.goalSelector.addGoal(4, new RandomLookAroundGoal(this));
     }
 
+    /** See {@code guardhouse.GuardEntity#customServerAiStep}'s own doc -- the old heightmap-scan-based rescue is gone; this just hands off to the shared {@link com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog}. */
     @Override
     protected void customServerAiStep(ServerLevel level) {
-        int blockX = Mth.floor(getX());
-        int blockZ = Mth.floor(getZ());
-        // See guardhouse.GuardEntity's own 2026-10-21 fix: a raw heightmap value here can land on a
-        // tree branch instead of real ground, fighting npc.NpcTreetopEscape's own corrected check in
-        // an endless teleport loop. realSurfaceY scans past tree material the same way that class does.
-        int surfaceY = com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.realSurfaceY(level, blockX, blockZ);
-        if (surfaceY - getY() > UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS) {
-            getNavigation().stop();
-            teleportTo(blockX + 0.5, surfaceY, blockZ + 0.5);
-            return;
-        }
-        com.github.cerealklla.settlemynts.npc.NpcTreetopEscape.check(this, level);
+        stuckWatchdog.tick(this, spawnPos);
     }
 
     @Override
@@ -127,6 +122,7 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
         super.addAdditionalSaveData(output);
         output.storeNullable("SettlementCoreId", UUIDUtil.CODEC, settlementCoreId);
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
+        output.storeNullable("SpawnPos", net.minecraft.core.BlockPos.CODEC, spawnPos);
     }
 
     @Override
@@ -134,5 +130,6 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
         super.readAdditionalSaveData(input);
         settlementCoreId = input.read("SettlementCoreId", UUIDUtil.CODEC).orElse(null);
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
+        spawnPos = input.read("SpawnPos", net.minecraft.core.BlockPos.CODEC).orElse(null);
     }
 }

@@ -71,6 +71,7 @@ public final class LumberjackSpawnTicker {
 
         LumberjackWorkerEntity worker = new LumberjackWorkerEntity(ModEntities.LUMBERJACK_WORKER.get(), level);
         worker.setPos(signPos.getX() + 0.5, signPos.getY(), signPos.getZ() + 0.5);
+        worker.setSpawnPos(signPos);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
         level.addFreshEntity(worker);
         sign.setLumberjackWorkerId(worker.getUUID());
