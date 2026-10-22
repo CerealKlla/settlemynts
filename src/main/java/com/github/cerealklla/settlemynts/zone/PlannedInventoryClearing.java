@@ -105,6 +105,22 @@ public final class PlannedInventoryClearing {
             for (PlannedInventoryTarget target : p.plot().plannedInventory()) {
                 resourceKeys.add(new ResourceKey(target.resourceKey(), target.isTag()));
             }
+            // Real report, 2026-10-22: "the shop keeps asking for String" (via its public Wishlist)
+            // even though another plot in the same settlement sells it. Root cause -- confirmed by
+            // reading both this method and ShopWishlist#computeDeficits, not guessed: a Wishlist
+            // material need (a sold item's own recipe components, see that class's doc) is purely a
+            // *display* computation and was never promoted into a real PlannedInventoryTarget, so it
+            // never entered this resourceKeys set at all -- this engine could never even attempt to
+            // trade for it, no matter how much surplus existed elsewhere in the settlement. A plot
+            // only ever gets a real material PlannedInventoryTarget if it's NPC-owned (auto-seeded by
+            // ShopSeeding at creation) or a player manually sets one -- neither is guaranteed for a
+            // player-owned shop's own crafting inputs. Folding the Wishlist's own already-correct,
+            // tier-gated, sold-item-gated deficit computation in here (not re-deriving it) means a
+            // craft-driven material need is now a real tradeable resource, same as settleResource's
+            // own matching buyer-detection fallback just below handles the quantity side of this.
+            for (ShopWishlist.DeficitEntry deficit : ShopWishlist.computeDeficits(level, p.plot())) {
+                deficit.resource().itemId().ifPresent(id -> resourceKeys.add(new ResourceKey(id, false)));
+            }
         }
 
         SettlemyntsMod.LOGGER.info(
@@ -369,7 +385,7 @@ public final class PlannedInventoryClearing {
         List<Seller> sellers = new ArrayList<>();
 
         for (Participant p : participants) {
-            PlannedInventoryTarget target = findTarget(p.plot(), key);
+            PlannedInventoryTarget target = resolveEffectiveTarget(level, p, key);
             int currentStock = ContainerWithdraw.countAvailable(p.boxes(), resource);
             if (target != null && currentStock < target.targetCount()) {
                 buyers.add(new Buyer(p, target.targetCount() - currentStock));
@@ -519,6 +535,40 @@ public final class PlannedInventoryClearing {
         return null;
     }
 
+    /**
+     * {@link #findTarget}, falling back to a synthetic target derived from {@link
+     * ShopWishlist#computeDeficits} when no literal {@link PlannedInventoryTarget} exists at all --
+     * real report, 2026-10-22: "the shop keeps asking for String" (via its public Wishlist) even
+     * though another plot in the same settlement sells it, and Wheat could be turned into it besides.
+     * Root cause, confirmed by reading both this class and {@code ShopWishlist} (not guessed): a
+     * Wishlist material need (a sold item's own recipe components) was purely a *display*
+     * computation, never promoted into a real target -- so {@code settleGroup}'s own resourceKeys
+     * set never even considered it, and both buyer-detection sites below (the plain and the
+     * recursive-craftable path) required a literal target just to register a buyer at all. A plot
+     * only ever gets a real material target automatically if it's NPC-owned (auto-seeded by {@code
+     * ShopSeeding} at creation); a player-owned shop's own crafting inputs need one set manually on
+     * {@code client.PlannedInventoryScreen} -- which most players, reasonably, never think to do for
+     * an input they only need indirectly. The synthetic target's {@code targetCount} is set to
+     * exactly {@code currentStock + shortfall}, so every existing deficit/stock comparison downstream
+     * behaves identically to a real one, recomputed fresh every pass (never persisted) exactly like
+     * the Wishlist itself already is.
+     */
+    private static PlannedInventoryTarget resolveEffectiveTarget(ServerLevel level, Participant p, ResourceKey key) {
+        PlannedInventoryTarget target = findTarget(p.plot(), key);
+        if (target != null) {
+            return target;
+        }
+        int shortfall = ShopWishlist.computeDeficits(level, p.plot()).stream()
+                .filter(d -> d.resource().itemId().isPresent() && d.resource().itemId().get().equals(key.id()))
+                .mapToInt(ShopWishlist.DeficitEntry::quantityNeeded)
+                .findFirst().orElse(0);
+        if (shortfall <= 0) {
+            return null;
+        }
+        int currentStock = ContainerWithdraw.countAvailable(p.boxes(), key.toShopResource());
+        return new PlannedInventoryTarget(key.id(), key.isTag(), currentStock + shortfall);
+    }
+
     private static int sellPriceFor(ServerLevel level, UUID shopId, ShopResource resource) {
         for (YconomicsShopBridge.ShopListingView view : YconomicsShopBridge.getListings(level, shopId)) {
             if (sameResource(view.resource(), resource)) {
@@ -553,7 +603,7 @@ public final class PlannedInventoryClearing {
      */
     private static void enqueueCraftableResource(ServerLevel level, List<Participant> participants, ResourceKey key, MidnightWorkQueue queue) {
         for (Participant buyer : participants) {
-            PlannedInventoryTarget target = findTarget(buyer.plot(), key);
+            PlannedInventoryTarget target = resolveEffectiveTarget(level, buyer, key);
             if (target == null) {
                 continue;
             }

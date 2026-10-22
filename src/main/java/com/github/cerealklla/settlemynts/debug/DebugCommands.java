@@ -13,17 +13,21 @@ import com.github.cerealklla.cartographyr.api.Cartography;
 import com.github.cerealklla.cartographyr.geo.EntityId;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
+import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.YconomicsBillBridge;
+import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.roadway.HighwayConnectionMarkerEntity;
 import com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity;
 import com.github.cerealklla.settlemynts.roadway.HighwayStakeGraph;
+import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
 import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
 import com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore;
 import com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 import com.github.cerealklla.settlemynts.zone.SettlementKey;
+import com.github.cerealklla.settlemynts.zone.ShopResource;
 
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -77,6 +81,9 @@ public final class DebugCommands {
                 .requires(source -> true) // deliberately no permission gate -- see class doc
                 .then(Commands.literal("plotinfo")
                         .executes(ctx -> plotInfo(ctx.getSource())))
+                .then(Commands.literal("checkavailable")
+                        .then(Commands.argument("itemId", StringArgumentType.string())
+                                .executes(ctx -> checkAvailable(ctx.getSource(), StringArgumentType.getString(ctx, "itemId")))))
                 .then(Commands.literal("naturalvillagers")
                         .executes(ctx -> naturalVillagers(ctx.getSource())))
                 .then(Commands.literal("resyncprotection")
@@ -734,5 +741,70 @@ public final class DebugCommands {
             source.sendSuccess(() -> Component.literal(line), false);
         }
         return 1;
+    }
+
+    /**
+     * {@code /settlemynts checkavailable <itemId>} -- added 2026-10-22, explicit user request while
+     * chasing the real "shop keeps asking for String" bug (see {@code zone.PlannedInventoryClearing}'s
+     * own doc for the actual fix). "Available" here means "sellable right now" -- a real Shop listing
+     * for this item exists on some plot in the settlement the player is standing in, AND that plot's
+     * own boxes currently hold at least 1 unit of it -- a listing with zero stock doesn't count, same
+     * distinction {@code ShopWishlist}/{@code PlannedInventoryClearing} already draw everywhere else.
+     * Same settlement-resolution (nearest loaded Town Hall Core) as {@link #plotInfo}.
+     */
+    private static int checkAvailable(CommandSourceStack source, String itemIdRaw) {
+        if (!(source.getEntity() instanceof net.minecraft.world.entity.player.Player player) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world."));
+            return 0;
+        }
+        Identifier itemId = Identifier.tryParse(itemIdRaw);
+        if (itemId == null || !BuiltInRegistries.ITEM.containsKey(itemId)) {
+            source.sendFailure(Component.literal("Not a valid item id: " + itemIdRaw));
+            return 0;
+        }
+
+        AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+        List<GhostTownHallCoreEntity> cores = level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, c -> true);
+        GhostTownHallCoreEntity nearest = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (GhostTownHallCoreEntity core : cores) {
+            double distSq = core.distanceToSqr(player);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                nearest = core;
+            }
+        }
+        if (nearest == null) {
+            source.sendFailure(Component.literal("No loaded Town Hall Core found."));
+            return 0;
+        }
+
+        ShopResource resource = ShopResource.ofItem(itemId);
+        PlotRecord sellingPlot = null;
+        for (PlotRecord plot : nearest.getPlots()) {
+            if (plot.shopId().isEmpty()) {
+                continue;
+            }
+            boolean listed = YconomicsShopBridge.getListings(level, plot.shopId().get()).stream()
+                    .anyMatch(listing -> listing.resource().matches(new net.minecraft.world.item.ItemStack(BuiltInRegistries.ITEM.getValue(itemId))));
+            if (!listed) {
+                continue;
+            }
+            int stock = ContainerWithdraw.countAvailable(Settlemynts.resolvePlotBoxes(level, plot.plotId()), resource);
+            if (stock > 0) {
+                sellingPlot = plot;
+                break;
+            }
+        }
+
+        boolean available = sellingPlot != null;
+        if (available) {
+            PlotRecord finalPlot = sellingPlot;
+            source.sendSuccess(() -> Component.literal("true (listed and in stock at \"" + finalPlot.name() + "\")"), false);
+        } else {
+            source.sendSuccess(() -> Component.literal("false"), false);
+        }
+        return available ? 1 : 0;
     }
 }
