@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.zone;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -101,6 +102,18 @@ public final class PlannedInventoryClearing {
         }
 
         Set<ResourceKey> resourceKeys = new LinkedHashSet<>();
+        // Computed exactly ONCE per plot here, never again for the rest of this pass -- real
+        // production crash, 2026-10-22 (watchdog: "A single server tick took 60.01 seconds"). The
+        // first version of this Wishlist-fallback fix called ShopWishlist#computeDeficits fresh from
+        // inside resolveEffectiveTarget, which is itself called once per (participant, resourceKey)
+        // pair across settleResource/enqueueCraftableResource -- and computeDeficits does its own
+        // expensive Settlemynts#resolvePlotBoxes/findPolygonForPlot call (a real level entity-section
+        // scan, confirmed via the crash report's own stack trace), turning what should be a cheap
+        // lookup into a combinatorial blowup across every resource times every participant. Fixed by
+        // computing each participant's deficits once, right here (reusing the same result this
+        // method's own resourceKeys-gathering loop already needed anyway), and threading the finished
+        // map through instead of ever calling computeDeficits again for the rest of the pass.
+        Map<UUID, List<ShopWishlist.DeficitEntry>> wishlistDeficits = new HashMap<>();
         for (Participant p : participants) {
             for (PlannedInventoryTarget target : p.plot().plannedInventory()) {
                 resourceKeys.add(new ResourceKey(target.resourceKey(), target.isTag()));
@@ -118,7 +131,9 @@ public final class PlannedInventoryClearing {
             // tier-gated, sold-item-gated deficit computation in here (not re-deriving it) means a
             // craft-driven material need is now a real tradeable resource, same as settleResource's
             // own matching buyer-detection fallback just below handles the quantity side of this.
-            for (ShopWishlist.DeficitEntry deficit : ShopWishlist.computeDeficits(level, p.plot())) {
+            List<ShopWishlist.DeficitEntry> deficits = ShopWishlist.computeDeficits(level, p.plot());
+            wishlistDeficits.put(p.plot().plotId(), deficits);
+            for (ShopWishlist.DeficitEntry deficit : deficits) {
                 deficit.resource().itemId().ifPresent(id -> resourceKeys.add(new ResourceKey(id, false)));
             }
         }
@@ -128,7 +143,7 @@ public final class PlannedInventoryClearing {
                 participants.size(), resourceKeys.size());
         long start = System.nanoTime();
         for (ResourceKey key : resourceKeys) {
-            queue.enqueue(() -> settleResource(level, participants, key, queue));
+            queue.enqueue(() -> settleResource(level, participants, key, wishlistDeficits, queue));
         }
         queue.enqueue(() -> {
             double ms = (System.nanoTime() - start) / 1_000_000.0;
@@ -372,11 +387,12 @@ public final class PlannedInventoryClearing {
         return all.isEmpty() ? Optional.empty() : Optional.of(all.get(0));
     }
 
-    private static void settleResource(ServerLevel level, List<Participant> participants, ResourceKey key, MidnightWorkQueue queue) {
+    private static void settleResource(ServerLevel level, List<Participant> participants, ResourceKey key,
+                                        Map<UUID, List<ShopWishlist.DeficitEntry>> wishlistDeficits, MidnightWorkQueue queue) {
         if (!key.isTag()) {
             Optional<LyfeCraftingBridge.RecipeInfo> recipe = resolveRecipe(level, key.id());
             if (recipe.isPresent()) {
-                enqueueCraftableResource(level, participants, key, queue);
+                enqueueCraftableResource(level, participants, key, wishlistDeficits, queue);
                 return;
             }
         }
@@ -385,7 +401,7 @@ public final class PlannedInventoryClearing {
         List<Seller> sellers = new ArrayList<>();
 
         for (Participant p : participants) {
-            PlannedInventoryTarget target = resolveEffectiveTarget(level, p, key);
+            PlannedInventoryTarget target = resolveEffectiveTarget(p, key, wishlistDeficits);
             int currentStock = ContainerWithdraw.countAvailable(p.boxes(), resource);
             if (target != null && currentStock < target.targetCount()) {
                 buyers.add(new Buyer(p, target.targetCount() - currentStock));
@@ -552,13 +568,21 @@ public final class PlannedInventoryClearing {
      * exactly {@code currentStock + shortfall}, so every existing deficit/stock comparison downstream
      * behaves identically to a real one, recomputed fresh every pass (never persisted) exactly like
      * the Wishlist itself already is.
+     *
+     * <p><b>Takes the already-computed {@code wishlistDeficits} map, never calls {@link
+     * ShopWishlist#computeDeficits} itself</b> -- real production crash, 2026-10-22, see {@link
+     * #settleGroup}'s own doc for the full incident. This method runs once per (participant,
+     * resourceKey) pair across a whole settlement pass; computeDeficits does its own expensive
+     * level/entity-section scan to resolve a plot's boxes, so calling it from here directly turned a
+     * cheap lookup into a combinatorial, tick-blocking cost.
      */
-    private static PlannedInventoryTarget resolveEffectiveTarget(ServerLevel level, Participant p, ResourceKey key) {
+    private static PlannedInventoryTarget resolveEffectiveTarget(Participant p, ResourceKey key,
+                                                                   Map<UUID, List<ShopWishlist.DeficitEntry>> wishlistDeficits) {
         PlannedInventoryTarget target = findTarget(p.plot(), key);
         if (target != null) {
             return target;
         }
-        int shortfall = ShopWishlist.computeDeficits(level, p.plot()).stream()
+        int shortfall = wishlistDeficits.getOrDefault(p.plot().plotId(), List.of()).stream()
                 .filter(d -> d.resource().itemId().isPresent() && d.resource().itemId().get().equals(key.id()))
                 .mapToInt(ShopWishlist.DeficitEntry::quantityNeeded)
                 .findFirst().orElse(0);
@@ -601,9 +625,10 @@ public final class PlannedInventoryClearing {
      * resolution -- the real atomic unit of expensive work -- so even a settlement's worst-case
      * deficit spreads across as many ticks as it takes rather than piling into a single one.
      */
-    private static void enqueueCraftableResource(ServerLevel level, List<Participant> participants, ResourceKey key, MidnightWorkQueue queue) {
+    private static void enqueueCraftableResource(ServerLevel level, List<Participant> participants, ResourceKey key,
+                                                  Map<UUID, List<ShopWishlist.DeficitEntry>> wishlistDeficits, MidnightWorkQueue queue) {
         for (Participant buyer : participants) {
-            PlannedInventoryTarget target = resolveEffectiveTarget(level, buyer, key);
+            PlannedInventoryTarget target = resolveEffectiveTarget(buyer, key, wishlistDeficits);
             if (target == null) {
                 continue;
             }
@@ -661,7 +686,7 @@ public final class PlannedInventoryClearing {
         // alternate count rather than staying bounded by the number of distinct resources involved.
         // Fresh per real unit-fulfillment attempt (costs can legitimately change between attempts as
         // stock/participants shift), threaded down through the whole recursive search below.
-        Map<ResourceKey, Long> costMemo = new java.util.HashMap<>();
+        Map<ResourceKey, Long> costMemo = new HashMap<>();
         Optional<CraftOption> craftOption = key.isTag() ? Optional.empty()
                 : cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting, costMemo);
 
@@ -900,7 +925,7 @@ public final class PlannedInventoryClearing {
     private static Identifier cheapestGroupMember(ServerLevel level, List<Participant> participants, Participant buyer,
                                                     List<Identifier> members, PlotCraftingCapability capability, Set<Identifier> visiting) {
         // Fresh per call, same reasoning as fulfillOneUnit's own costMemo -- see that method's doc.
-        Map<ResourceKey, Long> costMemo = new java.util.HashMap<>();
+        Map<ResourceKey, Long> costMemo = new HashMap<>();
         Identifier best = null;
         long bestCost = -1;
         for (Identifier member : members) {
