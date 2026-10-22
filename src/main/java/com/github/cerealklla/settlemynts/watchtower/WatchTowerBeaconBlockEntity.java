@@ -305,17 +305,27 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
             litTimeRemaining--;
         }
 
-        int builtTier = resolveBuiltTier(level);
-        if (litTimeRemaining <= 0 && manuallyEnabled && builtTier > 0) {
-            if (countFuel() <= 0) {
-                pullFuelFromPlot(level);
-            }
-            if (countFuel() > 0) {
-                int required = WatchTowerConstants.fuelCostForTier(builtTier);
-                int burnTicks = Math.max(1, WatchTowerConstants.MINUTE_TICKS / required);
-                consumeFuel(1);
-                litTimeRemaining = burnTicks;
-                litTotalTime = burnTicks;
+        // Real production incident, 2026-10-22: this used to call resolveBuiltTier(level)
+        // unconditionally every tick -- it bottoms out in Blueprynts#getConstructionBoxTier, a live
+        // level.getBlockEntity(boxPos) read, not a flat index. That's fine once a minute (the old
+        // cadence), but every tick for every Beacon caused an 8 TPS server-wide stall from the moment
+        // the fix shipped -- confirmed via "neoforge tps" (8.1 TPS) and the fact that every slow tick
+        // was unaccounted for in TickProfiler's own named categories (this code was never wrapped in
+        // one). Only resolve it when actually dark and enabled -- once lit, this is skipped entirely
+        // until the next time fuel runs out, same cadence the pre-regression code had.
+        if (litTimeRemaining <= 0 && manuallyEnabled) {
+            int builtTier = resolveBuiltTier(level);
+            if (builtTier > 0) {
+                if (countFuel() <= 0) {
+                    pullFuelFromPlot(level);
+                }
+                if (countFuel() > 0) {
+                    int required = WatchTowerConstants.fuelCostForTier(builtTier);
+                    int burnTicks = Math.max(1, WatchTowerConstants.MINUTE_TICKS / required);
+                    consumeFuel(1);
+                    litTimeRemaining = burnTicks;
+                    litTotalTime = burnTicks;
+                }
             }
         }
 
