@@ -82,9 +82,9 @@ public class WatchTowerBeaconMenu extends AbstractContainerMenu {
         return canManage;
     }
 
-    /** Real report, 2026-10-22: "nothing I'm doing is lighting the tower" -- the burn check needs
-     * this much Coal/Charcoal in the slot at once (10 + builtTier*10), with no indication anywhere
-     * of the actual number; 0 if nothing's built yet. Resolved server-side, shown by the Screen. */
+    /** The plot's own Coal/Charcoal-per-minute burn rate (10 + builtTier*10) -- burned one piece at
+     * a time (see {@code WatchTowerBeaconBlockEntity#serverTick}), this is just the number shown on
+     * the Screen; 0 if nothing's built yet. */
     public int requiredFuel() {
         return requiredFuel;
     }

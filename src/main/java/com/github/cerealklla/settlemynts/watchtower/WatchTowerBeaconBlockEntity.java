@@ -44,12 +44,16 @@ import net.neoforged.neoforge.common.extensions.IMenuProviderExtension;
  * flame-progress bar -- {@code litTimeRemaining > 0} is also literally "is the doubling bonus
  * currently active," no separate flag needed.
  *
- * <p>Burn model is a custom flat rate, NOT vanilla's per-item {@code litTime}: once a real minute
- * ({@link WatchTowerConstants#MINUTE_TICKS}), if {@link #manuallyEnabled} and the fuel slot holds
- * at least {@link WatchTowerConstants#fuelCostForTier} worth of Coal/Charcoal for the plot's own
- * built-structure Tier, consume exactly that much and relight for the next minute; otherwise the
- * bonus goes dark. The base (un-doubled) radius is always free, scaled by the same Tier -- see
- * {@link WatchTowerLightController#recompute}, called from the same once-a-minute check.
+ * <p>Burn model mirrors vanilla's own {@code AbstractFurnaceBlockEntity} exactly (real correction,
+ * 2026-10-22, second round -- the original once-a-minute lump-sum design is gone): every tick, if
+ * dark and {@link #manuallyEnabled} and the fuel slot holds any Coal/Charcoal for a built plot,
+ * burn exactly one piece for {@code MINUTE_TICKS / fuelCostForTier(tier)} ticks -- long enough that
+ * burning that many pieces back to back adds up to one real minute lit, so the per-tier number
+ * stays a true "coal per minute" rate, just paid out incrementally instead of up front. Reacts the
+ * same tick fuel is deposited or the toggle flips on (there is no separate poll/cadence -- this is
+ * the ordinary per-tick {@code serverTick}, same as a furnace's own). The base (un-doubled) radius
+ * is always free, scaled by the same Tier -- see {@link WatchTowerLightController#recompute},
+ * called only when the lit/dark state actually flips.
  */
 public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProvider, IMenuProviderExtension {
 
@@ -212,39 +216,26 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
             }
             return; // Nothing else to do until this Beacon knows which plot it's standing on.
         }
-        if (litTimeRemaining > 0) {
+        boolean wasLit = litTimeRemaining > 0;
+        if (wasLit) {
             litTimeRemaining--;
         }
-        tickCounter++;
-        if (tickCounter < WatchTowerConstants.MINUTE_TICKS) {
-            return;
-        }
-        tickCounter = 0;
 
         int builtTier = resolveBuiltTier(level);
-        boolean becameLit = false;
-        if (manuallyEnabled && builtTier > 0) {
-            // Real correction, 2026-10-22: "it burns at that rate [10+Tier*10/min], no it shouldn't
-            // require that many to turn on the light" -- the rate itself is still the real spec
-            // (design doc: "10 + Tier*10 coal per minute"), but it's no longer an all-or-nothing
-            // threshold gating ignition entirely. Burns whatever's actually available, capped at the
-            // full per-minute rate -- any nonzero amount still lights the bonus for the full minute.
+        if (litTimeRemaining <= 0 && manuallyEnabled && builtTier > 0 && countFuel() > 0) {
             int required = WatchTowerConstants.fuelCostForTier(builtTier);
-            int toBurn = Math.min(countFuel(), required);
-            if (toBurn > 0) {
-                consumeFuel(toBurn);
-                litTimeRemaining = WatchTowerConstants.MINUTE_TICKS;
-                litTotalTime = WatchTowerConstants.MINUTE_TICKS;
-                becameLit = true;
-            }
-        }
-        if (!becameLit) {
-            litTimeRemaining = 0;
+            int burnTicks = Math.max(1, WatchTowerConstants.MINUTE_TICKS / required);
+            consumeFuel(1);
+            litTimeRemaining = burnTicks;
+            litTotalTime = burnTicks;
         }
 
-        int baseRadius = WatchTowerConstants.baseRadiusForTier(builtTier);
-        int radius = becameLit ? baseRadius * 2 : baseRadius;
-        WatchTowerLightController.recompute(level, this, radius);
+        boolean nowLit = litTimeRemaining > 0;
+        if (nowLit != wasLit) {
+            int baseRadius = WatchTowerConstants.baseRadiusForTier(builtTier);
+            int radius = nowLit ? baseRadius * 2 : baseRadius;
+            WatchTowerLightController.recompute(level, this, radius);
+        }
         setChanged();
     }
 
@@ -256,10 +247,6 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
     @Override
     public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
         boolean canManage = canManage(player);
-        // Real report, 2026-10-22: "nothing I'm doing is lighting the tower" -- turned out to just be
-        // not enough fuel (the burn check needs the FULL per-minute amount up front, 10 + Tier*10,
-        // minimum 20 even at Tier 1), with zero indication anywhere of what that number actually is.
-        // Resolved here and shipped down so the screen can finally show it.
         int builtTier = level instanceof ServerLevel serverLevel ? resolveBuiltTier(serverLevel) : 0;
         int requiredFuel = builtTier > 0 ? WatchTowerConstants.fuelCostForTier(builtTier) : 0;
         return new WatchTowerBeaconMenu(ModMenus.WATCH_TOWER_BEACON.get(), containerId, inventory, fuelContainer,

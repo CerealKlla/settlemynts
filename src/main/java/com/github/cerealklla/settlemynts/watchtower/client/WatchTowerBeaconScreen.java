@@ -86,11 +86,11 @@ public class WatchTowerBeaconScreen extends AbstractContainerScreen<WatchTowerBe
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
         int centerX = this.leftPos + this.imageWidth / 2;
         boolean lit = menu.litTimeRemaining() > 0;
-        // Real correction, 2026-10-22: any nonzero fuel now lights the bonus (see
-        // WatchTowerBeaconBlockEntity#serverTick's own doc) -- the per-tier number is a burn-rate
-        // cap, not a minimum threshold, so the wording here must say "up to", not "needs".
+        // Real correction, 2026-10-22 (second round): burns one piece of Coal/Charcoal at a time now,
+        // exactly like a vanilla furnace (see WatchTowerBeaconBlockEntity#serverTick's own doc) --
+        // the per-tier number is just the resulting average rate, not a per-ignition requirement.
         String label = lit ? "Burning" : (menu.requiredFuel() > 0
-                ? "Unlit (burns up to " + menu.requiredFuel() + " Coal/min)"
+                ? "Unlit (burns " + menu.requiredFuel() + " Coal/min)"
                 : "Unlit (nothing built yet)");
         graphics.text(font, label, centerX - font.width(label) / 2, this.topPos + STATUS_LABEL_Y, 0xFFFFFFFF);
 
