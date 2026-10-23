@@ -53,9 +53,9 @@ import net.minecraft.world.phys.AABB;
  * consequence of visibility becoming a shared field instead of a per-viewer decision, not
  * overlooked.
  *
- * <p>Any player who pings within {@link #PING_RANGE_BLOCKS} also gets/refreshes the "Traveler"
- * movement-speed buff, amplifier = (this marker's own road tier - 1), read directly off the real
- * {@link TieredRoadwayBlock} sitting just beneath the marker.
+ * <p>Any player who pings within {@link #TRAVELER_PING_RANGE_BLOCKS} also gets/refreshes the
+ * "Traveler" movement-speed buff, amplifier = (this marker's own road tier - 1), read directly off
+ * the real {@link TieredRoadwayBlock} sitting just beneath the marker.
  *
  * <p><b>Permanent, not regenerated-and-discarded like before</b> -- {@code setInvulnerable(true)}
  * at creation, real persistence (not {@code .noSave()}), and the same "only automatically removed
@@ -67,7 +67,8 @@ public class RoadwayConnectionMarkerEntity extends Display.BlockDisplay implemen
 
     private static final double SEARCH_RADIUS_BLOCKS = 500.0;
     private static final int MARKER_SPACING_BLOCKS = 4;
-    private static final int PING_RANGE_BLOCKS = 15;
+    private static final int TRAVELER_PING_RANGE_BLOCKS = 2; // Explicit spec: within 2 blocks of the marker.
+    private static final int TOOL_LIGHT_RANGE_BLOCKS = 15;
     private static final long TRAVELER_PING_COOLDOWN_TICKS = 50L; // 2.5 seconds.
     private static final int TRAVELER_BUFF_DURATION_TICKS = 20; // 1 second, explicit spec.
     private static final long LIT_GRACE_TICKS = 40L; // 2 seconds after the last tool-holder ping.
@@ -155,7 +156,7 @@ public class RoadwayConnectionMarkerEntity extends Display.BlockDisplay implemen
         }
         ServerPlayer player = ping.player();
 
-        if (ping.distanceToPlayer() <= PING_RANGE_BLOCKS) {
+        if (ping.distanceToPlayer() <= TRAVELER_PING_RANGE_BLOCKS) {
             long now = level.getGameTime();
             if (travelerCooldown.isReady(player.getUUID(), now, TRAVELER_PING_COOLDOWN_TICKS)) {
                 travelerCooldown.markHandled(player.getUUID(), now);
@@ -167,7 +168,7 @@ public class RoadwayConnectionMarkerEntity extends Display.BlockDisplay implemen
         ItemStack held = player.getMainHandItem();
         boolean holdingMatchingTool = held.is(ModItems.ROADWAY_STAKE.get())
                 && ownerCoreId.equals(held.get(ModItems.ROADWAY_STAKE_OWNER_CORE_ID));
-        if (holdingMatchingTool && ping.distanceToPlayer() <= PING_RANGE_BLOCKS) {
+        if (holdingMatchingTool && ping.distanceToPlayer() <= TOOL_LIGHT_RANGE_BLOCKS) {
             litUntilGameTime = level.getGameTime() + LIT_GRACE_TICKS;
         }
     }
