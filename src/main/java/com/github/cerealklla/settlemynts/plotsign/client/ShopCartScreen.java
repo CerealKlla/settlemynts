@@ -1,22 +1,30 @@
 package com.github.cerealklla.settlemynts.plotsign.client;
 
+import com.github.cerealklla.nuclyus.menu.client.NuclyusContainerScreen;
 import com.github.cerealklla.settlemynts.plotsign.ShopCartMenu;
 import com.github.cerealklla.settlemynts.plotsign.ShopListingEntry;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 
 /**
  * The redesigned real Shop screen (2026-10-20), replacing the earlier button-list {@code ShopScreen}
  * shipped hours earlier the same day -- see {@link ShopCartMenu}'s own doc for the actual four-lane
- * container design this just renders. A real {@link AbstractContainerScreen}, so vanilla's own
+ * container design this just renders. A real {@link NuclyusContainerScreen}, so vanilla's own
  * generic slot rendering/click/drag/tooltip handling does almost everything; this class only draws
  * the flat background panel, column headers, per-row price/stock text next to the Shop column, the
  * two gold totals, the "Confirm Purchase" button, and (2026-10-20) the Shop column's scroll controls.
+ *
+ * <p><b>Moved onto Nuclyus's shared tab-bar chrome, 2026-10-24</b> (explicit request: "move this into
+ * the unified GUI") -- was a plain {@code AbstractContainerScreen}; now carries the same tab-bar
+ * strip every other unified screen in the suite (K menu, Plot Config Sign) already shows, via the new
+ * {@code NuclyusContainerScreen} base (see that class's own doc for why a real container screen needs
+ * its own base rather than reusing {@code NuclyusMenuScreen} directly). Nothing else about this class
+ * changed -- the base shifts {@code topPos} down to make room for the bar, which every position this
+ * class computes already derives from {@code topPos}/{@code leftPos}.
  *
  * <p><b>Fixed window height + real scrolling, 2026-10-20</b> -- real report against the first cut:
  * "need to fix the scaling, and definitely need the ability to scroll through shop items." The
@@ -29,7 +37,7 @@ import net.minecraft.world.entity.player.Inventory;
  * on which window is showing (see {@link ShopCartMenu}'s own doc for why), so this screen only ever
  * reads the current window back via {@link ShopCartMenu#scrollOffset()}, never computes it locally.
  */
-public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
+public class ShopCartScreen extends NuclyusContainerScreen<ShopCartMenu> {
 
     private static final int BACKGROUND_COLOR = 0xC0101010;
     private static final int TOP_Y = 18;
@@ -44,7 +52,7 @@ public class ShopCartScreen extends AbstractContainerScreen<ShopCartMenu> {
     private static final int SCROLLBAR_X = BUY_X - 16;
 
     public ShopCartScreen(ShopCartMenu menu, Inventory inventory, Component title) {
-        super(menu, inventory, title, PLAYER_INV_X + 9 * 18 + 10,
+        super(menu, inventory, title, Component.literal("Shop"), PLAYER_INV_X + 9 * 18 + 10,
                 TOP_Y + ShopCartMenu.VISIBLE_SHOP_ROWS * ROW_HEIGHT + 56);
         this.inventoryLabelY = -1000; // Suppress vanilla's auto "Inventory" label -- see class doc, player inv has no separate panel here.
     }
