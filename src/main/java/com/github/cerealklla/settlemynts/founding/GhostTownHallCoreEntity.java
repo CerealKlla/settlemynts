@@ -330,6 +330,8 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
 
     // Not persisted -- just a one-time-per-load guard, see tick() below.
     private boolean bellMarkerVerified;
+    // Not persisted -- same shape as bellMarkerVerified, see tick() below.
+    private boolean coreIndexVerified;
 
     /**
      * Lazily backfills the Bell marker for a Core that was saved before 2026-10-05 (when it was
@@ -338,6 +340,20 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
      * existing world (including Production) picks up the new real block marker automatically
      * instead of silently rendering nothing once {@code GhostTownHallCoreRenderer} stopped drawing
      * the old icon.
+     *
+     * <p><b>Real live incident, 2026-10-22</b>: {@link SettlementCoreIndex} (added the same day for
+     * the midnight-processing force-load fix) is only ever written at {@link #create} and on
+     * relocation -- every settlement founded before the index existed had no entry at all, which
+     * went unnoticed until {@code api.Settlemynts#findPlotAt}/{@code #canManagePlotAt} were switched
+     * to read it instead of a full-world scan (see Settlemynts' own decisions.md): on live
+     * Production, the index was confirmed completely empty (`list<0>[0]`, read directly from the
+     * save file), silently breaking plot/permission resolution for every pre-existing settlement at
+     * once -- reported live as "the Manage button is missing" on every Construction Box, but the
+     * real blast radius is every caller of those two methods (Recallcinite Totem binding, the new
+     * Guard equip event listener, etc.). Backfilled here using the exact same self-healing shape as
+     * the Bell marker above, rather than a one-off migration command -- the index naturally becomes
+     * correct for the whole world as each settlement's own chunk next loads, which happens through
+     * ordinary play.
      */
     @Override
     public void tick() {
@@ -347,6 +363,10 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
             if (GhostTownHallBellEntity.findByOwnerCore(serverLevel, getUUID(), getX(), getZ()).isEmpty()) {
                 spawnBellMarker(serverLevel);
             }
+        }
+        if (!coreIndexVerified && level() instanceof ServerLevel serverLevel) {
+            coreIndexVerified = true;
+            SettlementCoreIndex.get(serverLevel.getServer()).put(getUUID(), net.minecraft.core.GlobalPos.of(serverLevel.dimension(), blockPosition()));
         }
     }
 
