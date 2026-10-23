@@ -16,11 +16,9 @@ import com.github.cerealklla.settlemynts.guardhouse.client.SelectKytScreen;
 import com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests;
 import com.github.cerealklla.settlemynts.plotsign.client.ClientProximityScanner;
 import com.github.cerealklla.settlemynts.plotsign.client.ClientShopPromptState;
-import com.github.cerealklla.settlemynts.plotsign.client.PlotConfigSignMenuScreen;
+import com.github.cerealklla.settlemynts.plotsign.client.PlotConfigScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.ShopCartScreen;
-import com.github.cerealklla.settlemynts.plotsign.client.PlotDetailsScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.NpcMenuScreen;
-import com.github.cerealklla.settlemynts.plotsign.client.PlotManagementScreen;
 import com.github.cerealklla.settlemynts.plotsign.client.ShopPromptOverlay;
 import com.github.cerealklla.settlemynts.plotsign.client.WishlistScreen;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
@@ -172,17 +170,7 @@ public class SettlemyntsModClient {
         });
         ClientPlotSignRequests.takePendingMenu().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(new PlotConfigSignMenuScreen(request));
-            }
-        });
-        ClientPlotSignRequests.takePendingPlotDetails().ifPresent(request -> {
-            if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(new PlotDetailsScreen(request));
-            }
-        });
-        ClientPlotSignRequests.takePendingPlotManagement().ifPresent(request -> {
-            if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(new PlotManagementScreen(request));
+                Minecraft.getInstance().setScreen(PlotConfigScreen.create(request));
             }
         });
         ClientFoundingRequests.takePendingDefenseSpendingScreen().ifPresent(request -> {
@@ -237,19 +225,10 @@ public class SettlemyntsModClient {
         });
 
         // Buy mode no longer reaches this at all, 2026-10-20 -- it opens a real ShopCartMenu via
-        // vanilla's own player.openMenu path now instead of sending OpenShopPayload (see that
-        // class's own doc), so this request is only ever manage=true in practice these days.
-        ClientPlotSignRequests.takePendingShop().ifPresent(request -> {
-            if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.ManageShopScreen(request));
-            }
-        });
-
-        ClientPlotSignRequests.takePendingPlannedInventory().ifPresent(request -> {
-            if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.PlannedInventoryScreen(request));
-            }
-        });
+        // vanilla's own player.openMenu path now instead of sending OpenShopPayload. Manage mode's
+        // OpenShopPayload is now consumed directly by plotsign.client.ShopTab (tabbed Plot Config
+        // Sign rework, 2026-10-23), not dispatched centrally here anymore -- same for
+        // OpenPlannedInventoryPayload, now owned by plotsign.client.PlannedInventoryTab.
 
         // Patches the currently-open cart menu's gold totals in place after a Buy/Sell (real report,
         // 2026-10-10, now against the real ShopCartMenu, 2026-10-20) -- checked against the player's

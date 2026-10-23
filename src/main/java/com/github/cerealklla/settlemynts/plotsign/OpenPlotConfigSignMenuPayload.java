@@ -38,10 +38,15 @@ import net.minecraft.resources.Identifier;
  * guardhouse.GuardhouseConstants#capacityForTier(tier) - plot.guardKitStandsIssued()} for a
  * Guardhouse-typed plot, {@code 0} otherwise. Gates/labels the new "Get Guard Kit Stands" button --
  * only shown when {@code > 0} (alongside the existing {@code canManage}/{@code hasGarrison} gate).
+ *
+ * <p>{@code isMineshaft} (added 2026-10-23, Mineshaft Specialization + tabbed Plot Config Sign
+ * rework) -- {@code true} only for a Mineshaft-typed plot ({@code
+ * zone.PlotWorkerKind#MINESHAFT_ZONE_TYPE_ID}). Gates the new "Specialization" (Ore/Stone) control
+ * inside {@code client.ConfigureTab}.
  */
 public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage, boolean hasGarrison, boolean isTownHall,
                                              boolean hasConstructionBox, int tier, int maxPlotTier, boolean canHireNpc,
-                                             int guardKitStandsAvailable) implements CustomPacketPayload {
+                                             int guardKitStandsAvailable, boolean isMineshaft) implements CustomPacketPayload {
 
     public static final Type<OpenPlotConfigSignMenuPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_plot_config_sign_menu"));
@@ -56,6 +61,7 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
             ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::maxPlotTier,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::canHireNpc,
             ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::guardKitStandsAvailable,
+            ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::isMineshaft,
             OpenPlotConfigSignMenuPayload::new);
 
     @Override

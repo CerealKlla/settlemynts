@@ -36,7 +36,9 @@ public final class PlotWorkerKind {
     // see FarmerWorkGoal/LumberjackWorkGoal's own doc).
     public static final Identifier FARM_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "farm");
     public static final Identifier LUMBERYARD_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "lumberyard");
-    private static final Identifier MINESHAFT_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "mineshaft");
+    // Widened to public 2026-10-23 so PlotConfigSignBlock can gate the new "Specialization" control
+    // (Configure Plot, Mineshaft only) without duplicating this identifier.
+    public static final Identifier MINESHAFT_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath("blueprynts", "mineshaft");
 
     private PlotWorkerKind() {
     }

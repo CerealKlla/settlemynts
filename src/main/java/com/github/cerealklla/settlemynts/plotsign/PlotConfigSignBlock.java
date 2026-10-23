@@ -78,12 +78,14 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
         int maxPlotTier = 5;
         boolean canHireNpc = false;
         int guardKitStandsAvailable = 0;
+        boolean isMineshaft = false;
         if (sign.settlementCoreId() != null && serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core) {
             PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
             if (plot != null) {
                 canManage = PlotPermissions.canManage(plot, core, serverPlayer.getUUID());
                 hasGarrison = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID);
                 isTownHall = plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID);
+                isMineshaft = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.MINESHAFT_ZONE_TYPE_ID);
                 hasConstructionBox = plot.constructionBoxId().isPresent();
                 tier = plot.tier();
                 maxPlotTier = isTownHall ? 5 : core.townHallPlot().map(PlotRecord::tier).orElse(5);
@@ -98,7 +100,7 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
                 }
             }
         }
-        PacketDistributor.sendToPlayer(serverPlayer, new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc, guardKitStandsAvailable));
+        PacketDistributor.sendToPlayer(serverPlayer, new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc, guardKitStandsAvailable, isMineshaft));
         return InteractionResult.SUCCESS_SERVER;
     }
 

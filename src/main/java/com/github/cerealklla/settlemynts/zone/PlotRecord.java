@@ -7,6 +7,8 @@ import java.util.UUID;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
 
+import com.github.cerealklla.settlemynts.mineshaft.MineSpecialization;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.resources.Identifier;
@@ -103,12 +105,21 @@ import net.minecraft.resources.Identifier;
  * record's own last remaining slot under Mojang's real 16-field {@code RecordCodecBuilder} arity
  * ceiling (see the note above on {@code hiredNpc}) -- a single {@code int} doesn't need a nested
  * sub-record workaround the way three fields did.
+ *
+ * <p>{@code misc} (added 2026-10-23, Mineshaft Specialization) -- {@code PlotRecord} was already at
+ * the 16-field ceiling with nothing left to shuffle, so the lone {@code tieredDefaultsAppliedTier}
+ * top-level field (only 2 real external call sites -- {@code zone.ShopSeeding}, {@code
+ * debug.DebugCommands}, both already using {@link #tieredDefaultsAppliedTier()}/{@link
+ * #withTieredDefaultsAppliedTier}, kept unchanged) was folded into this new {@link PlotMiscState}
+ * bucket alongside the new {@code mineSpecialization} field, freeing exactly one slot for the new
+ * field the same way {@code hiredNpc} did for its three. Any future one-off addition to {@code
+ * PlotRecord} should grow {@link PlotMiscState} the same way, not add another top-level field.
  */
 public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long cartographyrPlotEntityId,
                           long cartographyrBufferEntityId, Optional<BlockPos> boxPos, Optional<UUID> constructionBoxId,
                           Optional<UUID> owner, Optional<UUID> billId, Optional<UUID> shopId,
                           List<SuppressedShopResource> suppressedShopResources, int tier,
-                          List<PlannedInventoryTarget> plannedInventory, int tieredDefaultsAppliedTier,
+                          List<PlannedInventoryTarget> plannedInventory, PlotMiscState misc,
                           HiredNpcState hiredNpc, int guardKitStandsIssued) {
 
     public static final Codec<PlotRecord> CODEC = RecordCodecBuilder.create(i -> i.group(
@@ -125,10 +136,35 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
             SuppressedShopResource.CODEC.listOf().optionalFieldOf("suppressed_shop_resources", List.of()).forGetter(PlotRecord::suppressedShopResources),
             Codec.INT.optionalFieldOf("tier", 1).forGetter(PlotRecord::tier),
             PlannedInventoryTarget.CODEC.listOf().optionalFieldOf("planned_inventory", List.of()).forGetter(PlotRecord::plannedInventory),
-            Codec.INT.optionalFieldOf("tiered_defaults_applied_tier", 0).forGetter(PlotRecord::tieredDefaultsAppliedTier),
+            PlotMiscState.CODEC.optionalFieldOf("misc", PlotMiscState.NONE).forGetter(PlotRecord::misc),
             HiredNpcState.CODEC.optionalFieldOf("hired_npc", HiredNpcState.NONE).forGetter(PlotRecord::hiredNpc),
             Codec.INT.optionalFieldOf("guard_kit_stands_issued", 0).forGetter(PlotRecord::guardKitStandsIssued)
     ).apply(i, PlotRecord::new));
+
+    /**
+     * Generic one-off-field bucket (added 2026-10-23) -- see this record's own class doc on {@code
+     * misc} for why. {@code tieredDefaultsAppliedTier} moved here verbatim from its old top-level
+     * slot (see {@code zone.ShopSeeding}/{@code debug.DebugCommands} for its own meaning);
+     * {@code mineSpecialization} is this plot's Ore/Stone Mineshaft loot focus (ignored for any
+     * non-Mineshaft plot) -- see {@link MineSpecialization}'s own doc.
+     */
+    public record PlotMiscState(int tieredDefaultsAppliedTier, MineSpecialization mineSpecialization) {
+        public static final PlotMiscState NONE = new PlotMiscState(0, MineSpecialization.ORE);
+
+        public static final Codec<PlotMiscState> CODEC = RecordCodecBuilder.create(i -> i.group(
+                Codec.INT.optionalFieldOf("tiered_defaults_applied_tier", 0).forGetter(PlotMiscState::tieredDefaultsAppliedTier),
+                Codec.STRING.xmap(MineSpecialization::valueOf, MineSpecialization::name)
+                        .optionalFieldOf("mine_specialization", MineSpecialization.ORE).forGetter(PlotMiscState::mineSpecialization)
+        ).apply(i, PlotMiscState::new));
+
+        public PlotMiscState withTieredDefaultsAppliedTier(int tieredDefaultsAppliedTier) {
+            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization);
+        }
+
+        public PlotMiscState withMineSpecialization(MineSpecialization mineSpecialization) {
+            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization);
+        }
+    }
 
     /**
      * A player-owned plot's hired-NPC configuration (added 2026-10-15, explicit user request: "Hire
@@ -188,6 +224,16 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
         return hiredNpc.job();
     }
 
+    /** Pass-through onto {@link #misc}'s own {@link PlotMiscState#tieredDefaultsAppliedTier()} -- see this record's own class doc on why. */
+    public int tieredDefaultsAppliedTier() {
+        return misc.tieredDefaultsAppliedTier();
+    }
+
+    /** Pass-through onto {@link #misc}'s own {@link PlotMiscState#mineSpecialization()} -- see this record's own class doc on why, and {@link MineSpecialization} for what this controls. */
+    public MineSpecialization mineSpecialization() {
+        return misc.mineSpecialization();
+    }
+
     /**
      * Reassigns this plot's Owner after the fact (added 2026-10-17 for {@code debug.DebugCommands}'
      * admin-only {@code /settlemynts setplotowner} -- every other owner assignment only ever happens
@@ -197,44 +243,50 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
      */
     public PlotRecord withOwner(Optional<UUID> owner) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc, hiredNpc, guardKitStandsIssued);
     }
 
     /** Stamps in a freshly-registered Shop id -- see this record's own class doc on when this happens. */
     public PlotRecord withShopId(UUID shopId) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
+                boxPos, constructionBoxId, owner, billId, Optional.of(shopId), suppressedShopResources, tier, plannedInventory, misc, hiredNpc, guardKitStandsIssued);
     }
 
     /** Overwrites the full Shop Config suppression set -- see {@code SettlemyntsMod#setShopListings}, the only caller. */
     public PlotRecord withSuppressedShopResources(List<SuppressedShopResource> suppressedShopResources) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
+                boxPos, constructionBoxId, owner, billId, shopId, List.copyOf(suppressedShopResources), tier, plannedInventory, misc, hiredNpc, guardKitStandsIssued);
     }
 
     /** Raises (or sets) this plot's own unlocked construction-Tier cap -- see this record's own class doc. */
     public PlotRecord withTier(int tier) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc, hiredNpc, guardKitStandsIssued);
     }
 
     /** Overwrites the full Planned Inventory target set -- see {@code SettlemyntsMod#setPlannedInventory}, the only caller. */
     public PlotRecord withPlannedInventory(List<PlannedInventoryTarget> plannedInventory) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, List.copyOf(plannedInventory), tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, List.copyOf(plannedInventory), misc, hiredNpc, guardKitStandsIssued);
     }
 
     /** Marks {@code tier} as the highest Tier {@code zone.ShopSeeding#applyTieredDefaults} has seeded for -- see this record's own class doc. */
     public PlotRecord withTieredDefaultsAppliedTier(int tieredDefaultsAppliedTier) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc.withTieredDefaultsAppliedTier(tieredDefaultsAppliedTier), hiredNpc, guardKitStandsIssued);
+    }
+
+    /** "Specialization" (Configure Plot, Mineshaft only) -- switches this plot's Mineshaft loot focus between {@link MineSpecialization#ORE}/{@link MineSpecialization#STONE}. See {@link MineLootTable} and {@link MineSpecialization}'s own docs. */
+    public PlotRecord withMineSpecialization(MineSpecialization mineSpecialization) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc.withMineSpecialization(mineSpecialization), hiredNpc, guardKitStandsIssued);
     }
 
     /** Sets whether this plot currently has (or should have, through a funds-driven despawn) a hired
      *  NPC -- see this record's own class doc. */
     public PlotRecord withNpcHired(boolean npcHired) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc.withHired(npcHired), guardKitStandsIssued);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc, hiredNpc.withHired(npcHired), guardKitStandsIssued);
     }
 
     /** Records the real-day index of this plot's last successful NPC maintenance charge -- see this
@@ -242,14 +294,14 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
      *  manual "Hire NPC" click and that night's midnight tick). */
     public PlotRecord withNpcLastChargedDay(long npcLastChargedDay) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc.withLastChargedDay(npcLastChargedDay), guardKitStandsIssued);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc, hiredNpc.withLastChargedDay(npcLastChargedDay), guardKitStandsIssued);
     }
 
     /** "Change Job" -- overrides which worker kind this plot's hired NPC should be, independent of
      *  {@code zoneTypeId}. See this record's own class doc and {@link PlotWorkerKind}. */
     public PlotRecord withJob(PlotJob job) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc.withJob(job), guardKitStandsIssued);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc, hiredNpc.withJob(job), guardKitStandsIssued);
     }
 
     /** Adjusts how many Guard Kit Stands this plot has ever been issued -- see this record's own class
@@ -257,6 +309,6 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
      *  outside-plot removal check passes {@code -1} per stand permanently destroyed. */
     public PlotRecord withGuardKitStandsIssued(int guardKitStandsIssued) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
-                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, tieredDefaultsAppliedTier, hiredNpc, guardKitStandsIssued);
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc, hiredNpc, guardKitStandsIssued);
     }
 }

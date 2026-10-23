@@ -154,7 +154,11 @@ public class MinerWorkGoal extends Goal {
         }
 
         if (leg == Leg.OUTBOUND) {
-            pendingLoot = MineLootTable.rollLoot(worker.resolvePlotRecord(level).map(PlotRecord::tier).orElse(1), worker.getRandom())
+            Optional<PlotRecord> currentPlot = worker.resolvePlotRecord(level);
+            pendingLoot = MineLootTable.rollLoot(
+                            currentPlot.map(PlotRecord::tier).orElse(1),
+                            currentPlot.map(PlotRecord::mineSpecialization).orElse(MineSpecialization.ORE),
+                            worker.getRandom())
                     .orElse(ItemStack.EMPTY);
             leg = Leg.RETURN;
             pursueTicks = 0;

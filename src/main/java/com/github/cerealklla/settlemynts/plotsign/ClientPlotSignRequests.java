@@ -22,6 +22,7 @@ public final class ClientPlotSignRequests {
     private static final ClientRequestSlot<OpenShopWishlistPayload> WISHLIST = new ClientRequestSlot<>();
     private static final ClientRequestSlot<EstablishHighwayCandidatesPayload> ESTABLISH_HIGHWAY_MAP = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenNpcMenuPayload> NPC_MENU = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenConfigurePlotPayload> CONFIGURE_PLOT = new ClientRequestSlot<>();
 
     private ClientPlotSignRequests() {
     }
@@ -112,5 +113,13 @@ public final class ClientPlotSignRequests {
 
     public static Optional<OpenNpcMenuPayload> takePendingNpcMenu() {
         return NPC_MENU.takePending();
+    }
+
+    public static void requestConfigurePlot(OpenConfigurePlotPayload payload) {
+        CONFIGURE_PLOT.request(payload);
+    }
+
+    public static Optional<OpenConfigurePlotPayload> takePendingConfigurePlot() {
+        return CONFIGURE_PLOT.takePending();
     }
 }

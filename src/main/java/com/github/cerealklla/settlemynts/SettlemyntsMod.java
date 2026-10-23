@@ -477,6 +477,19 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.RelocatePlotSignPayload.STREAM_CODEC,
                 (payload, context) -> relocatePlotSign(payload, context));
 
+        // "Configure" tab + Mineshaft Specialization (tabbed Plot Config Sign rework, 2026-10-23).
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestConfigurePlotPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestConfigurePlotPayload.STREAM_CODEC,
+                (payload, context) -> requestConfigurePlot(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenConfigurePlotPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenConfigurePlotPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestConfigurePlot(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetMineSpecializationPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SetMineSpecializationPayload.STREAM_CODEC,
+                (payload, context) -> setMineSpecialization(payload, context));
+
         // Real Shop system (2026-10-05, replacing the old inert placeholder) -- see
         // bridge.YconomicsShopBridge and api.Settlemynts' Shop methods' own docs.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestShopPayload.TYPE,
@@ -2953,6 +2966,44 @@ public class SettlemyntsMod {
         }
     }
 
+    /** "Configure" tab opening -- fetches this plot's current Mineshaft Specialization (harmless/ignored for a non-Mineshaft plot). Read-only, no permission check needed. */
+    private static void requestConfigurePlot(com.github.cerealklla.settlemynts.plotsign.RequestConfigurePlotPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenConfigurePlotPayload(payload.signPos(), plot.mineSpecialization()));
+    }
+
+    /** "Specialization" Ore/Stone buttons on the "Configure" tab (2026-10-23, explicit user request) -- re-checks canManage and that this is actually a Mineshaft plot server-side. */
+    private static void setMineSpecialization(com.github.cerealklla.settlemynts.plotsign.SetMineSpecializationPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        if (!plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.MINESHAFT_ZONE_TYPE_ID)) {
+            player.sendSystemMessage(Component.literal("This plot isn't a Mineshaft."));
+            return;
+        }
+        resolved.get().core().updatePlot(plot.withMineSpecialization(payload.specialization()));
+        player.sendSystemMessage(Component.literal("Mineshaft Specialization set to " + payload.specialization().label() + "."));
+    }
+
     /**
      * "Relocate Plot Sign" (design doc Section 14a) -- mirrors {@code BluepryntsMod}'s own
      * "Reposition Supply Box" handler shape. Re-checks {@link
@@ -3269,7 +3320,7 @@ public class SettlemyntsMod {
                     Map.of(Identifier.withDefaultNamespace("gold_nugget"), 1), 1L));
         }
 
-        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1, java.util.List.of(), 0, PlotRecord.HiredNpcState.NONE, 0);
+        PlotRecord plotRecord = new PlotRecord(plotSessionId, payload.name(), zoneTypeId, plotEntity.id().value(), bufferEntity.id().value(), boxPos, constructionBoxId, owner, billId, Optional.empty(), java.util.List.of(), 1, java.util.List.of(), PlotRecord.PlotMiscState.NONE, PlotRecord.HiredNpcState.NONE, 0);
         core.addPlot(plotRecord);
 
         // Plot Config Sign (design doc Section 14a) -- spawned unconditionally, next to the same
