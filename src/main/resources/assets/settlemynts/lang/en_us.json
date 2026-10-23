@@ -14,5 +14,11 @@
   "entity.settlemynts.ghost_perimeter_stake": "Planned Perimeter Stake",
   "entity.settlemynts.ghost_boundary_wall": "Settlement Boundary",
   "entity.settlemynts.roadway_stake": "Roadway Stake",
-  "entity.settlemynts.highway_stake": "Highway Stake"
+  "entity.settlemynts.highway_stake": "Highway Stake",
+  "entity.settlemynts.guard": "Guard",
+  "entity.settlemynts.resident_villager": "Resident",
+  "entity.settlemynts.lumberjack_worker": "Lumberjack",
+  "entity.settlemynts.farmer_worker": "Farmer",
+  "entity.settlemynts.miner_worker": "Miner",
+  "entity.settlemynts.guard_kit_stand": "Guard Kit Stand"
 }
