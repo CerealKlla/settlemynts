@@ -67,7 +67,7 @@ public class RoadwayConnectionMarkerEntity extends Display.BlockDisplay implemen
 
     private static final double SEARCH_RADIUS_BLOCKS = 500.0;
     private static final int MARKER_SPACING_BLOCKS = 4;
-    private static final int TRAVELER_PING_RANGE_BLOCKS = 2; // Explicit spec: within 2 blocks of the marker.
+    private static final int TRAVELER_PING_RANGE_BLOCKS = 3; // Explicit spec: within 3 blocks of the marker (raised from 2, 2026-10-24).
     private static final int TOOL_LIGHT_RANGE_BLOCKS = 15;
     private static final long TRAVELER_PING_COOLDOWN_TICKS = 50L; // 2.5 seconds.
     private static final int TRAVELER_BUFF_DURATION_TICKS = 20; // 1 second, explicit spec.
