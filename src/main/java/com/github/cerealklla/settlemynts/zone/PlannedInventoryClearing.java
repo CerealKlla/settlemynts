@@ -469,6 +469,9 @@ public final class PlannedInventoryClearing {
                 if (net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
                     com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.notifyPlotBoxesChanged(level, buyer.participant().plot());
                 }
+                // Same trigger, for a Guard Kit Stand waiting on exactly this gear (2026-10-22, see
+                // GuardEquipBoxChangeListener's own "Correction, same day" doc) -- also a cheap no-op otherwise.
+                com.github.cerealklla.settlemynts.guardhouse.GuardEquipBoxChangeListener.notifyPlotBoxesChanged(level, buyer.participant().plot());
                 List<ItemStack> payment = ContainerWithdraw.drain(buyer.participant().boxes(), GOLD_NUGGETS, (int) split.totalCost());
                 for (ItemStack stack : payment) {
                     ContainerDeposit.depositIntoAny(seller.participant().boxes(), stack);
@@ -874,6 +877,7 @@ public final class PlannedInventoryClearing {
             if (net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
                 com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.notifyPlotBoxesChanged(level, buyer.plot());
             }
+            com.github.cerealklla.settlemynts.guardhouse.GuardEquipBoxChangeListener.notifyPlotBoxesChanged(level, buyer.plot());
             for (ItemStack stack : ContainerWithdraw.drain(buyer.boxes(), GOLD_NUGGETS, realPrice.get())) {
                 ContainerDeposit.depositIntoAny(seller.boxes(), stack);
             }

@@ -8,6 +8,7 @@ import java.util.UUID;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge;
+import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.GlobalPos;
 import net.minecraft.server.level.ServerLevel;
@@ -37,6 +38,15 @@ import net.neoforged.neoforge.event.entity.player.PlayerContainerEvent;
  * real container types a plot's own boxes are, see {@code zone.ContainerDeposit}'s own doc) so
  * closing one of this mod's own custom screens (Shop Cart, Guardhouse Food Stores, a Kyt editor,
  * etc. -- none of which are "a plot box") never triggers a spurious rescan.
+ *
+ * <p><b>Correction, same day</b>: the container-close trigger alone doesn't cover the actual spec
+ * -- "any time a guardhouse's inventory changes" (the original 2026-10-17 request this whole
+ * mechanic exists for) includes gear arriving via the midnight settlement-trading pass with no
+ * player ever touching a box at all. {@link #notifyPlotBoxesChanged} is the direct-call half of
+ * this fix, mirroring {@code bridge.BlueprintsConstructionBridge#notifyPlotBoxesChanged}'s own
+ * shape/naming exactly -- called straight from {@code zone.PlannedInventoryClearing}'s own delivery
+ * points, the same two spots that notifier and {@code watchtower.WatchTowerRefuelNotifier} already
+ * get called from for the identical reason.
  */
 public final class GuardEquipBoxChangeListener {
 
@@ -52,7 +62,16 @@ public final class GuardEquipBoxChangeListener {
                 .ifPresent(plot -> refreshGuardsOnPlot(level, plot.plotId(), plot.polygon()));
     }
 
-    private void refreshGuardsOnPlot(ServerLevel level, UUID plotId, Geometry.Polygon polygon) {
+    /** See this class's own "Correction, same day" doc -- cheap no-op unless this plot actually has a Guard Kit Stand waiting on exactly this delivery. */
+    public static void notifyPlotBoxesChanged(ServerLevel level, PlotRecord plot) {
+        if (!KytGuardhouseBridge.isLoaded()) {
+            return;
+        }
+        Settlemynts.resolvePolygonDirect(level, plot)
+                .ifPresent(polygon -> refreshGuardsOnPlot(level, plot.plotId(), polygon));
+    }
+
+    private static void refreshGuardsOnPlot(ServerLevel level, UUID plotId, Geometry.Polygon polygon) {
         List<Container> plotBoxes = Settlemynts.resolveBoxesForPolygon(level, polygon);
         for (Map.Entry<UUID, GlobalPos> entry : GuardKitStandIndex.get(level.getServer()).all().entrySet()) {
             GlobalPos pos = entry.getValue();
