@@ -21,8 +21,8 @@ import net.minecraft.network.chat.Component;
  * <p>Replaces the old flat {@code PlotConfigSignMenuScreen} ("Main Menu") -- every old top-level
  * button is now either folded into a tab's own content ({@link OverviewTab}: Plot Details/Hire NPC;
  * {@link UpgradeTab}: the old pop-up {@code UpgradePlotScreen}'s cost breakdown + funding buttons;
- * {@link ConfigureTab}: Relocate Plot Sign/Specialization; {@link ShopTab}: Enter/Manage Shop;
- * {@link PlannedInventoryTab}; {@link GarrisonTab}: Get Guard Kit Stands; {@link ManagementTab}:
+ * {@link ConfigureTab}: Relocate Plot Sign/Specialization; {@link ShopTab}: its own Shop/Manage
+ * Shop/Planned Inventory sub-tabs; {@link GarrisonTab}: Get Guard Kit Stands; {@link ManagementTab}:
  * Plot Management/Establish Highway) or still pops a real standalone sub-screen over the whole
  * tabbed host for an action that genuinely needs its own screen ({@code EstablishHighwayMapScreen},
  * the real {@code ShopCartMenu} container menu for buy-mode).
@@ -43,9 +43,6 @@ public final class PlotConfigScreen {
         }
         if (!data.hasGarrison() && !data.isTownHall()) {
             tabs.add(new ShopTab(data));
-            if (data.canManage()) {
-                tabs.add(new PlannedInventoryTab(data));
-            }
         }
         if (data.canManage() && data.hasGarrison()) {
             tabs.add(new GarrisonTab(data));

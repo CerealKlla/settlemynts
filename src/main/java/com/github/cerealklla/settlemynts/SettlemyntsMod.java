@@ -142,6 +142,7 @@ public class SettlemyntsMod {
         ModBlocks.ITEMS.register(modEventBus);
         ModBlockEntities.BLOCK_ENTITIES.register(modEventBus);
         com.github.cerealklla.settlemynts.registration.ModMenus.MENU_TYPES.register(modEventBus);
+        com.github.cerealklla.settlemynts.registration.ModMobEffects.MOB_EFFECTS.register(modEventBus);
 
         Cartography.registerLayer(new Layer(ZONE_LAYER_ID, "Zone", -1));
         // 2026-10-06 fix (real report: a creeper destroyed part of a building) -- this layer never
@@ -203,6 +204,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.PlotStakeTossGuard());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.roadway.RoadwayClearanceListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillagePlotListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.roadway.TravelerSpeedListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerationTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillageShopLinkTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalShopVaultProtectionListener());
@@ -1716,12 +1718,18 @@ public class SettlemyntsMod {
     /**
      * "Auto Sell" on the cart screen (2026-10-20, explicit user request) -- queues everything the
      * player is carrying that the shop's Planned Inventory currently wants into the Sell column, for
-     * the player to then Confirm Purchase. Scans the player's real main inventory/hotbar only (vanilla's
-     * own {@code Inventory} backs {@code Container#getItem}/{@code #removeItem} with exactly those 36
-     * slots -- armor/offhand live in a separate {@code EntityEquipment}, confirmed against the
-     * decompiled source, so this can never sweep up worn gear). Caps per resource at the same live
-     * {@code targetCount - currentStock} formula {@link #confirmShopCart} itself enforces, minus
-     * whatever's already sitting in the Sell column from an earlier click, so repeated clicks are safe.
+     * the player to then Confirm Purchase. Scans the player's real main inventory ONLY (vanilla's own
+     * {@code Inventory} backs {@code Container#getItem}/{@code #removeItem} with all 36 hotbar+main
+     * slots as one range -- armor/offhand live in a separate {@code EntityEquipment}, confirmed
+     * against the decompiled source, so this can never sweep up worn gear regardless). **Real report,
+     * 2026-10-24: "Auto Sell should never take items which are equipped, including hotbar"** -- the
+     * hotbar (slots 0-8) was never actually excluded despite this doc previously claiming "main
+     * inventory/hotbar only" was already hotbar-safe; fixed by draining through {@link
+     * com.github.cerealklla.settlemynts.zone.MainInventoryView} (slots 9-35 only) instead of the raw
+     * {@code Inventory}, mirroring {@code zone.AutoDropper}'s own identical exclusion. Caps per
+     * resource at the same live {@code targetCount - currentStock} formula {@link #confirmShopCart}
+     * itself enforces, minus whatever's already sitting in the Sell column from an earlier click, so
+     * repeated clicks are safe.
      */
     public static void autoSellToShopCart(ServerPlayer player, com.github.cerealklla.settlemynts.plotsign.ShopCartMenu menu) {
         if (!(player.level() instanceof ServerLevel serverLevel)) {
@@ -1754,7 +1762,8 @@ public class SettlemyntsMod {
                 continue;
             }
             java.util.List<net.minecraft.world.item.ItemStack> drained =
-                    com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(java.util.List.of(player.getInventory()), resource, remaining);
+                    com.github.cerealklla.settlemynts.zone.ContainerWithdraw.drain(
+                            java.util.List.of(new com.github.cerealklla.settlemynts.zone.MainInventoryView(player.getInventory())), resource, remaining);
             for (net.minecraft.world.item.ItemStack stack : drained) {
                 com.github.cerealklla.settlemynts.zone.ContainerDeposit.depositIntoAny(java.util.List.of(menu.sellContainer()), stack);
                 if (!stack.isEmpty()) {
