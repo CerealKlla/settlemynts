@@ -1,7 +1,7 @@
 package com.github.cerealklla.settlemynts.plotsign.client;
 
 import com.github.cerealklla.nuclyus.menu.client.NuclyusMenu;
-import com.github.cerealklla.nuclyus.menu.client.NuclyusMenuScreen;
+import com.github.cerealklla.nuclyus.menu.client.WidgetHost;
 import com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests;
 import com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload;
 import com.github.cerealklla.settlemynts.plotsign.OpenPlotManagementPayload;
@@ -29,7 +29,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 public final class ManagementTab implements NuclyusMenu {
 
     private final OpenPlotConfigSignMenuPayload data;
-    private NuclyusMenuScreen host;
+    private WidgetHost host;
     private OpenPlotManagementPayload managementData;
     private Button establishHighwayButton;
 
@@ -49,7 +49,7 @@ public final class ManagementTab implements NuclyusMenu {
 
     @Override
     public void attachHost(Screen host) {
-        this.host = (NuclyusMenuScreen) host;
+        this.host = (WidgetHost) host;
     }
 
     @Override

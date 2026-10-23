@@ -73,7 +73,7 @@ import net.minecraft.world.item.Items;
  * free-form scratch space (never bound to a specific listing/row), so they're just a fixed {@link
  * #BUY_SELL_SLOTS}-slot column, same as a small chest.
  */
-public class ShopCartMenu extends AbstractContainerMenu {
+public class ShopCartMenu extends AbstractContainerMenu implements ShopCartLike {
 
     private static final int HOTBAR_SIZE = 9;
     private static final int MAIN_INVENTORY_SIZE = 27;

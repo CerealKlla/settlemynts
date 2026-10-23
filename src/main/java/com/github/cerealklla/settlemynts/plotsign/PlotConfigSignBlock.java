@@ -20,7 +20,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.phys.BlockHitResult;
-import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
  * The Plot Config Sign (design doc Section 14a) -- Settlemynts-owned (mirrors the existing
@@ -100,7 +99,11 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
                 }
             }
         }
-        PacketDistributor.sendToPlayer(serverPlayer, new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc, guardKitStandsAvailable, isMineshaft));
+        // Opens the whole unified Plot Config Sign screen via a real container-menu handshake now
+        // (2026-10-24, see PlotConfigMenu's own doc) -- used to just send this payload standalone
+        // and let the client build a plain, non-container NuclyusMenuScreen from it.
+        com.github.cerealklla.settlemynts.SettlemyntsMod.openPlotConfigMenu(serverPlayer,
+                new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc, guardKitStandsAvailable, isMineshaft));
         return InteractionResult.SUCCESS_SERVER;
     }
 

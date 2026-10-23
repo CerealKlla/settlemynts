@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.registration;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.guardhouse.GuardhouseFoodMenu;
+import com.github.cerealklla.settlemynts.plotsign.PlotConfigMenu;
 import com.github.cerealklla.settlemynts.plotsign.ShopCartMenu;
 import com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconMenu;
 
@@ -27,6 +28,11 @@ public final class ModMenus {
     public static final DeferredHolder<MenuType<?>, MenuType<ShopCartMenu>> SHOP_CART = MENU_TYPES.register(
             "shop_cart",
             () -> IMenuTypeExtension.create((windowId, inventory, extraData) -> ShopCartMenu.fromNetwork(windowId, inventory, extraData)));
+
+    /** Added 2026-10-24 -- the whole Plot Config Sign screen, real Shop slots merged in (see PlotConfigMenu's own doc). */
+    public static final DeferredHolder<MenuType<?>, MenuType<PlotConfigMenu>> PLOT_CONFIG = MENU_TYPES.register(
+            "plot_config",
+            () -> IMenuTypeExtension.create((windowId, inventory, extraData) -> PlotConfigMenu.fromNetwork(windowId, inventory, extraData)));
 
     public static final DeferredHolder<MenuType<?>, MenuType<WatchTowerBeaconMenu>> WATCH_TOWER_BEACON = MENU_TYPES.register(
             "watch_tower_beacon",

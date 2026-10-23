@@ -11,7 +11,6 @@ import com.github.cerealklla.nuclyus.request.ClientRequestSlot;
  */
 public final class ClientPlotSignRequests {
 
-    private static final ClientRequestSlot<OpenPlotConfigSignMenuPayload> MENU = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenPlotDetailsPayload> PLOT_DETAILS = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenPlotManagementPayload> PLOT_MANAGEMENT = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenShopPayload> SHOP = new ClientRequestSlot<>();
@@ -25,14 +24,6 @@ public final class ClientPlotSignRequests {
     private static final ClientRequestSlot<OpenConfigurePlotPayload> CONFIGURE_PLOT = new ClientRequestSlot<>();
 
     private ClientPlotSignRequests() {
-    }
-
-    public static void requestMenu(OpenPlotConfigSignMenuPayload payload) {
-        MENU.request(payload);
-    }
-
-    public static Optional<OpenPlotConfigSignMenuPayload> takePendingMenu() {
-        return MENU.takePending();
     }
 
     public static void requestPlotDetails(OpenPlotDetailsPayload payload) {

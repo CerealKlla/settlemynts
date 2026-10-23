@@ -1,7 +1,7 @@
 package com.github.cerealklla.settlemynts.plotsign.client;
 
 import com.github.cerealklla.nuclyus.menu.client.NuclyusMenu;
-import com.github.cerealklla.nuclyus.menu.client.NuclyusMenuScreen;
+import com.github.cerealklla.nuclyus.menu.client.WidgetHost;
 import com.github.cerealklla.settlemynts.guardhouse.RequestGuardKitStandsPayload;
 import com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload;
 
@@ -22,7 +22,7 @@ import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 public final class GarrisonTab implements NuclyusMenu {
 
     private final OpenPlotConfigSignMenuPayload data;
-    private NuclyusMenuScreen host;
+    private WidgetHost host;
     private Button getStandsButton;
 
     public GarrisonTab(OpenPlotConfigSignMenuPayload data) {
@@ -41,7 +41,7 @@ public final class GarrisonTab implements NuclyusMenu {
 
     @Override
     public void attachHost(Screen host) {
-        this.host = (NuclyusMenuScreen) host;
+        this.host = (WidgetHost) host;
     }
 
     @Override

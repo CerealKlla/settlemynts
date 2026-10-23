@@ -134,6 +134,7 @@ public class SettlemyntsModClient {
         event.register(ModMenus.GUARDHOUSE_FOOD.get(), GuardhouseFoodScreen::new);
         event.register(ModMenus.SHOP_CART.get(), ShopCartScreen::new);
         event.register(ModMenus.WATCH_TOWER_BEACON.get(), com.github.cerealklla.settlemynts.watchtower.client.WatchTowerBeaconScreen::new);
+        event.register(ModMenus.PLOT_CONFIG.get(), PlotConfigScreen::new);
     }
 
     @SubscribeEvent
@@ -168,11 +169,9 @@ public class SettlemyntsModClient {
                 Minecraft.getInstance().setScreen(new PlotStakeScreen(request));
             }
         });
-        ClientPlotSignRequests.takePendingMenu().ifPresent(request -> {
-            if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(PlotConfigScreen.create(request));
-            }
-        });
+        // Plot Config Sign opens via a real PlotConfigMenu now, 2026-10-24 -- vanilla's own
+        // container-open flow handles this automatically (see onRegisterMenuScreens), no polling
+        // needed here anymore.
         ClientFoundingRequests.takePendingDefenseSpendingScreen().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
                 Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.founding.client.DefenseSpendingScreen(request));

@@ -5,23 +5,27 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.github.cerealklla.nuclyus.menu.client.NuclyusContainerScreen;
 import com.github.cerealklla.nuclyus.menu.client.NuclyusMenu;
-import com.github.cerealklla.nuclyus.menu.client.NuclyusMenuScreen;
+import com.github.cerealklla.nuclyus.menu.client.WidgetHost;
 import com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests;
 import com.github.cerealklla.settlemynts.plotsign.OpenPlannedInventoryPayload;
 import com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload;
 import com.github.cerealklla.settlemynts.plotsign.OpenShopPayload;
 import com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry;
 import com.github.cerealklla.settlemynts.plotsign.PlannedInventoryUpdate;
+import com.github.cerealklla.settlemynts.plotsign.PlotConfigMenu;
 import com.github.cerealklla.settlemynts.plotsign.RequestPlannedInventoryPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestShopPayload;
 import com.github.cerealklla.settlemynts.plotsign.SetPlannedInventoryPayload;
 import com.github.cerealklla.settlemynts.plotsign.SetShopListingsPayload;
 import com.github.cerealklla.settlemynts.plotsign.ShopAnchor;
 import com.github.cerealklla.settlemynts.plotsign.ShopInventoryEntry;
+import com.github.cerealklla.settlemynts.plotsign.ShopListingEntry;
 import com.github.cerealklla.settlemynts.plotsign.ShopListingUpdate;
 import com.github.cerealklla.settlemynts.zone.ShopResource;
 
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -43,8 +47,13 @@ import net.minecraft.resources.Identifier;
  * (below the main K-menu-style tab bar, same selection-greys-out-the-active-choice convention as
  * {@link ConfigureTab}'s Ore/Stone buttons) switches between three pages:
  * <ul>
- *   <li><b>Shop</b> (always visible) -- just "Open Shop," which opens the real buy-mode {@code
- *   ShopCartMenu} container menu directly (server-pushed, no client dispatch needed here).</li>
+ *   <li><b>Shop</b> (always visible) -- the real Shop/Buy/Sell/Player slots {@link PlotConfigMenu}
+ *   already carries, merged in directly 2026-10-24 (explicit request: "Place it fully within the
+ *   unified menu, not as a separate area") -- used to open a separate {@code ShopCartMenu} window;
+ *   now this sub-tab just toggles {@link PlotConfigMenu#setShopSlotsActive} and draws the same
+ *   column headers/price text/gold totals/Confirm-Purchase/Auto-Sell/scroll controls the old
+ *   {@code ShopCartScreen} drew, at the real slot panel's own position ({@link
+ *   NuclyusContainerScreen#slotPanelLeft}/{@link NuclyusContainerScreen#slotPanelTop}).</li>
  *   <li><b>Manage Shop</b> ({@code canManage} only) -- the scan-the-plot price editor, folded in
  *   from the old pop-up {@code client.ManageShopScreen}.</li>
  *   <li><b>Planned Inventory</b> ({@code canManage} only) -- folded in from the old separate
@@ -66,8 +75,19 @@ public final class ShopTab implements NuclyusMenu {
     private static final int SUB_TAB_Y_OFFSET = 16;
     private static final int CONTENT_TOP_OFFSET = 56;
 
+    // Real slot panel's own layout (must stay in lockstep with PlotConfigMenu's identical copies).
+    private static final int SHOP_TOP_Y = 18;
+    private static final int SHOP_ROW_HEIGHT = 18;
+    private static final int SHOP_X = 8;
+    private static final int BUY_X = 230;
+    private static final int SELL_X = 260;
+    private static final int PLAYER_INV_X = 300;
+    private static final int SCROLLBAR_X = BUY_X - 16;
+
     private final OpenPlotConfigSignMenuPayload data;
-    private NuclyusMenuScreen host;
+    private final PlotConfigMenu menu;
+    private WidgetHost host;
+    private NuclyusContainerScreen<?> containerScreen;
     private SubTab subTab = SubTab.SHOP;
 
     private Button shopSubTabButton;
@@ -75,7 +95,10 @@ public final class ShopTab implements NuclyusMenu {
     private Button plannedSubTabButton;
 
     // "Shop" page.
-    private Button openShopButton;
+    private Button confirmButton;
+    private Button autoSellButton;
+    private Button scrollUpButton;
+    private Button scrollDownButton;
 
     // "Manage Shop" page.
     private OpenShopPayload manageData;
@@ -91,8 +114,9 @@ public final class ShopTab implements NuclyusMenu {
     private int plannedScrollOffset;
     private Button plannedSaveButton;
 
-    public ShopTab(OpenPlotConfigSignMenuPayload data) {
+    public ShopTab(OpenPlotConfigSignMenuPayload data, PlotConfigMenu menu) {
         this.data = data;
+        this.menu = menu;
     }
 
     @Override
@@ -107,7 +131,8 @@ public final class ShopTab implements NuclyusMenu {
 
     @Override
     public void attachHost(Screen host) {
-        this.host = (NuclyusMenuScreen) host;
+        this.host = (WidgetHost) host;
+        this.containerScreen = (NuclyusContainerScreen<?>) host;
     }
 
     @Override
@@ -119,6 +144,7 @@ public final class ShopTab implements NuclyusMenu {
         plannedPendingValues.clear();
         manageScrollOffset = 0;
         plannedScrollOffset = 0;
+        menu.setShopSlotsActive(true);
 
         Rect2i area = host.contentArea();
         addSubTabButtons(area);
@@ -127,6 +153,7 @@ public final class ShopTab implements NuclyusMenu {
 
     @Override
     public void onHidden() {
+        menu.setShopSlotsActive(false);
         removeSubTabButtons();
         removePageWidgets();
     }
@@ -180,14 +207,30 @@ public final class ShopTab implements NuclyusMenu {
         }
         removePageWidgets();
         subTab = newSubTab;
+        menu.setShopSlotsActive(subTab == SubTab.SHOP);
         refreshSubTabButtons();
         addPageWidgets(host.contentArea());
     }
 
     private void addPageWidgets(Rect2i area) {
         switch (subTab) {
-            case SHOP -> openShopButton = host.addMenuWidget(Button.builder(Component.literal("Open Shop"), b -> openShop())
-                    .bounds(area.getX() + 20, area.getY() + CONTENT_TOP_OFFSET, 150, 20).build());
+            case SHOP -> {
+                int left = containerScreen.slotPanelLeft();
+                int top = containerScreen.slotPanelTop();
+                int confirmY = top + SHOP_TOP_Y + PlotConfigMenu.VISIBLE_SHOP_ROWS * SHOP_ROW_HEIGHT + 12;
+                confirmButton = host.addMenuWidget(Button.builder(Component.literal("Confirm Purchase"),
+                                b -> Minecraft.getInstance().gameMode.handleInventoryButtonClick(menu.containerId, PlotConfigMenu.CONFIRM_BUTTON_ID))
+                        .bounds(left + SHOP_X, confirmY, 150, 20).build());
+                autoSellButton = host.addMenuWidget(Button.builder(Component.literal("Auto Sell"),
+                                b -> Minecraft.getInstance().gameMode.handleInventoryButtonClick(menu.containerId, PlotConfigMenu.AUTO_SELL_BUTTON_ID))
+                        .bounds(left + SHOP_X + 160, confirmY, 100, 20).build());
+                scrollUpButton = host.addMenuWidget(Button.builder(Component.literal("^"),
+                                b -> Minecraft.getInstance().gameMode.handleInventoryButtonClick(menu.containerId, PlotConfigMenu.SCROLL_UP_BUTTON_ID))
+                        .bounds(left + SCROLLBAR_X, top + SHOP_TOP_Y, 12, 12).build());
+                scrollDownButton = host.addMenuWidget(Button.builder(Component.literal("v"),
+                                b -> Minecraft.getInstance().gameMode.handleInventoryButtonClick(menu.containerId, PlotConfigMenu.SCROLL_DOWN_BUTTON_ID))
+                        .bounds(left + SCROLLBAR_X, top + SHOP_TOP_Y + PlotConfigMenu.VISIBLE_SHOP_ROWS * SHOP_ROW_HEIGHT - 12, 12, 12).build());
+            }
             case MANAGE -> {
                 manageData = null;
                 managePendingValues.clear();
@@ -208,9 +251,21 @@ public final class ShopTab implements NuclyusMenu {
     }
 
     private void removePageWidgets() {
-        if (openShopButton != null) {
-            host.removeMenuWidget(openShopButton);
-            openShopButton = null;
+        if (confirmButton != null) {
+            host.removeMenuWidget(confirmButton);
+            confirmButton = null;
+        }
+        if (autoSellButton != null) {
+            host.removeMenuWidget(autoSellButton);
+            autoSellButton = null;
+        }
+        if (scrollUpButton != null) {
+            host.removeMenuWidget(scrollUpButton);
+            scrollUpButton = null;
+        }
+        if (scrollDownButton != null) {
+            host.removeMenuWidget(scrollDownButton);
+            scrollDownButton = null;
         }
         clearManageRowWidgets();
         if (manageSaveButton != null) {
@@ -458,16 +513,62 @@ public final class ShopTab implements NuclyusMenu {
     @Override
     public void render(GuiGraphicsExtractor graphics, Rect2i area, int mouseX, int mouseY, float partialTick) {
         switch (subTab) {
-            case SHOP -> {
-                // Nothing to render beyond the "Open Shop" button itself.
-            }
+            case SHOP -> renderShopPage(graphics);
             case MANAGE -> renderManagePage(graphics, area);
             case PLANNED -> renderPlannedPage(graphics, area);
         }
     }
 
+    /**
+     * Column headers, per-row price/stock text, gold totals, scroll label, and the hint line -- the
+     * exact same decorations the old (now-deleted-from-this-flow) {@code ShopCartScreen} used to draw
+     * around its own real slots, just now positioned off {@link NuclyusContainerScreen#slotPanelLeft}/
+     * {@link NuclyusContainerScreen#slotPanelTop} instead of its own {@code leftPos}/{@code topPos}
+     * (this tab doesn't own the slot panel's layout, {@link PlotConfigMenu} does).
+     */
+    private void renderShopPage(GuiGraphicsExtractor graphics) {
+        Font font = Minecraft.getInstance().font;
+        int left = containerScreen.slotPanelLeft();
+        int top = containerScreen.slotPanelTop();
+
+        graphics.text(font, "Shop", left + SHOP_X, top + 4, 0xFFAAAAAA);
+        graphics.text(font, "Buy", left + BUY_X, top + 4, 0xFFAAAAAA);
+        graphics.text(font, "Sell", left + SELL_X, top + 4, 0xFFAAAAAA);
+
+        String goldLine = "Merchant Gold: " + menu.shopGoldNuggets() + "    Player Gold: " + menu.playerGoldNuggets();
+        graphics.text(font, goldLine, left + PLAYER_INV_X, top + 4, 0xFFFFD700);
+
+        List<ShopListingEntry> listings = menu.listings();
+        int offset = menu.scrollOffset();
+        int visibleCount = Math.min(PlotConfigMenu.VISIBLE_SHOP_ROWS, Math.max(0, listings.size() - offset));
+        for (int row = 0; row < visibleCount; row++) {
+            ShopListingEntry listing = listings.get(offset + row);
+            int rowTextY = top + SHOP_TOP_Y + row * SHOP_ROW_HEIGHT + SHOP_ROW_HEIGHT / 2 - 4;
+            String priceLine = listing.shopStock() + " in stock   " + listing.pricePerUnit() + "g / " + listing.buyPricePerUnit() + "g";
+            graphics.text(font, priceLine, left + SHOP_X + 20, rowTextY, 0xFFFFFFFF);
+        }
+        if (listings.size() > PlotConfigMenu.VISIBLE_SHOP_ROWS) {
+            String scrollLabel = (offset + 1) + "-" + (offset + visibleCount) + " / " + listings.size();
+            graphics.text(font, scrollLabel, left + SHOP_X, top + SHOP_TOP_Y + PlotConfigMenu.VISIBLE_SHOP_ROWS * SHOP_ROW_HEIGHT + 2, 0xFFAAAAAA);
+        }
+
+        int confirmY = top + SHOP_TOP_Y + PlotConfigMenu.VISIBLE_SHOP_ROWS * SHOP_ROW_HEIGHT + 12;
+        String hint = "Shop <-> Buy, and Player <-> Sell only -- Confirm Purchase to charge/pay for everything queued.";
+        graphics.text(font, Component.literal(hint).withStyle(ChatFormatting.GRAY), left + SHOP_X, confirmY - 12, 0xFFAAAAAA);
+    }
+
     @Override
     public boolean mouseScrolled(Rect2i area, double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (subTab == SubTab.SHOP) {
+            int left = containerScreen.slotPanelLeft();
+            int top = containerScreen.slotPanelTop();
+            if (scrollY != 0 && mouseX >= left + SHOP_X && mouseX < left + BUY_X
+                    && mouseY >= top + SHOP_TOP_Y && mouseY < top + SHOP_TOP_Y + PlotConfigMenu.VISIBLE_SHOP_ROWS * SHOP_ROW_HEIGHT) {
+                int buttonId = scrollY > 0 ? PlotConfigMenu.SCROLL_UP_BUTTON_ID : PlotConfigMenu.SCROLL_DOWN_BUTTON_ID;
+                Minecraft.getInstance().gameMode.handleInventoryButtonClick(menu.containerId, buttonId);
+                return true;
+            }
+        }
         if (subTab == SubTab.MANAGE && manageData != null) {
             manageScrollOffset = Math.max(0, Math.min(manageMaxScrollOffset(area), manageScrollOffset - (int) (scrollY * ROW_HEIGHT)));
             rebuildManageRows(area);
@@ -479,10 +580,6 @@ public final class ShopTab implements NuclyusMenu {
             return true;
         }
         return false;
-    }
-
-    private void openShop() {
-        send(new RequestShopPayload(new ShopAnchor.Sign(data.signPos()), false));
     }
 
     private void send(CustomPacketPayload payload) {

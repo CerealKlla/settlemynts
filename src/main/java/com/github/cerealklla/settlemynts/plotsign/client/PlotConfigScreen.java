@@ -3,36 +3,43 @@ package com.github.cerealklla.settlemynts.plotsign.client;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.github.cerealklla.nuclyus.menu.client.NuclyusContainerScreen;
 import com.github.cerealklla.nuclyus.menu.client.NuclyusMenu;
-import com.github.cerealklla.nuclyus.menu.client.NuclyusMenuScreen;
-import com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload;
+import com.github.cerealklla.settlemynts.plotsign.PlotConfigMenu;
 
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Inventory;
 
 /**
- * Factory for the Plot Config Sign's tabbed main screen (rework added 2026-10-23, explicit user
- * request: "restructure the Plot Config signs... to something closer to the players K menu, with
- * tabs up top to break up logically grouped functionality"). Reuses Nuclyus's shared {@code
- * menu.client.NuclyusMenuScreen} host directly (its fixed-tab constructor, added the same day) --
- * same tab-bar rendering/input delegation the K menu itself uses, just with a caller-built tab list
- * instead of one collected from {@code NuclyusMenuRegistry} (this is a per-sign, per-open tab set
- * computed from server-sent flags, not a cross-mod registration).
+ * The Plot Config Sign's real screen (merged 2026-10-24, explicit request: "Place it fully within
+ * the unified menu, not as a separate area" -- re: the Shop tab previously popping its own separate
+ * {@code ShopCartMenu} window). Rebuilt from a static factory producing a plain {@code
+ * NuclyusMenuScreen} into a real class extending {@link NuclyusContainerScreen}, backed by {@link
+ * PlotConfigMenu} -- see that class's own doc for the full merge design (real Shop/Buy/Sell/Player
+ * slots embedded alongside the same Overview/Upgrade/Configure/Shop/Garrison/Management tabs this
+ * screen always had, inert outside the Shop tab's own Shop sub-tab).
  *
- * <p>Replaces the old flat {@code PlotConfigSignMenuScreen} ("Main Menu") -- every old top-level
- * button is now either folded into a tab's own content ({@link OverviewTab}: Plot Details/Hire NPC;
- * {@link UpgradeTab}: the old pop-up {@code UpgradePlotScreen}'s cost breakdown + funding buttons;
- * {@link ConfigureTab}: Relocate Plot Sign/Specialization; {@link ShopTab}: its own Shop/Manage
- * Shop/Planned Inventory sub-tabs; {@link GarrisonTab}: Get Guard Kit Stands; {@link ManagementTab}:
- * Plot Management/Establish Highway) or still pops a real standalone sub-screen over the whole
- * tabbed host for an action that genuinely needs its own screen ({@code EstablishHighwayMapScreen},
- * the real {@code ShopCartMenu} container menu for buy-mode).
+ * <p>{@link #imageWidth}/{@link #imageHeight} (the fixed, centered box {@code AbstractContainerScreen}
+ * uses for the real slot panel) are sized to exactly fit the Shop lanes, same as the old {@code
+ * ShopCartScreen} -- this does **not** constrain the other five tabs at all, since {@link
+ * NuclyusContainerScreen#contentArea()} spans the full window regardless of {@code imageWidth}/
+ * {@code imageHeight}, same as it always did under plain {@code NuclyusMenuScreen}.
  */
-public final class PlotConfigScreen {
+public final class PlotConfigScreen extends NuclyusContainerScreen<PlotConfigMenu> {
 
-    private PlotConfigScreen() {
+    private static final int TOP_Y = 18;
+    private static final int ROW_HEIGHT = 18;
+    private static final int PLAYER_INV_X = 300;
+
+    public PlotConfigScreen(PlotConfigMenu menu, Inventory inventory, Component title) {
+        super(menu, inventory, title, buildTabs(menu), PLAYER_INV_X + 9 * 18 + 10,
+                TOP_Y + PlotConfigMenu.VISIBLE_SHOP_ROWS * ROW_HEIGHT + 56);
+        this.inventoryLabelY = -1000; // Suppress vanilla's auto "Inventory" label -- player inv has no separate panel here, same as the old ShopCartScreen.
     }
 
-    public static NuclyusMenuScreen create(OpenPlotConfigSignMenuPayload data) {
+    private static List<NuclyusMenu> buildTabs(PlotConfigMenu menu) {
+        var data = menu.signData();
         List<NuclyusMenu> tabs = new ArrayList<>();
         tabs.add(new OverviewTab(data));
         if (data.canManage() && data.hasConstructionBox() && data.tier() < 5 && data.tier() < data.maxPlotTier()) {
@@ -41,8 +48,8 @@ public final class PlotConfigScreen {
         if (data.canManage()) {
             tabs.add(new ConfigureTab(data));
         }
-        if (!data.hasGarrison() && !data.isTownHall()) {
-            tabs.add(new ShopTab(data));
+        if (menu.hasShop()) {
+            tabs.add(new ShopTab(data, menu));
         }
         if (data.canManage() && data.hasGarrison()) {
             tabs.add(new GarrisonTab(data));
@@ -50,6 +57,22 @@ public final class PlotConfigScreen {
         if (data.canManage() && data.isTownHall()) {
             tabs.add(new ManagementTab(data));
         }
-        return new NuclyusMenuScreen(Component.literal("Plot Config Sign"), tabs);
+        return tabs;
+    }
+
+    @Override
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        graphics.fill(0, 0, width, height, 0xC0101010);
+    }
+
+    @Override
+    public boolean isPauseScreen() {
+        return false;
+    }
+
+    /** See the old {@code ShopCartScreen}'s own doc -- same "citing the Kyt editor screen" fix, same reasoning, unchanged. */
+    @Override
+    protected boolean hasClickedOutside(double mouseX, double mouseY, int xo, int yo) {
+        return false;
     }
 }

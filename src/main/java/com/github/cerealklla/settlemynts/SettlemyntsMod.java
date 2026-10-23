@@ -470,11 +470,10 @@ public class SettlemyntsMod {
                     }
                 });
 
-        // Plot Config Sign (design doc Section 14a).
-        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload.TYPE,
-                com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload.STREAM_CODEC,
-                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestMenu(payload));
-
+        // Plot Config Sign (design doc Section 14a) -- OpenPlotConfigSignMenuPayload is no longer
+        // sent as a standalone packet, 2026-10-24 (the whole screen opens via a real PlotConfigMenu
+        // now, see that class's own doc); its record/STREAM_CODEC is reused purely as a data bundle
+        // riding on that menu's own extra-data channel.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RelocatePlotSignPayload.TYPE,
                 com.github.cerealklla.settlemynts.plotsign.RelocatePlotSignPayload.STREAM_CODEC,
                 (payload, context) -> relocatePlotSign(payload, context));
@@ -1105,6 +1104,58 @@ public class SettlemyntsMod {
     }
 
     /**
+     * Opens the whole unified Plot Config Sign screen (merged 2026-10-24, explicit request: "Place
+     * it fully within the unified menu, not as a separate area" -- see {@code
+     * plotsign.PlotConfigMenu}'s own doc for the full merge design). Called directly by {@code
+     * plotsign.PlotConfigSignBlock}'s own interaction -- {@code signData} is already fully resolved
+     * by that caller exactly as it always was. Real Shop data (if this plot has one, same {@code
+     * !hasGarrison() && !isTownHall()} gate the Shop tab itself has always used -- not also gated on
+     * {@code shopId} presence, so a plot whose shop has never been lazily registered yet still gets
+     * a real, just-empty Shop tab instead of no tab at all) is resolved eagerly here, the same way
+     * {@link #handleRequestShop}'s own buy-mode branch always has, so the whole screen opens through
+     * one single real container-menu handshake instead of two separate round trips.
+     */
+    public static void openPlotConfigMenu(ServerPlayer player, com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload signData) {
+        if (!(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        boolean hasShop = !signData.hasGarrison() && !signData.isTownHall();
+        com.github.cerealklla.settlemynts.plotsign.ShopAnchor anchor = new com.github.cerealklla.settlemynts.plotsign.ShopAnchor.Sign(signData.signPos());
+        java.util.UUID plotId = null;
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.ShopListingEntry> listings = java.util.List.of();
+        int shopGoldNuggets = 0;
+        int playerGoldNuggets = 0;
+
+        if (hasShop && com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.isAvailable()) {
+            java.util.Optional<ShopContext> resolved = resolveShopContext(serverLevel, anchor);
+            if (resolved.isPresent()) {
+                PlotRecord plot = resolved.get().plot();
+                com.github.cerealklla.settlemynts.zone.PlotOwner owner = resolved.get().owner();
+                com.github.cerealklla.settlemynts.zone.ShopSeeding.syncToCatalog(serverLevel, plot, owner, resolved.get().anchorPos());
+                java.util.UUID resolvedPlotId = plot.plotId();
+                plot = owner.getPlots().stream().filter(p -> p.plotId().equals(resolvedPlotId)).findFirst().orElse(plot);
+
+                java.util.List<com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.ShopListingView> views = plot.shopId()
+                        .map(shopId -> com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getListings(serverLevel, shopId))
+                        .orElse(java.util.List.of());
+                java.util.Map<net.minecraft.resources.Identifier, Integer> stock =
+                        com.github.cerealklla.settlemynts.api.Settlemynts.scanPlotItemStock(serverLevel, plot.plotId());
+                shopGoldNuggets = stock.getOrDefault(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(net.minecraft.world.item.Items.GOLD_NUGGET), 0);
+                playerGoldNuggets = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.getNuggetBalance(player);
+                listings = buildBuyListings(player, views, manageBoxesFor(serverLevel, plot), plot);
+                plotId = plot.plotId();
+            } else {
+                hasShop = false;
+            }
+        } else {
+            hasShop = false;
+        }
+
+        player.openMenu(new com.github.cerealklla.settlemynts.plotsign.PlotConfigMenuProvider(
+                signData, hasShop, hasShop ? anchor : null, plotId, listings, shopGoldNuggets, playerGoldNuggets));
+    }
+
+    /**
      * Builds the buy-mode listing table rows (price + live stock, per-player Merchant-adjusted
      * prices) -- factored out of {@link #handleRequestShop} (2026-10-10) so {@link
      * #sendShopStockUpdate} can rebuild the same rows with fresh stock after a Buy/Sell without
@@ -1614,7 +1665,7 @@ public class SettlemyntsMod {
      * menu's Sell container as a side effect, so a failed sell line (the shop can't afford it) puts
      * those real stacks straight back rather than letting them vanish.
      */
-    public static void confirmShopCart(ServerPlayer player, com.github.cerealklla.settlemynts.plotsign.ShopCartMenu menu) {
+    public static void confirmShopCart(ServerPlayer player, com.github.cerealklla.settlemynts.plotsign.ShopCartLike menu) {
         if (!(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
@@ -1731,7 +1782,7 @@ public class SettlemyntsMod {
      * itself enforces, minus whatever's already sitting in the Sell column from an earlier click, so
      * repeated clicks are safe.
      */
-    public static void autoSellToShopCart(ServerPlayer player, com.github.cerealklla.settlemynts.plotsign.ShopCartMenu menu) {
+    public static void autoSellToShopCart(ServerPlayer player, com.github.cerealklla.settlemynts.plotsign.ShopCartLike menu) {
         if (!(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
