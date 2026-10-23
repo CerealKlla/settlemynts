@@ -106,9 +106,12 @@ public final class ResidentSpawnTicker {
         // job-site-claiming or trading -- the same `representativeProfessionFor` lookup
         // NaturalVillagePlotGenerator already uses for natural villages' own villagers.
         ResidentVillagerEntity resident = new ResidentVillagerEntity(ModEntities.RESIDENT_VILLAGER.get(), level);
-        resident.setPos(signPos.getX() + 0.5, signPos.getY(), signPos.getZ() + 0.5);
+        // Real report, 2026-10-23: "you're spawning them inside the sign and then they get stuck" --
+        // see FarmerSpawnTicker's own doc for the full root cause (the sign's solid block model).
+        net.minecraft.core.BlockPos spawnPos = signPos.above();
+        resident.setPos(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
         resident.setPlotIdentity(sign.settlementCoreId(), plotId);
-        resident.setSpawnPos(signPos);
+        resident.setSpawnPos(spawnPos);
         com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator.representativeProfessionFor(plot.zoneTypeId())
                 .ifPresent(profession -> resident.setVillagerData(resident.getVillagerData().withProfession(level.registryAccess(), profession)));
         level.addFreshEntity(resident);

@@ -70,8 +70,11 @@ public final class LumberjackSpawnTicker {
         }
 
         LumberjackWorkerEntity worker = new LumberjackWorkerEntity(ModEntities.LUMBERJACK_WORKER.get(), level);
-        worker.setPos(signPos.getX() + 0.5, signPos.getY(), signPos.getZ() + 0.5);
-        worker.setSpawnPos(signPos);
+        // Real report, 2026-10-23: "you're spawning them inside the sign and then they get stuck" --
+        // see FarmerSpawnTicker's own doc for the full root cause (the sign's solid block model).
+        net.minecraft.core.BlockPos spawnPos = signPos.above();
+        worker.setPos(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
+        worker.setSpawnPos(spawnPos);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
         level.addFreshEntity(worker);
         sign.setLumberjackWorkerId(worker.getUUID());

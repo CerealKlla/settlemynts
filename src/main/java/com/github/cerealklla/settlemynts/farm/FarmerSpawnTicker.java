@@ -79,9 +79,16 @@ public final class FarmerSpawnTicker {
         }
 
         FarmerWorkerEntity worker = new FarmerWorkerEntity(ModEntities.FARMER_WORKER.get(), level);
-        worker.setPos(signPos.getX() + 0.5, signPos.getY(), signPos.getZ() + 0.5);
+        // Real report, 2026-10-23: "you're spawning them inside the sign and then they get stuck" --
+        // the Plot Config Sign's block model is a plain solid wood block (see this mod's own
+        // CLAUDE.md), so spawning exactly at signPos embedded the worker in solid geometry. Spawn one
+        // block above it instead -- both the initial spawn position and the stuck-watchdog's own
+        // rescue target (setSpawnPos below), since a watchdog that rescues back into the sign itself
+        // would immediately re-trap the worker the moment it "fixes" a stall.
+        net.minecraft.core.BlockPos spawnPos = signPos.above();
+        worker.setPos(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
-        worker.setSpawnPos(signPos);
+        worker.setSpawnPos(spawnPos);
         // Cosmetic only (2026-10-09, explicit request) -- the zone here is always Farm, so the
         // profession is just the matching vanilla robe, not a job-site-claim (this worker's Brain is
         // never ticked -- same reasoning as resident.ResidentVillagerEntity's own class doc).
