@@ -57,7 +57,7 @@ public final class PlannedInventoryTab implements NuclyusMenu {
 
     @Override
     public int order() {
-        return 3;
+        return 4;
     }
 
     @Override

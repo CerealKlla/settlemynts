@@ -63,7 +63,7 @@ public final class ShopTab implements NuclyusMenu {
 
     @Override
     public int order() {
-        return 2;
+        return 3;
     }
 
     @Override

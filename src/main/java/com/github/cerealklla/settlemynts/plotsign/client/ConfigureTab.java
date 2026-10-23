@@ -48,7 +48,7 @@ public final class ConfigureTab implements NuclyusMenu {
 
     @Override
     public int order() {
-        return 1;
+        return 2;
     }
 
     @Override

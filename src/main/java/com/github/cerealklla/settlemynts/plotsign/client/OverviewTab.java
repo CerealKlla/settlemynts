@@ -7,7 +7,6 @@ import com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload;
 import com.github.cerealklla.settlemynts.plotsign.OpenPlotDetailsPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestHireNpcPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestPlotDetailsPayload;
-import com.github.cerealklla.settlemynts.plotsign.RequestUpgradePlotPreviewPayload;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -21,12 +20,11 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
 /**
  * "Overview" tab (tabbed Plot Config Sign rework, 2026-10-23) -- always present, first tab. Folds
- * the old flat "Plot Details" screen in as read-only content, plus the "Hire NPC"/"Upgrade Plot"
- * actions that used to be separate Main Menu buttons. "Upgrade Plot" still pops the real {@code
- * UpgradePlotScreen} over this whole tabbed host (same as the old Main Menu button did) rather than
- * becoming inline content -- its own funding-option buttons are {@code .active}-gated from a server
- * round trip, not worth folding into tab content for a one-shot action that replaces the screen
- * either way.
+ * the old flat "Plot Details" screen in as read-only content, plus the "Hire NPC" action that used
+ * to be a separate Main Menu button. "Upgrade Plot" now lives in its own {@link UpgradeTab} (folded
+ * in from the old pop-up {@code client.UpgradePlotScreen} per explicit user request, same day) --
+ * its cost breakdown + 3 funding buttons needed a real content area of their own, not a shared
+ * strip here.
  */
 public final class OverviewTab implements NuclyusMenu {
 
@@ -34,7 +32,6 @@ public final class OverviewTab implements NuclyusMenu {
     private NuclyusMenuScreen host;
     private OpenPlotDetailsPayload details;
     private Button hireNpcButton;
-    private Button upgradePlotButton;
 
     public OverviewTab(OpenPlotConfigSignMenuPayload data) {
         this.data = data;
@@ -61,15 +58,9 @@ public final class OverviewTab implements NuclyusMenu {
         send(new RequestPlotDetailsPayload(data.signPos()));
 
         Rect2i area = host.contentArea();
-        int y = area.getY() + 20;
         if (data.canHireNpc()) {
             hireNpcButton = host.addMenuWidget(Button.builder(Component.literal("Hire NPC"), b -> hireNpc())
-                    .bounds(area.getX() + 20, y, 150, 20).build());
-            y += 24;
-        }
-        if (data.canManage() && data.hasConstructionBox() && data.tier() < 5 && data.tier() < data.maxPlotTier()) {
-            upgradePlotButton = host.addMenuWidget(Button.builder(Component.literal("Upgrade Plot"), b -> upgradePlot())
-                    .bounds(area.getX() + 20, y, 150, 20).build());
+                    .bounds(area.getX() + 20, area.getY() + 20, 150, 20).build());
         }
     }
 
@@ -79,10 +70,6 @@ public final class OverviewTab implements NuclyusMenu {
             host.removeMenuWidget(hireNpcButton);
             hireNpcButton = null;
         }
-        if (upgradePlotButton != null) {
-            host.removeMenuWidget(upgradePlotButton);
-            upgradePlotButton = null;
-        }
     }
 
     @Override
@@ -91,7 +78,7 @@ public final class OverviewTab implements NuclyusMenu {
 
         Font font = Minecraft.getInstance().font;
         int centerX = area.getX() + area.getWidth() / 2;
-        int y = area.getY() + 20 + (hireNpcButton != null ? 24 : 0) + (upgradePlotButton != null ? 24 : 0) + 16;
+        int y = area.getY() + 20 + (hireNpcButton != null ? 24 : 0) + 16;
         if (details == null) {
             String message = "Loading...";
             graphics.text(font, message, centerX - font.width(message) / 2, y, 0xFFAAAAAA);
@@ -112,14 +99,6 @@ public final class OverviewTab implements NuclyusMenu {
 
     private void hireNpc() {
         send(new RequestHireNpcPayload(data.signPos()));
-    }
-
-    private void upgradePlot() {
-        send(new RequestUpgradePlotPreviewPayload(data.signPos()));
-        // Closes this whole tabbed host -- the central dispatcher in SettlemyntsModClient only opens
-        // UpgradePlotScreen once the response arrives if `screen == null`, same convention as every
-        // other "pop a real sub-screen" action in this feature.
-        Minecraft.getInstance().setScreen(null);
     }
 
     private void send(CustomPacketPayload payload) {

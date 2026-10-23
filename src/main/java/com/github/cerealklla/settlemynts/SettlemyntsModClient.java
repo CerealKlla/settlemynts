@@ -212,11 +212,9 @@ public class SettlemyntsModClient {
             }
         }
 
-        ClientPlotSignRequests.takePendingUpgradePlotPreview().ifPresent(request -> {
-            if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.plotsign.client.UpgradePlotScreen(request));
-            }
-        });
+        // OpenPlotConfigSignMenuPayload's UpgradePlotPreviewPayload response is now consumed directly
+        // by plotsign.client.UpgradeTab (folded in from the old pop-up UpgradePlotScreen, 2026-10-23
+        // per explicit user request), not dispatched centrally here anymore.
 
         ClientPlotSignRequests.takePendingEstablishHighwayMap().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
