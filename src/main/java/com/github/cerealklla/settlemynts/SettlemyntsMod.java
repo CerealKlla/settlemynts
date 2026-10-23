@@ -184,6 +184,7 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.zone.RentLedgerListener.register();
         }
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardSpawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardEquipBoxChangeListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardKitStandRemovalListener());
         // PlotShopProximityTicker is no longer a tick-event subscriber as of 2026-10-12 -- it's
         // purely static now, driven by ProximityScanPayload instead of PlayerTickEvent (see its own

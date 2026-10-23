@@ -31,14 +31,15 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * guard from the plot's own boxes (best-effort per slot, see {@link
  * GuardEntity#equipFromLoadoutUsingBoxes}) instead of the old unconditional full-Kyt equip.
  *
- * <p><b>Also tops up already-alive guards, 2026-10-17</b> (explicit user spec: "any time a
- * guardhouse's inventory changes, check all guards for that guardhouse and if they are missing
- * gear which is now available equip them with it") -- when a stand's {@code assignedGuardId} is
- * already alive, this same periodic scan now calls {@link
- * GuardEntity#equipMissingFromLoadoutUsingBoxes} on it instead of skipping, filling any slot the
- * guard still doesn't have something equipped in. There's no real "container changed" event for a
- * plain world chest to hook directly, so this scan's existing 5-second cadence stands in for one --
- * the same approximation every other reactive-feeling mechanic in this mod already relies on.
+ * <p><b>Topping up an already-alive guard's missing gear moved off this ticker entirely,
+ * 2026-10-22</b> -- explicit user correction: "Guard equip rescan should not be a tick, There is an
+ * event for gear being added to the box, use that." The 2026-10-17 version of this feature polled
+ * every alive guard here on this same 5-second cadence; it's now handled by {@link
+ * GuardEquipBoxChangeListener}, reacting to {@code PlayerContainerEvent.Close} instead (the same
+ * "player just finished interacting with a container" substitute this suite already uses elsewhere
+ * for problems that would otherwise need polling -- see that class's own doc). This ticker's only
+ * remaining job is spawning a replacement guard once a dead stand's respawn timer is ready, which
+ * is genuinely time-gated and has no event to react to instead.
  *
  * <p><b>Known scaling simplification</b>, same as every other full-world-scanning ticker in this
  * mod: a stand whose chunk isn't currently loaded is silently skipped for that scan, same
@@ -92,11 +93,8 @@ public final class GuardSpawnTicker {
 
         if (stand.assignedGuardId().isPresent()) {
             // Guard already alive (GuardEntity#die clears this field, so "present" means genuinely
-            // alive, same assumption the old early-return here already made) -- top up any gear
-            // still missing now that the plot's boxes may have changed since it last equipped.
-            if (level.getEntity(stand.assignedGuardId().get()) instanceof GuardEntity guard) {
-                guard.equipMissingFromLoadoutUsingBoxes(record.get(), resolvePlotBoxes(level, plot));
-            }
+            // alive, same assumption the old early-return here already made) -- nothing left to do
+            // here; gear top-up is event-driven now, see GuardEquipBoxChangeListener.
             return;
         }
         if (level.getGameTime() < stand.respawnReadyAtGameTime()) {
