@@ -70,7 +70,11 @@ public class RoadwayConnectionMarkerEntity extends Display.BlockDisplay implemen
     private static final int TRAVELER_PING_RANGE_BLOCKS = 3; // Explicit spec: within 3 blocks of the marker (raised from 2, 2026-10-24).
     private static final int TOOL_LIGHT_RANGE_BLOCKS = 15;
     private static final long TRAVELER_PING_COOLDOWN_TICKS = 50L; // 2.5 seconds.
-    private static final int TRAVELER_BUFF_DURATION_TICKS = 20; // 1 second, explicit spec.
+    // Real report, 2026-10-23: "flickering which is visually distracting" -- the buff's own
+    // duration (1 second) was shorter than the refresh cooldown below it (2.5 seconds), so the
+    // effect visibly expired before a player's next ping could refresh it. Raised to 2 seconds,
+    // explicit follow-up spec.
+    private static final int TRAVELER_BUFF_DURATION_TICKS = 40; // 2 seconds.
     private static final long LIT_GRACE_TICKS = 40L; // 2 seconds after the last tool-holder ping.
 
     private UUID ownerCoreId;
