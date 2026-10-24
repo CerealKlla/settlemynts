@@ -23,8 +23,8 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
  * "Configure" tab (tabbed Plot Config Sign rework, 2026-10-23) -- only present when {@code
  * canManage}. Folds the old flat "Configure Plot" screen's "Relocate Plot Sign" button in as-is,
  * plus the new Mineshaft-only "Specialization" control (Owner/Mayor/Town Planners can switch a
- * Mineshaft plot between {@link MineSpecialization#ORE}/{@link MineSpecialization#STONE} -- see
- * {@code mineshaft.MineLootTable}'s own doc). The current specialization is fetched fresh via
+ * Mineshaft plot between {@link MineSpecialization#ORE}/{@link MineSpecialization#STONE}/{@link
+ * MineSpecialization#EXCAVATION} -- see {@code mineshaft.MineLootTable}'s own doc). The current specialization is fetched fresh via
  * {@link RequestConfigurePlotPayload} every time this tab is shown, same "always refetch" discipline
  * as every other server-backed tab here.
  */
@@ -36,6 +36,7 @@ public final class ConfigureTab implements NuclyusMenu {
     private Button relocateButton;
     private Button oreButton;
     private Button stoneButton;
+    private Button excavationButton;
 
     public ConfigureTab(OpenPlotConfigSignMenuPayload data) {
         this.data = data;
@@ -72,9 +73,11 @@ public final class ConfigureTab implements NuclyusMenu {
 
         if (data.isMineshaft()) {
             oreButton = host.addMenuWidget(Button.builder(Component.literal("Specialization: Ore"), b -> setSpecialization(MineSpecialization.ORE))
-                    .bounds(centerX - 205, y, 200, 20).build());
+                    .bounds(centerX - 235, y, 150, 20).build());
             stoneButton = host.addMenuWidget(Button.builder(Component.literal("Specialization: Stone"), b -> setSpecialization(MineSpecialization.STONE))
-                    .bounds(centerX + 5, y, 200, 20).build());
+                    .bounds(centerX - 75, y, 150, 20).build());
+            excavationButton = host.addMenuWidget(Button.builder(Component.literal("Specialization: Excavation"), b -> setSpecialization(MineSpecialization.EXCAVATION))
+                    .bounds(centerX + 85, y, 150, 20).build());
             refreshSpecializationButtons();
         }
     }
@@ -93,6 +96,10 @@ public final class ConfigureTab implements NuclyusMenu {
             host.removeMenuWidget(stoneButton);
             stoneButton = null;
         }
+        if (excavationButton != null) {
+            host.removeMenuWidget(excavationButton);
+            excavationButton = null;
+        }
     }
 
     @Override
@@ -106,11 +113,12 @@ public final class ConfigureTab implements NuclyusMenu {
     }
 
     private void refreshSpecializationButtons() {
-        if (configured == null || oreButton == null || stoneButton == null) {
+        if (configured == null || oreButton == null || stoneButton == null || excavationButton == null) {
             return;
         }
         oreButton.active = configured.specialization() != MineSpecialization.ORE;
         stoneButton.active = configured.specialization() != MineSpecialization.STONE;
+        excavationButton.active = configured.specialization() != MineSpecialization.EXCAVATION;
     }
 
     private void relocate() {

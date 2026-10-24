@@ -276,7 +276,7 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
                 boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc.withTieredDefaultsAppliedTier(tieredDefaultsAppliedTier), hiredNpc, guardKitStandsIssued);
     }
 
-    /** "Specialization" (Configure Plot, Mineshaft only) -- switches this plot's Mineshaft loot focus between {@link MineSpecialization#ORE}/{@link MineSpecialization#STONE}. See {@link MineLootTable} and {@link MineSpecialization}'s own docs. */
+    /** "Specialization" (Configure Plot, Mineshaft only) -- switches this plot's Mineshaft loot focus between {@link MineSpecialization#ORE}/{@link MineSpecialization#STONE}/{@link MineSpecialization#EXCAVATION}. See {@link MineLootTable} and {@link MineSpecialization}'s own docs. */
     public PlotRecord withMineSpecialization(MineSpecialization mineSpecialization) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
                 boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc.withMineSpecialization(mineSpecialization), hiredNpc, guardKitStandsIssued);
