@@ -32,6 +32,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
@@ -44,8 +45,19 @@ import net.minecraft.resources.Identifier;
  * button for that... a second set of sub-tabs within the shop page for Shop, Manage Shop, Preferred
  * [Planned] Inventory, the second two only visible to the Owner or Mayor/Town Planner") -- present
  * whenever this plot has a real Shop (not Guardhouse, not Town Hall). Its own secondary tab strip
- * (below the main K-menu-style tab bar, same selection-greys-out-the-active-choice convention as
- * {@link ConfigureTab}'s Ore/Stone buttons) switches between three pages:
+ * is a genuine second tier of tabs (rebuilt 2026-10-24 per a repeated, explicit user correction --
+ * "I have asked a few times now for this to be two tiers of tabs... keep using buttons up top" --
+ * the original version used plain floating {@link Button} widgets instead, which both looked
+ * nothing like {@link NuclyusContainerScreen}'s own real tab bar and left the real slot panel's
+ * fixed position overlapping them, since nothing had ever pushed {@code topPos} down to clear a
+ * second band). {@link #renderSubTabBar} mirrors {@code NuclyusContainerScreen}'s own tab-bar
+ * rendering technique exactly (full-width background band, text-width-sized segments, the last one
+ * absorbing slack, active/inactive shading) and sits directly beneath it; {@link #mouseClicked}
+ * hit-tests the same rects manually instead of real widgets, same reason {@code
+ * NuclyusContainerScreen} itself doesn't use {@code Button} for its own top-level tabs. {@code
+ * client.PlotConfigScreen#init} pushes {@code topPos} down by {@link #SUB_TAB_BAR_HEIGHT} whenever
+ * this band can appear, so the real Shop slot panel (which this class doesn't own the layout of)
+ * always clears it regardless of which sub-tab is currently active. Switches between three pages:
  * <ul>
  *   <li><b>Shop</b> (always visible) -- the real Shop/Buy/Sell/Player slots {@link PlotConfigMenu}
  *   already carries, merged in directly 2026-10-24 (explicit request: "Place it fully within the
@@ -70,10 +82,24 @@ public final class ShopTab implements NuclyusMenu {
 
     private enum SubTab { SHOP, MANAGE, PLANNED }
 
+    private static final SubTab[] SUB_TAB_ORDER = { SubTab.SHOP, SubTab.MANAGE, SubTab.PLANNED };
+
     private static final int ROW_HEIGHT = 24;
     private static final int PANEL_HALF_WIDTH = 220;
-    private static final int SUB_TAB_Y_OFFSET = 16;
-    private static final int CONTENT_TOP_OFFSET = 56;
+
+    /** Real second tier of tabs -- see this class's own doc. Same height as {@link NuclyusContainerScreen#TAB_BAR_HEIGHT}. */
+    public static final int SUB_TAB_BAR_HEIGHT = 24;
+    private static final int SUB_TAB_PADDING = 6;
+    // Same palette shape as NuclyusContainerScreen's own tab bar, one shade darker background so the
+    // two tiers read as stacked rather than identical -- duplicated rather than shared, same
+    // established "copy and tweak" convention NuclyusContainerScreen's own doc cites for its copy of
+    // NuclyusMenuScreen's palette.
+    private static final int SUB_TAB_BAR_BG = 0xFF2A2A2A;
+    private static final int SUB_TAB_ACTIVE_BG = 0xFFC6C6C6;
+    private static final int SUB_TAB_INACTIVE_BG = 0xFF8B8B8B;
+    private static final int SUB_TAB_TEXT_COLOR = 0xFF202020;
+
+    private static final int CONTENT_TOP_OFFSET = SUB_TAB_BAR_HEIGHT + 24;
 
     // Real slot panel's own layout (must stay in lockstep with PlotConfigMenu's identical copies).
     private static final int SHOP_TOP_Y = 18;
@@ -89,10 +115,6 @@ public final class ShopTab implements NuclyusMenu {
     private WidgetHost host;
     private NuclyusContainerScreen<?> containerScreen;
     private SubTab subTab = SubTab.SHOP;
-
-    private Button shopSubTabButton;
-    private Button manageSubTabButton;
-    private Button plannedSubTabButton;
 
     // "Shop" page.
     private Button confirmButton;
@@ -149,58 +171,64 @@ public final class ShopTab implements NuclyusMenu {
         plannedScrollOffset = 0;
         menu.setShopSlotsActive(true);
 
-        Rect2i area = host.contentArea();
-        addSubTabButtons(area);
-        addPageWidgets(area);
+        addPageWidgets(host.contentArea());
     }
 
     @Override
     public void onHidden() {
         menu.setShopSlotsActive(false);
-        removeSubTabButtons();
         removePageWidgets();
     }
 
-    private void addSubTabButtons(Rect2i area) {
-        int x = area.getX() + 20;
-        int y = area.getY() + SUB_TAB_Y_OFFSET;
-        shopSubTabButton = host.addMenuWidget(Button.builder(Component.literal("Shop"), b -> switchSubTab(SubTab.SHOP))
-                .bounds(x, y, 100, 20).build());
-        x += 105;
-        if (data.canManage()) {
-            manageSubTabButton = host.addMenuWidget(Button.builder(Component.literal("Manage Shop"), b -> switchSubTab(SubTab.MANAGE))
-                    .bounds(x, y, 120, 20).build());
-            x += 125;
-            plannedSubTabButton = host.addMenuWidget(Button.builder(Component.literal("Planned Inventory"), b -> switchSubTab(SubTab.PLANNED))
-                    .bounds(x, y, 150, 20).build());
-        }
-        refreshSubTabButtons();
+    /** Only "Shop" exists at all for a non-manager viewer -- a one-entry band would be pointless chrome, so the whole second tier is skipped (see {@link #render}/{@link #mouseClicked}). */
+    private List<SubTab> visibleSubTabs() {
+        return data.canManage() ? List.of(SUB_TAB_ORDER) : List.of(SubTab.SHOP);
     }
 
-    private void removeSubTabButtons() {
-        if (shopSubTabButton != null) {
-            host.removeMenuWidget(shopSubTabButton);
-            shopSubTabButton = null;
-        }
-        if (manageSubTabButton != null) {
-            host.removeMenuWidget(manageSubTabButton);
-            manageSubTabButton = null;
-        }
-        if (plannedSubTabButton != null) {
-            host.removeMenuWidget(plannedSubTabButton);
-            plannedSubTabButton = null;
-        }
+    private static String subTabLabel(SubTab tab) {
+        return switch (tab) {
+            case SHOP -> "Shop";
+            case MANAGE -> "Manage Shop";
+            case PLANNED -> "Planned Inventory";
+        };
     }
 
-    private void refreshSubTabButtons() {
-        if (shopSubTabButton != null) {
-            shopSubTabButton.active = subTab != SubTab.SHOP;
+    /** Same text-width-sized-segments-plus-slack-absorbing-last-tab algorithm as {@code NuclyusContainerScreen#tabRects()}. */
+    private Rect2i[] subTabRects(Rect2i area) {
+        List<SubTab> visible = visibleSubTabs();
+        Font font = Minecraft.getInstance().font;
+        int[] widths = new int[visible.size()];
+        int sum = 0;
+        for (int i = 0; i < visible.size(); i++) {
+            widths[i] = font.width(subTabLabel(visible.get(i))) + SUB_TAB_PADDING * 2;
+            sum += widths[i];
         }
-        if (manageSubTabButton != null) {
-            manageSubTabButton.active = subTab != SubTab.MANAGE;
+        int lastIndex = widths.length - 1;
+        widths[lastIndex] = Math.max(widths[lastIndex], area.getWidth() - (sum - widths[lastIndex]));
+        Rect2i[] rects = new Rect2i[visible.size()];
+        int x = area.getX();
+        for (int i = 0; i < widths.length; i++) {
+            rects[i] = new Rect2i(x, area.getY(), widths[i], SUB_TAB_BAR_HEIGHT);
+            x += widths[i];
         }
-        if (plannedSubTabButton != null) {
-            plannedSubTabButton.active = subTab != SubTab.PLANNED;
+        return rects;
+    }
+
+    private void renderSubTabBar(GuiGraphicsExtractor graphics, Rect2i area) {
+        Font font = Minecraft.getInstance().font;
+        graphics.fill(area.getX(), area.getY(), area.getX() + area.getWidth(), area.getY() + SUB_TAB_BAR_HEIGHT, SUB_TAB_BAR_BG);
+        List<SubTab> visible = visibleSubTabs();
+        Rect2i[] rects = subTabRects(area);
+        for (int i = 0; i < rects.length; i++) {
+            Rect2i rect = rects[i];
+            boolean active = subTab == visible.get(i);
+            int bg = active ? SUB_TAB_ACTIVE_BG : SUB_TAB_INACTIVE_BG;
+            graphics.fill(rect.getX(), rect.getY(), rect.getX() + rect.getWidth(), rect.getY() + rect.getHeight(), bg);
+            String label = subTabLabel(visible.get(i));
+            graphics.text(font, label,
+                    rect.getX() + (rect.getWidth() - font.width(label)) / 2,
+                    rect.getY() + (SUB_TAB_BAR_HEIGHT - font.lineHeight) / 2,
+                    SUB_TAB_TEXT_COLOR, false);
         }
     }
 
@@ -211,7 +239,6 @@ public final class ShopTab implements NuclyusMenu {
         removePageWidgets();
         subTab = newSubTab;
         menu.setShopSlotsActive(subTab == SubTab.SHOP);
-        refreshSubTabButtons();
         addPageWidgets(host.contentArea());
     }
 
@@ -564,6 +591,25 @@ public final class ShopTab implements NuclyusMenu {
             case MANAGE -> renderManagePage(graphics, area);
             case PLANNED -> renderPlannedPage(graphics, area);
         }
+        if (data.canManage()) {
+            renderSubTabBar(graphics, area);
+        }
+    }
+
+    @Override
+    public boolean mouseClicked(Rect2i area, MouseButtonEvent event, boolean doubleClick) {
+        if (!data.canManage() || event.y() < area.getY() || event.y() >= area.getY() + SUB_TAB_BAR_HEIGHT) {
+            return false;
+        }
+        List<SubTab> visible = visibleSubTabs();
+        Rect2i[] rects = subTabRects(area);
+        for (int i = 0; i < rects.length; i++) {
+            if (rects[i].contains((int) event.x(), (int) event.y())) {
+                switchSubTab(visible.get(i));
+                return true;
+            }
+        }
+        return true; // Swallow the click regardless -- the band tiles the full width, so landing here with no rect hit shouldn't happen, but a click inside this strip should never fall through to a real slot beneath it either way.
     }
 
     /**

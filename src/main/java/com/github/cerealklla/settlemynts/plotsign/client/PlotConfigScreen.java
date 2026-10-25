@@ -36,6 +36,25 @@ public final class PlotConfigScreen extends NuclyusContainerScreen<PlotConfigMen
         super(menu, inventory, title, buildTabs(menu), PLAYER_INV_X + 9 * 18 + 10,
                 TOP_Y + PlotConfigMenu.VISIBLE_SHOP_ROWS * ROW_HEIGHT + 56);
         this.inventoryLabelY = -1000; // Suppress vanilla's auto "Inventory" label -- player inv has no separate panel here, same as the old ShopCartScreen.
+        // Suppress vanilla's auto title label too, 2026-10-24 -- it was never moved to account for
+        // ShopTab's own second tab tier and rendered right on top of it (misread live as "ShopConfig"
+        // fused with the "Shop" sub-tab button beneath it). Every tab already carries its own heading
+        // via the tab bar(s) themselves; a floating "Plot Config" string added nothing real.
+        this.titleLabelY = -1000;
+    }
+
+    /**
+     * Clears {@link ShopTab}'s own second tab tier, whenever it can be showing, so the real Shop/
+     * Buy/Sell/Player slot panel (and {@code ShopTab}'s own header text drawn relative to {@link
+     * #slotPanelTop()}) never sits underneath it -- see {@link NuclyusContainerScreen#extraTopOffset()}'s
+     * own doc for why this has to be this hook and not a plain {@code init()} override. Gated on
+     * {@code canManage} to match {@code ShopTab#visibleSubTabs()} exactly -- a non-manager viewer
+     * never sees that second tier at all (only "Shop" exists for them), so nothing needs the extra
+     * clearance in that case.
+     */
+    @Override
+    protected int extraTopOffset() {
+        return menu.hasShop() && menu.signData().canManage() ? ShopTab.SUB_TAB_BAR_HEIGHT : 0;
     }
 
     private static List<NuclyusMenu> buildTabs(PlotConfigMenu menu) {
