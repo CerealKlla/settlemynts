@@ -93,8 +93,15 @@ public final class GuardSpawnTicker {
 
         if (stand.assignedGuardId().isPresent()) {
             // Guard already alive (GuardEntity#die clears this field, so "present" means genuinely
-            // alive, same assumption the old early-return here already made) -- nothing left to do
-            // here; gear top-up is event-driven now, see GuardEquipBoxChangeListener.
+            // alive, same assumption the old early-return here already made) -- gear top-up is
+            // event-driven now (GuardEquipBoxChangeListener). A companion's cooldown elapsing has no
+            // real event to react to at all (pure wall-clock time passing) -- this 5-second scan,
+            // already visiting every stand for the guard's own death/respawn timer, is the closest
+            // thing to a "timer" available without a dedicated new scheduling mechanism; see
+            // GuardEntity#recheckCompanions's own doc.
+            if (level.getEntity(stand.assignedGuardId().get()) instanceof GuardEntity guard) {
+                guard.recheckCompanions(level);
+            }
             return;
         }
         if (level.getGameTime() < stand.respawnReadyAtGameTime()) {

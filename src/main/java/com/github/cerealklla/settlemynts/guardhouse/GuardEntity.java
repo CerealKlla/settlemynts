@@ -8,8 +8,12 @@ import com.github.cerealklla.cartographyr.api.Cartography;
 import com.github.cerealklla.cartographyr.geo.EntityId;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
+import com.github.cerealklla.kyt.api.Kyt;
+import com.github.cerealklla.kyt.generic.GenericFamily;
 import com.github.cerealklla.kyt.loadout.LoadoutRecord;
+import com.github.cerealklla.settlemynts.bridge.LyfeEquipmentFamiliesBridge;
 import com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge;
+import com.github.cerealklla.settlemynts.bridge.LyfeSummoningBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
@@ -363,6 +367,82 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         stuckWatchdog.tick(this, homePos);
     }
 
+    /**
+     * Bound Allay in a Bottle / Summoning Stone item(s) the Kyt's hotbar specified (explicit user
+     * spec, 2026-10-25), tracked internally -- never visibly equipped (no vanilla EquipmentSlot of
+     * its own; would otherwise compete with a real weapon for MAINHAND). "The Kyt's hotbar already
+     * has room" for more than one, so this is a list, not a single slot. A companion specified via
+     * the Kyt's own {@code offhand} field instead is a different case entirely -- "if the Kyt demands
+     * that the item be held in the off-hand then that's where it will be at all times" (explicit user
+     * spec) -- it's equipped normally into real OFFHAND by the unmodified {@link #withdrawAndEquip}
+     * call in {@link #equipFromLoadoutUsingBoxes}, not tracked here; see {@link #trackedCompanionStacks}.
+     */
+    private final List<ItemStack> companionItems = new java.util.ArrayList<>();
+
+    /**
+     * "Only events. Guard spawns, summon all companions. Companion Dies, set timer on guard to
+     * re-summon. No unnecessary persistent ticks" (explicit user spec, 2026-10-25) -- deliberately
+     * NOT a per-guard, per-tick check (like {@link #customServerAiStep}, rejected for exactly this
+     * reason). Called once, as a real event, from two places: {@link #equipFromLoadoutUsingBoxes}
+     * right after spawn-equip (the "Guard spawns, summon all companions" event), and {@link
+     * GuardSpawnTicker}'s own already-existing periodic per-stand scan for an already-alive guard
+     * (the closest thing to a "timer" available without a new scheduling mechanism -- the Guard's own
+     * death/respawn timer is already driven the identical way, via {@code
+     * GuardKitStandEntity#respawnReadyAtGameTime} checked on that same scan, not a dedicated ticker).
+     * {@link LyfeSummoningBridge#tickCompanion} is itself both the summon trigger and the death/
+     * cooldown tracker -- noticing a previously-summoned companion has died starts its cooldown right
+     * there (mirrors {@code AllayDeathListener}), and a companion with no cooldown pending summons
+     * immediately, so one call per tracked stack covers "just spawned," "died, start cooldown," and
+     * "cooldown elapsed, re-summon" with no separate code path for any of the three.
+     */
+    void recheckCompanions(ServerLevel level) {
+        if (!LyfeSummoningBridge.isLoaded()) {
+            return;
+        }
+        for (ItemStack stack : trackedCompanionStacks()) {
+            LyfeSummoningBridge.tickCompanion(level, stack, getUUID(), getX(), getY(), getZ(), getYRot());
+        }
+    }
+
+    /** {@link #companionItems} plus the real OFFHAND stack, if that happens to be a companion item too (see {@link #companionItems}'s own doc). */
+    private List<ItemStack> trackedCompanionStacks() {
+        ItemStack offhand = getItemBySlot(EquipmentSlot.OFFHAND);
+        if (!offhand.isEmpty() && LyfeSummoningBridge.isLoaded() && LyfeSummoningBridge.isCompanionItem(offhand)) {
+            List<ItemStack> combined = new java.util.ArrayList<>(companionItems);
+            combined.add(offhand);
+            return combined;
+        }
+        return companionItems;
+    }
+
+    /**
+     * Scans {@code record.hotbar()} for every companion-type entry, withdraws each from {@code
+     * plotBoxes}, and tracks it in {@link #companionItems} -- called at spawn-equip time, and again
+     * whenever {@link #equipMissingFromLoadoutUsingBoxes} reacts to a real box-contents-changed event
+     * (so a companion listed in the Kyt but out of stock at spawn still gets picked up later, without
+     * polling). Safe to call repeatedly: skips any candidate whose item type is already tracked, so a
+     * second call never double-withdraws the same companion.
+     */
+    private void withdrawCompanionsFromHotbar(List<Container> plotBoxes, LoadoutRecord record) {
+        if (!LyfeSummoningBridge.isLoaded()) {
+            return;
+        }
+        for (ItemStack candidate : record.hotbar()) {
+            if (candidate.isEmpty() || !LyfeSummoningBridge.isCompanionItem(candidate)) {
+                continue;
+            }
+            boolean alreadyTracked = companionItems.stream().anyMatch(stack -> stack.getItem() == candidate.getItem());
+            if (alreadyTracked) {
+                continue;
+            }
+            Identifier itemId = BuiltInRegistries.ITEM.getKey(candidate.getItem());
+            List<ItemStack> taken = ContainerWithdraw.drain(plotBoxes, ShopResource.ofItem(itemId), 1);
+            if (!taken.isEmpty()) {
+                companionItems.add(taken.get(0));
+            }
+        }
+    }
+
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
         super.addAdditionalSaveData(output);
@@ -370,6 +450,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
         output.storeNullable("AssignedStandId", UUIDUtil.CODEC, assignedStandId);
         output.storeNullable("HomePos", net.minecraft.core.BlockPos.CODEC, homePos);
+        output.store("CompanionItems", ItemStack.OPTIONAL_CODEC.listOf(), companionItems);
     }
 
     @Override
@@ -379,6 +460,8 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
         assignedStandId = input.read("AssignedStandId", UUIDUtil.CODEC).orElse(null);
         homePos = input.read("HomePos", net.minecraft.core.BlockPos.CODEC).orElse(null);
+        companionItems.clear();
+        companionItems.addAll(input.read("CompanionItems", ItemStack.OPTIONAL_CODEC.listOf()).orElse(List.of()));
         // Real bug found live, 2026-10-08: a guard that existed before the ranged-attack fix shot
         // nothing on Production even after redeploying, while a freshly-spawned guard worked fine on
         // the Dev Server. Root cause: LivingEntity#readAdditionalSaveData (just called via super,
@@ -448,11 +531,30 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         }
         setPersistenceRequired();
         setCanPickUpLoot(false);
+
+        // "Guard spawns, summon all companions" (explicit user spec, 2026-10-25) -- see
+        // companionItems'/recheckCompanions' own doc.
+        withdrawCompanionsFromHotbar(plotBoxes, record);
+        if (level() instanceof ServerLevel serverLevel) {
+            recheckCompanions(serverLevel);
+        }
     }
 
+    /**
+     * Resolves a plain real item's template normally (matched by id, same as always), or -- if
+     * {@code template} is one of Kyt's Generic placeholders (explicit user spec, 2026-10-25: "Use
+     * any Sword"/etc.) -- walks that family's real items lowest tier first, equipping the first one
+     * actually in stock ("the lowest tier available of the generic first"). {@link Kyt#genericFamilyOf}
+     * is called unguarded, same as this file's existing unconditional {@link LoadoutRecord} usage --
+     * reaching this method at all already requires a real Kyt loadout, so Kyt is necessarily loaded.
+     */
     private boolean withdrawAndEquip(List<Container> plotBoxes, ItemStack template, EquipmentSlot slot) {
         if (template.isEmpty()) {
             return false;
+        }
+        Optional<GenericFamily> family = Kyt.genericFamilyOf(template);
+        if (family.isPresent()) {
+            return withdrawGenericAndEquip(plotBoxes, family.get(), slot);
         }
         Identifier itemId = BuiltInRegistries.ITEM.getKey(template.getItem());
         List<ItemStack> taken = ContainerWithdraw.drain(plotBoxes, ShopResource.ofItem(itemId), 1);
@@ -461,6 +563,20 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         }
         setItemSlot(slot, taken.get(0));
         return true;
+    }
+
+    private boolean withdrawGenericAndEquip(List<Container> plotBoxes, GenericFamily family, EquipmentSlot slot) {
+        if (!LyfeEquipmentFamiliesBridge.isLoaded()) {
+            return false;
+        }
+        for (Identifier candidateId : LyfeEquipmentFamiliesBridge.idsLowToHigh(family)) {
+            List<ItemStack> taken = ContainerWithdraw.drain(plotBoxes, ShopResource.ofItem(candidateId), 1);
+            if (!taken.isEmpty()) {
+                setItemSlot(slot, taken.get(0));
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -502,6 +618,13 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         withdrawAndEquipIfMissing(plotBoxes, record.offhand(), EquipmentSlot.OFFHAND);
         if (getItemBySlot(EquipmentSlot.MAINHAND).isEmpty()) {
             withdrawAndEquipFirstAvailable(plotBoxes, record, EquipmentSlot.MAINHAND);
+        }
+        // Box contents just changed (this method's own trigger, see GuardEquipBoxChangeListener) --
+        // a companion that was out of stock at spawn may be available now; this event is also a
+        // reasonable point to retry summoning one that's tracked but still on/past cooldown.
+        withdrawCompanionsFromHotbar(plotBoxes, record);
+        if (level() instanceof ServerLevel serverLevel) {
+            recheckCompanions(serverLevel);
         }
     }
 
