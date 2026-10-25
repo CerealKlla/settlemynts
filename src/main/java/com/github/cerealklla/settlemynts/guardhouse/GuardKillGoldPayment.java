@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.guardhouse;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -22,23 +23,22 @@ import net.neoforged.neoforge.event.entity.living.LivingDropsEvent;
 
 /**
  * "Any time a Town Guard kills a mob the town should get paid the same amount of gold which
- * dropped for the mob. This is singleton, meaning if multiple guards help the town just gets 1
- * payment. This payment goes to the town hall directly." (explicit user spec, 2026-10-23)
+ * dropped for the mob... This payment goes to the town hall directly." (explicit user spec,
+ * 2026-10-23). The original spec paid only one Guard's settlement per kill regardless of how many
+ * Guards contributed ("singleton") -- removed 2026-10-24 per explicit follow-up: "let's remove the
+ * restriction on guard kill bounties; now all guards that contribute to a kill will be rewarded."
+ * Every Guard among the mob's assist-credited attackers now triggers its own independent payment to
+ * its own settlement's town hall -- two Guards from the same town jointly finishing off a mob now
+ * pays that one town twice, not once; Guards from two different settlements each pay their own town.
  *
  * <p>Reads the real, already-rolled {@link LivingDropsEvent#getDrops()} collection rather than
  * re-deriving an amount independently -- registered at {@link EventPriority#LOWEST} so it runs
  * after both Yconomics' own gold roll ({@code mob.HostileMobDrops}, default priority) and Lyfe's
  * Gold Find scaling ({@code loot.GoldFindDropListener}, {@link EventPriority#LOW}), so "the same
  * amount which dropped" always matches what a player would actually see on the ground -- no
- * cross-mod re-roll, no risk of the two numbers drifting apart.
- *
- * <p>"Singleton" is satisfied structurally: this handler only ever runs once per kill (one event),
- * and only ever finds *one* qualifying Guard (the first one found among the mob's assist-credited
- * attackers, or the killing blow's own source if Lyfe isn't loaded) rather than iterating every
- * assisting Guard -- so N guards from the same settlement jointly finishing off a mob still produce
- * exactly one deposit. If guards from two different settlements both assisted (a rare, edge-case
- * cross-settlement kill), only the one Guard this resolves to gets paid -- a judgment call, not a
- * design requirement from the spec either way.
+ * cross-mod re-roll, no risk of the two numbers drifting apart. Each paid-out Guard gets the full
+ * {@code goldAmount}, not a divided share -- the spec says "the same amount... for the mob" per
+ * Guard, not a pool split between contributors.
  */
 public final class GuardKillGoldPayment {
 
@@ -48,12 +48,17 @@ public final class GuardKillGoldPayment {
         if (!(deadMob.level() instanceof ServerLevel level)) {
             return;
         }
-        GuardEntity guard = findAssistingGuard(level, event);
-        if (guard == null || guard.getSettlementCoreId() == null) {
-            return;
-        }
         int goldAmount = sumGoldNuggets(event.getDrops());
         if (goldAmount <= 0) {
+            return;
+        }
+        for (GuardEntity guard : findAssistingGuards(level, event)) {
+            payGuardsSettlement(level, guard, goldAmount);
+        }
+    }
+
+    private static void payGuardsSettlement(ServerLevel level, GuardEntity guard, int goldAmount) {
+        if (guard.getSettlementCoreId() == null) {
             return;
         }
         if (!(level.getEntity(guard.getSettlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
@@ -70,16 +75,17 @@ public final class GuardKillGoldPayment {
         }
     }
 
-    private static GuardEntity findAssistingGuard(ServerLevel level, LivingDropsEvent event) {
+    private static List<GuardEntity> findAssistingGuards(ServerLevel level, LivingDropsEvent event) {
         if (LyfeAssistBridge.isLoaded()) {
+            List<GuardEntity> guards = new ArrayList<>();
             for (UUID attackerId : LyfeAssistBridge.getAssistedAttackerIds(event.getEntity())) {
                 if (level.getEntity(attackerId) instanceof GuardEntity guard) {
-                    return guard;
+                    guards.add(guard);
                 }
             }
-            return null;
+            return guards;
         }
-        return event.getSource().getEntity() instanceof GuardEntity guard ? guard : null;
+        return event.getSource().getEntity() instanceof GuardEntity guard ? List.of(guard) : List.of();
     }
 
     private static int sumGoldNuggets(Iterable<ItemEntity> drops) {
