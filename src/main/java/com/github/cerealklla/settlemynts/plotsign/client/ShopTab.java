@@ -108,8 +108,10 @@ public final class ShopTab implements NuclyusMenu {
     private Button manageSaveButton;
 
     // "Planned Inventory" page.
+    private static final int PLANNED_PANEL_HALF_WIDTH = 260;
     private OpenPlannedInventoryPayload plannedData;
-    private final Map<Identifier, String> plannedPendingValues = new LinkedHashMap<>();
+    private final Map<Identifier, String> plannedForSalePendingValues = new LinkedHashMap<>();
+    private final Map<Identifier, String> plannedKeepPrivatePendingValues = new LinkedHashMap<>();
     private final List<EditBox> plannedRowWidgets = new ArrayList<>();
     private int plannedScrollOffset;
     private Button plannedSaveButton;
@@ -141,7 +143,8 @@ public final class ShopTab implements NuclyusMenu {
         manageData = null;
         plannedData = null;
         managePendingValues.clear();
-        plannedPendingValues.clear();
+        plannedForSalePendingValues.clear();
+        plannedKeepPrivatePendingValues.clear();
         manageScrollOffset = 0;
         plannedScrollOffset = 0;
         menu.setShopSlotsActive(true);
@@ -241,7 +244,8 @@ public final class ShopTab implements NuclyusMenu {
             }
             case PLANNED -> {
                 plannedData = null;
-                plannedPendingValues.clear();
+                plannedForSalePendingValues.clear();
+                plannedKeepPrivatePendingValues.clear();
                 plannedScrollOffset = 0;
                 send(new RequestPlannedInventoryPayload(data.signPos()));
                 plannedSaveButton = host.addMenuWidget(Button.builder(Component.literal("Save Changes"), b -> savePlannedChanges())
@@ -285,8 +289,24 @@ public final class ShopTab implements NuclyusMenu {
         return area.getY() + CONTENT_TOP_OFFSET;
     }
 
+    /**
+     * Sized to actual row content, clamped to the window's own available space -- real report,
+     * 2026-10-24: "the GUI is also a little strangely stretched." Used to unconditionally stretch all
+     * the way to {@code area.getHeight() - 30} regardless of row count, since {@code area} is {@code
+     * host.contentArea()}'s full window span, not this panel's own natural size (see {@code
+     * client.PlotConfigScreen}'s own class doc on why {@code imageWidth}/{@code imageHeight} don't
+     * constrain this tab at all) -- a shop with only a handful of listings left a large empty gap
+     * between the last row and the Save Changes button. A maximally-tall window fallback still applies
+     * while {@code manageData} hasn't arrived yet (nothing to size against) and as a hard ceiling once
+     * it has (so a long list still scrolls instead of overflowing the window).
+     */
     private int manageFooterTop(Rect2i area) {
-        return area.getY() + area.getHeight() - 30;
+        int maxFooter = area.getY() + area.getHeight() - 30;
+        if (manageData == null) {
+            return maxFooter;
+        }
+        int rowCount = Math.max(1, manageData.inventory().size());
+        return Math.min(maxFooter, manageViewportTop(area) + rowCount * ROW_HEIGHT);
     }
 
     private int manageMaxScrollOffset(Rect2i area) {
@@ -404,8 +424,14 @@ public final class ShopTab implements NuclyusMenu {
         return area.getY() + CONTENT_TOP_OFFSET;
     }
 
+    /** Same content-sized-footer fix as {@link #manageFooterTop}'s own doc -- see that method. */
     private int plannedFooterTop(Rect2i area) {
-        return area.getY() + area.getHeight() - 30;
+        int maxFooter = area.getY() + area.getHeight() - 30;
+        if (plannedData == null) {
+            return maxFooter;
+        }
+        int rowCount = Math.max(1, plannedData.entries().size());
+        return Math.min(maxFooter, plannedViewportTop(area) + rowCount * ROW_HEIGHT);
     }
 
     private int plannedMaxScrollOffset(Rect2i area) {
@@ -423,6 +449,15 @@ public final class ShopTab implements NuclyusMenu {
         plannedRowWidgets.clear();
     }
 
+    // Column x-positions for the Planned Inventory page's four columns (Item | In Stock | For Sale |
+    // Keep Private) -- a dedicated, wider half-width than Manage Shop's own PANEL_HALF_WIDTH, since
+    // this page needs room for two numeric EditBoxes instead of one.
+    private static final int PLANNED_STOCK_X_OFFSET = -60;
+    private static final int PLANNED_FOR_SALE_X_OFFSET = 10;
+    private static final int PLANNED_FOR_SALE_WIDTH = 70;
+    private static final int PLANNED_KEEP_PRIVATE_X_OFFSET = 100;
+    private static final int PLANNED_KEEP_PRIVATE_WIDTH = 90;
+
     private void rebuildPlannedRows(Rect2i area) {
         clearPlannedRowWidgets();
         if (plannedData == null) {
@@ -438,13 +473,21 @@ public final class ShopTab implements NuclyusMenu {
             if (rowY < viewportTop || rowY + ROW_HEIGHT > footerTop) {
                 continue;
             }
-            EditBox targetBox = new EditBox(Minecraft.getInstance().font, centerX + 120, rowY, 90, 20, Component.literal("Target Qty"));
-            targetBox.setMaxLength(9);
-            targetBox.setFilter(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
-            targetBox.setValue(plannedPendingValues.getOrDefault(entry.resourceKey(), ""));
-            targetBox.setResponder(value -> plannedPendingValues.put(entry.resourceKey(), value));
-            host.addMenuWidget(targetBox);
-            plannedRowWidgets.add(targetBox);
+            EditBox forSaleBox = new EditBox(Minecraft.getInstance().font, centerX + PLANNED_FOR_SALE_X_OFFSET, rowY, PLANNED_FOR_SALE_WIDTH, 20, Component.literal("For Sale"));
+            forSaleBox.setMaxLength(9);
+            forSaleBox.setFilter(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
+            forSaleBox.setValue(plannedForSalePendingValues.getOrDefault(entry.resourceKey(), ""));
+            forSaleBox.setResponder(value -> plannedForSalePendingValues.put(entry.resourceKey(), value));
+            host.addMenuWidget(forSaleBox);
+            plannedRowWidgets.add(forSaleBox);
+
+            EditBox keepPrivateBox = new EditBox(Minecraft.getInstance().font, centerX + PLANNED_KEEP_PRIVATE_X_OFFSET, rowY, PLANNED_KEEP_PRIVATE_WIDTH, 20, Component.literal("Keep Private"));
+            keepPrivateBox.setMaxLength(9);
+            keepPrivateBox.setFilter(s -> s.isEmpty() || s.chars().allMatch(Character::isDigit));
+            keepPrivateBox.setValue(plannedKeepPrivatePendingValues.getOrDefault(entry.resourceKey(), ""));
+            keepPrivateBox.setResponder(value -> plannedKeepPrivatePendingValues.put(entry.resourceKey(), value));
+            host.addMenuWidget(keepPrivateBox);
+            plannedRowWidgets.add(keepPrivateBox);
         }
     }
 
@@ -453,7 +496,8 @@ public final class ShopTab implements NuclyusMenu {
             ClientPlotSignRequests.takePendingPlannedInventory().ifPresent(payload -> {
                 plannedData = payload;
                 for (PlannedInventoryEntry entry : plannedData.entries()) {
-                    plannedPendingValues.put(entry.resourceKey(), entry.targetCount() >= 0 ? Integer.toString(entry.targetCount()) : "");
+                    plannedForSalePendingValues.put(entry.resourceKey(), entry.targetCount() >= 0 ? Integer.toString(entry.targetCount()) : "");
+                    plannedKeepPrivatePendingValues.put(entry.resourceKey(), entry.keepPrivateCount() > 0 ? Integer.toString(entry.keepPrivateCount()) : "");
                 }
                 rebuildPlannedRows(area);
             });
@@ -469,10 +513,11 @@ public final class ShopTab implements NuclyusMenu {
             return;
         }
 
-        graphics.fill(centerX - PANEL_HALF_WIDTH, viewportTop - 16, centerX + PANEL_HALF_WIDTH, footerTop + 4, 0xC0101010);
-        graphics.text(font, "Item", centerX - PANEL_HALF_WIDTH + 10, viewportTop - 14, 0xFFAAAAAA);
-        graphics.text(font, "Current Stock", centerX + 10, viewportTop - 14, 0xFFAAAAAA);
-        graphics.text(font, "Target Qty", centerX + 120, viewportTop - 14, 0xFFAAAAAA);
+        graphics.fill(centerX - PLANNED_PANEL_HALF_WIDTH, viewportTop - 16, centerX + PLANNED_PANEL_HALF_WIDTH, footerTop + 4, 0xC0101010);
+        graphics.text(font, "Item", centerX - PLANNED_PANEL_HALF_WIDTH + 10, viewportTop - 14, 0xFFAAAAAA);
+        graphics.text(font, "In Stock", centerX + PLANNED_STOCK_X_OFFSET, viewportTop - 14, 0xFFAAAAAA);
+        graphics.text(font, "For Sale", centerX + PLANNED_FOR_SALE_X_OFFSET, viewportTop - 14, 0xFFAAAAAA);
+        graphics.text(font, "Keep Private", centerX + PLANNED_KEEP_PRIVATE_X_OFFSET, viewportTop - 14, 0xFFAAAAAA);
 
         List<PlannedInventoryEntry> entries = plannedData.entries();
         if (entries.isEmpty()) {
@@ -481,12 +526,12 @@ public final class ShopTab implements NuclyusMenu {
             return;
         }
 
-        graphics.enableScissor(centerX - PANEL_HALF_WIDTH, viewportTop, centerX + PANEL_HALF_WIDTH, footerTop);
+        graphics.enableScissor(centerX - PLANNED_PANEL_HALF_WIDTH, viewportTop, centerX + PLANNED_PANEL_HALF_WIDTH, footerTop);
         int y = viewportTop - plannedScrollOffset;
         for (PlannedInventoryEntry entry : entries) {
             if (y + ROW_HEIGHT >= viewportTop && y <= footerTop) {
-                graphics.text(font, entry.label(), centerX - PANEL_HALF_WIDTH + 10, y + 6, 0xFFFFFFFF);
-                graphics.text(font, Integer.toString(entry.currentStock()), centerX + 10, y + 6, 0xFFFFFFFF);
+                graphics.text(font, entry.label(), centerX - PLANNED_PANEL_HALF_WIDTH + 10, y + 6, 0xFFFFFFFF);
+                graphics.text(font, Integer.toString(entry.currentStock()), centerX + PLANNED_STOCK_X_OFFSET, y + 6, 0xFFFFFFFF);
             }
             y += ROW_HEIGHT;
         }
@@ -499,10 +544,12 @@ public final class ShopTab implements NuclyusMenu {
         }
         List<PlannedInventoryUpdate> updates = plannedData.entries().stream()
                 .map(entry -> {
-                    String raw = plannedPendingValues.getOrDefault(entry.resourceKey(), "").trim();
-                    boolean managed = !raw.isEmpty();
-                    int target = managed ? Integer.parseInt(raw) : 0;
-                    return new PlannedInventoryUpdate(entry.resourceKey(), entry.isTag(), managed, target);
+                    String rawForSale = plannedForSalePendingValues.getOrDefault(entry.resourceKey(), "").trim();
+                    String rawKeepPrivate = plannedKeepPrivatePendingValues.getOrDefault(entry.resourceKey(), "").trim();
+                    boolean managed = !rawForSale.isEmpty() || !rawKeepPrivate.isEmpty();
+                    int forSale = rawForSale.isEmpty() ? 0 : Integer.parseInt(rawForSale);
+                    int keepPrivate = rawKeepPrivate.isEmpty() ? 0 : Integer.parseInt(rawKeepPrivate);
+                    return new PlannedInventoryUpdate(entry.resourceKey(), entry.isTag(), managed, forSale, keepPrivate);
                 })
                 .toList();
         send(new SetPlannedInventoryPayload(data.signPos(), updates));

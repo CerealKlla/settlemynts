@@ -1218,7 +1218,7 @@ public class SettlemyntsMod {
                                         ? com.github.cerealklla.settlemynts.zone.ShopResource.ofTag(net.minecraft.tags.TagKey.create(net.minecraft.core.registries.Registries.ITEM, key))
                                         : com.github.cerealklla.settlemynts.zone.ShopResource.ofItem(key);
                                 int baseStock = com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, baseResource);
-                                return Math.max(0, target.targetCount() - baseStock);
+                                return Math.max(0, (target.keepPrivateCount() + target.targetCount()) - baseStock);
                             })
                             .orElse(0);
                     return new com.github.cerealklla.settlemynts.plotsign.ShopListingEntry(
@@ -1715,7 +1715,7 @@ public class SettlemyntsMod {
             // here instead: never sell more than the plot's own PlannedInventoryTarget still wants,
             // recomputed fresh against live stock right now.
             int cap = freshPlot.flatMap(p -> findPlannedInventoryTarget(p, listing.resourceKey(), listing.isTag()))
-                    .map(target -> Math.max(0, target.targetCount() - com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, resource)))
+                    .map(target -> Math.max(0, (target.keepPrivateCount() + target.targetCount()) - com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, resource)))
                     .orElse(0);
             int queuedCount = queuedSell.stream().mapToInt(net.minecraft.world.item.ItemStack::getCount).sum();
             java.util.List<net.minecraft.world.item.ItemStack> toSell = new java.util.ArrayList<>();
@@ -1807,7 +1807,7 @@ public class SettlemyntsMod {
             }
             com.github.cerealklla.settlemynts.zone.ShopResource resource = resourceFor(listing);
             int remaining = findPlannedInventoryTarget(freshPlot.get(), listing.resourceKey(), listing.isTag())
-                    .map(target -> Math.max(0, target.targetCount() - com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, resource)))
+                    .map(target -> Math.max(0, (target.keepPrivateCount() + target.targetCount()) - com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(boxes, resource)))
                     .orElse(0);
             remaining -= com.github.cerealklla.settlemynts.zone.ContainerWithdraw.countAvailable(java.util.List.of(menu.sellContainer()), resource);
             if (remaining <= 0) {
@@ -2213,7 +2213,7 @@ public class SettlemyntsMod {
             int tagStock = stock.entrySet().stream()
                     .filter(e -> resource.matches(new net.minecraft.world.item.ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(e.getKey()))))
                     .mapToInt(java.util.Map.Entry::getValue).sum();
-            entries.add(new com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry(target.resourceKey(), true, tagStock, target.targetCount()));
+            entries.add(new com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry(target.resourceKey(), true, tagStock, target.targetCount(), target.keepPrivateCount()));
         }
 
         java.util.Set<net.minecraft.resources.Identifier> itemKeys = new java.util.LinkedHashSet<>();
@@ -2226,7 +2226,8 @@ public class SettlemyntsMod {
         for (net.minecraft.resources.Identifier key : itemKeys) {
             com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget existing = targetsByItem.get(key);
             int targetCount = existing != null ? existing.targetCount() : -1;
-            entries.add(new com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry(key, false, stock.getOrDefault(key, 0), targetCount));
+            int keepPrivateCount = existing != null ? existing.keepPrivateCount() : 0;
+            entries.add(new com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry(key, false, stock.getOrDefault(key, 0), targetCount, keepPrivateCount));
         }
         entries.sort(java.util.Comparator
                 .comparing((com.github.cerealklla.settlemynts.plotsign.PlannedInventoryEntry e) -> e.currentStock() <= 0)
@@ -2249,7 +2250,7 @@ public class SettlemyntsMod {
         for (com.github.cerealklla.settlemynts.plotsign.PlannedInventoryUpdate update : payload.updates()) {
             if (update.managed()) {
                 targets.add(new com.github.cerealklla.settlemynts.zone.PlannedInventoryTarget(
-                        update.resourceKey(), update.isTag(), Math.max(0, update.targetCount())));
+                        update.resourceKey(), update.isTag(), Math.max(0, update.targetCount()), Math.max(0, update.keepPrivateCount()), false, false));
             }
         }
         // Guard Kit Stand overhaul (2026-10-16)/Construction Box funding rework (2026-10-22) -- this

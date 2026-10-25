@@ -216,8 +216,22 @@ public final class PlannedInventoryClearing {
             if (usable.isEmpty()) {
                 continue; // No sufficiently-tiered crafting structure (or Furnace/Stonecutter) present on this plot.
             }
-            queue.enqueue(() -> attemptOneOwnStockCraft(level, plot, boxes, target, usable, finalCapability, queue, 0));
+            int desiredStock = desiredStockForTarget(level, plot, ShopResource.ofItem(target.resourceKey()), target);
+            queue.enqueue(() -> attemptOneOwnStockCraft(level, plot, boxes, target, desiredStock, usable, finalCapability, queue, 0));
         }
+    }
+
+    /**
+     * {@code target}'s own real desired stock level -- {@code keepPrivateCount + targetCount} if the
+     * plot has a real Shop Config price listed for {@code resource}, else {@code keepPrivateCount}
+     * alone (For Sale is meaningless with nothing to sell it at). See {@link #desiredStockFor}'s own
+     * doc for the identical reasoning applied to the inter-plot buy/craft path -- this is the same
+     * computation for a plot's own "use what you already have" production pass, which only ever deals
+     * in literal targets (no synthetic Wishlist fallback exists here).
+     */
+    private static int desiredStockForTarget(ServerLevel level, PlotRecord plot, ShopResource resource, PlannedInventoryTarget target) {
+        boolean priced = plot.shopId().isPresent() && sellPriceFor(level, plot.shopId().get(), resource) > 0;
+        return target.keepPrivateCount() + (priced ? target.targetCount() : 0);
     }
 
     /**
@@ -227,14 +241,14 @@ public final class PlannedInventoryClearing {
      * still possible and the target isn't met; bounded by {@link #MAX_CRAFTS_PER_PLOT_PER_TARGET}).
      */
     private static void attemptOneOwnStockCraft(ServerLevel level, PlotRecord plot, List<Container> boxes, PlannedInventoryTarget target,
-                                                 List<LyfeCraftingBridge.RecipeInfo> usable, PlotCraftingCapability capability,
+                                                 int desiredStock, List<LyfeCraftingBridge.RecipeInfo> usable, PlotCraftingCapability capability,
                                                  MidnightWorkQueue queue, int attemptsSoFar) {
         if (attemptsSoFar >= MAX_CRAFTS_PER_PLOT_PER_TARGET) {
             return;
         }
         Map<Identifier, Integer> available = Settlemynts.scanItemStock(boxes);
         int currentStock = available.getOrDefault(target.resourceKey(), 0);
-        if (currentStock >= target.targetCount()) {
+        if (currentStock >= desiredStock) {
             return;
         }
         // Picks whichever alternate (e.g. furnace fuel) is actually currently stocked -- see the
@@ -249,7 +263,7 @@ public final class PlannedInventoryClearing {
         SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} crafted 1x {} (structure tier {})",
                 plot.plotId(), recipe.resultId(), capability.lyfeStructureTier());
         ShopWishlistCache.invalidate(plot.plotId());
-        queue.enqueue(() -> attemptOneOwnStockCraft(level, plot, boxes, target, usable, capability, queue, attemptsSoFar + 1));
+        queue.enqueue(() -> attemptOneOwnStockCraft(level, plot, boxes, target, desiredStock, usable, capability, queue, attemptsSoFar + 1));
     }
 
     /** Single-plot entry point -- see {@link #craftFromOwnStockForGroup}'s own doc for the full story. */
@@ -277,10 +291,11 @@ public final class PlannedInventoryClearing {
             if (usable.isEmpty()) {
                 continue; // No sufficiently-tiered crafting structure (or Furnace/Stonecutter) present on this plot.
             }
+            int desiredStock = desiredStockForTarget(level, plot, ShopResource.ofItem(target.resourceKey()), target);
             for (int i = 0; i < MAX_CRAFTS_PER_PLOT_PER_TARGET; i++) {
                 Map<Identifier, Integer> available = Settlemynts.scanItemStock(boxes);
                 int currentStock = available.getOrDefault(target.resourceKey(), 0);
-                if (currentStock >= target.targetCount()) {
+                if (currentStock >= desiredStock) {
                     break;
                 }
                 // Picks whichever alternate (e.g. furnace fuel) is actually currently stocked, re-checked
@@ -401,21 +416,26 @@ public final class PlannedInventoryClearing {
         List<Seller> sellers = new ArrayList<>();
 
         for (Participant p : participants) {
-            PlannedInventoryTarget target = resolveEffectiveTarget(p, key, wishlistDeficits);
+            EffectiveTarget effective = resolveEffectiveTarget(p, key, wishlistDeficits);
+            PlannedInventoryTarget target = effective.target();
             int currentStock = ContainerWithdraw.countAvailable(p.boxes(), resource);
-            if (target != null && currentStock < target.targetCount()) {
-                buyers.add(new Buyer(p, target.targetCount() - currentStock));
+            int desiredStock = desiredStockFor(level, p, resource, effective);
+            if (desiredStock >= 0 && currentStock < desiredStock) {
+                buyers.add(new Buyer(p, desiredStock - currentStock));
                 continue;
             }
-            // Surplus above its own declared target, or (real fix, 2026-10-10: "I set it to want to
-            // have 64 apples in stock, but not list them for sale... but the grocer isn't buying
-            // them" -- the Grocer had a target, the player's own apple-selling plot never did) its
-            // whole current stock when it has no target at all. Previously a seller candidate with no
-            // PlannedInventoryTarget of its own was silently skipped entirely, even with a real Shop
-            // listing and real stock -- inconsistent with the craftable-resource path's own
+            // Surplus above its own Keep Private floor (0 if no target exists at all, or the target
+            // has no floor set) -- "The Listed $ Amount means 'Sell Items'. If there is no Keep#, then
+            // sell all the items of that type, otherwise ensure we keep the Keep#" (explicit user
+            // spec, 2026-10-24). Real fix, 2026-10-10: "I set it to want to have 64 apples in stock,
+            // but not list them for sale... but the grocer isn't buying them" -- the Grocer had a
+            // target, the player's own apple-selling plot never did. Previously a seller candidate
+            // with no PlannedInventoryTarget of its own was silently skipped entirely, even with a
+            // real Shop listing and real stock -- inconsistent with the craftable-resource path's own
             // cheapestSellerPrice, which already never required one (see that method's own doc: a
             // seller is just "anyone with a real listing price," always).
-            int surplus = target != null ? currentStock - target.targetCount() : currentStock;
+            int keepFloor = target != null ? target.keepPrivateCount() : 0;
+            int surplus = currentStock - keepFloor;
             if (surplus <= 0 || p.plot().shopId().isEmpty()) {
                 continue;
             }
@@ -588,21 +608,55 @@ public final class PlannedInventoryClearing {
      * level/entity-section scan to resolve a plot's boxes, so calling it from here directly turned a
      * cheap lookup into a combinatorial, tick-blocking cost.
      */
-    private static PlannedInventoryTarget resolveEffectiveTarget(Participant p, ResourceKey key,
-                                                                   Map<UUID, List<ShopWishlist.DeficitEntry>> wishlistDeficits) {
+    private static EffectiveTarget resolveEffectiveTarget(Participant p, ResourceKey key,
+                                                            Map<UUID, List<ShopWishlist.DeficitEntry>> wishlistDeficits) {
         PlannedInventoryTarget target = findTarget(p.plot(), key);
         if (target != null) {
-            return target;
+            return new EffectiveTarget(target, true);
         }
         int shortfall = wishlistDeficits.getOrDefault(p.plot().plotId(), List.of()).stream()
                 .filter(d -> d.resource().itemId().isPresent() && d.resource().itemId().get().equals(key.id()))
                 .mapToInt(ShopWishlist.DeficitEntry::quantityNeeded)
                 .findFirst().orElse(0);
         if (shortfall <= 0) {
-            return null;
+            return new EffectiveTarget(null, false);
         }
         int currentStock = ContainerWithdraw.countAvailable(p.boxes(), key.toShopResource());
-        return new PlannedInventoryTarget(key.id(), key.isTag(), currentStock + shortfall);
+        return new EffectiveTarget(new PlannedInventoryTarget(key.id(), key.isTag(), currentStock + shortfall), false);
+    }
+
+    /**
+     * {@link #resolveEffectiveTarget}'s own return shape -- {@code literal} is {@code true} only for
+     * a real, player-set (or Guard-Kit-Stand/Construction-Box-derived) {@link PlannedInventoryTarget}
+     * row; {@code false} for the synthetic Wishlist-material fallback {@code resolveEffectiveTarget}
+     * builds on the fly. {@link #desiredStockFor} needs this distinction -- a synthetic entry
+     * represents a plain "I need N units of this crafting input," price-independent and with no Keep
+     * Private concept at all (always {@code keepPrivateCount == 0}), while a literal entry is the real
+     * Keep Private/For Sale pair this feature actually governs.
+     */
+    private record EffectiveTarget(PlannedInventoryTarget target, boolean literal) {
+    }
+
+    /**
+     * The real stock level {@code p} wants to reach for {@code resource}, or {@code -1} if it has no
+     * target at all (never a buyer). For a synthetic (non-literal) target -- a crafting-input
+     * shortfall, see {@link EffectiveTarget}'s own doc -- this is just {@code target.targetCount()}
+     * unchanged, exactly as before this feature existed: material restocking has nothing to do with
+     * Shop Config pricing. For a literal target, per the explicit user spec on {@link
+     * PlannedInventoryTarget#keepPrivateCount()}: with a real Shop Config price listed for this
+     * resource, the desired level is {@code keepPrivateCount + targetCount} (the Keep Private floor
+     * plus the For Sale buffer); with no price listed, {@code targetCount} (For Sale) is meaningless
+     * (nothing to sell it at) and the desired level is {@code keepPrivateCount} alone -- "if there is
+     * no listed $ amount then it would just attempt to maintain at least [Keep#] in inventory."
+     */
+    private static int desiredStockFor(ServerLevel level, Participant p, ShopResource resource, EffectiveTarget effective) {
+        if (effective.target() == null) {
+            return -1;
+        }
+        if (!effective.literal()) {
+            return effective.target().targetCount();
+        }
+        return desiredStockForTarget(level, p.plot(), resource, effective.target());
     }
 
     private static int sellPriceFor(ServerLevel level, UUID shopId, ShopResource resource) {
@@ -639,17 +693,19 @@ public final class PlannedInventoryClearing {
      */
     private static void enqueueCraftableResource(ServerLevel level, List<Participant> participants, ResourceKey key,
                                                   Map<UUID, List<ShopWishlist.DeficitEntry>> wishlistDeficits, MidnightWorkQueue queue) {
+        ShopResource resource = key.toShopResource();
         for (Participant buyer : participants) {
-            PlannedInventoryTarget target = resolveEffectiveTarget(buyer, key, wishlistDeficits);
-            if (target == null) {
+            EffectiveTarget effective = resolveEffectiveTarget(buyer, key, wishlistDeficits);
+            int desiredStock = desiredStockFor(level, buyer, resource, effective);
+            if (desiredStock < 0) {
                 continue;
             }
-            int startingStock = ContainerWithdraw.countAvailable(buyer.boxes(), key.toShopResource());
-            if (startingStock >= target.targetCount()) {
+            int startingStock = ContainerWithdraw.countAvailable(buyer.boxes(), resource);
+            if (startingStock >= desiredStock) {
                 continue;
             }
             PlotCraftingCapability capability = PlotCraftingCapability.resolve(level, buyer.plot().plotId());
-            queue.enqueue(() -> attemptOneCraftableUnit(level, participants, buyer, key, target, capability, queue, 0));
+            queue.enqueue(() -> attemptOneCraftableUnit(level, participants, buyer, key, desiredStock, capability, queue, 0));
         }
     }
 
@@ -663,19 +719,19 @@ public final class PlannedInventoryClearing {
      * actually moving stock toward target.
      */
     private static void attemptOneCraftableUnit(ServerLevel level, List<Participant> participants, Participant buyer,
-                                                 ResourceKey key, PlannedInventoryTarget target, PlotCraftingCapability capability,
+                                                 ResourceKey key, int desiredStock, PlotCraftingCapability capability,
                                                  MidnightWorkQueue queue, int attemptsSoFar) {
         if (attemptsSoFar >= MAX_CRAFTS_PER_PLOT_PER_TARGET) {
             return;
         }
         int currentStock = ContainerWithdraw.countAvailable(buyer.boxes(), key.toShopResource());
-        if (currentStock >= target.targetCount()) {
+        if (currentStock >= desiredStock) {
             return;
         }
         if (!fulfillOneUnit(level, participants, buyer, key, capability, new LinkedHashSet<>())) {
             return; // Can't make further progress on this resource for this buyer this round.
         }
-        queue.enqueue(() -> attemptOneCraftableUnit(level, participants, buyer, key, target, capability, queue, attemptsSoFar + 1));
+        queue.enqueue(() -> attemptOneCraftableUnit(level, participants, buyer, key, desiredStock, capability, queue, attemptsSoFar + 1));
     }
 
     /**
