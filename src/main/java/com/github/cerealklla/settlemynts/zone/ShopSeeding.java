@@ -409,9 +409,12 @@ public final class ShopSeeding {
         owner.updatePlot(plot.withPlannedInventory(merged));
     }
 
-    // A single stack -- a reasonable "keep enough on hand" starting point, flagged tunable like
-    // every other such default stock number in this suite (e.g. ShopSeedCatalog's own listings).
-    private static final int WATCH_TOWER_DEFAULT_COAL_TARGET = 64;
+    // Real spec, 2026-10-24: "the watch tower's target is supposed to be 560, enough to burn all
+    // night long" -- was a placeholder single-stack (64) guess, flagged tunable at the time. See
+    // zone.PlannedInventoryClearing#MAX_CRAFTS_PER_PLOT_PER_TARGET, raised the same day so a Watch
+    // Tower can actually restock up to this target in one midnight pass instead of capping out at
+    // the old, now-irrelevant 64.
+    private static final int WATCH_TOWER_DEFAULT_COAL_TARGET = 560;
 
     /**
      * Watch Tower-specific default (explicit user request, 2026-10-22: "the plot needs to default to

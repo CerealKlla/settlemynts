@@ -69,7 +69,14 @@ public final class PlannedInventoryClearing {
             BlueprintsConstructionBridge.appendLedgerEntry(level, plot, line);
         }
     }
-    private static final int MAX_CRAFTS_PER_PLOT_PER_TARGET = 64;
+    // A pure safety bound against an infinite/runaway loop, never a deliberate pacing mechanic (see
+    // this constant's own call sites' docs -- each queued job here does exactly one attempt, already
+    // spread across as many ticks as it takes). Raised 64 -> 600, 2026-10-24: the old value happened
+    // to equal the Watch Tower's own then-default Coal target (64), which silently meant a Watch
+    // Tower could never actually finish restocking past 64 in one night -- now that the real target
+    // is 560 (see ShopSeeding#WATCH_TOWER_DEFAULT_COAL_TARGET), the cap must sit comfortably above
+    // whatever the largest real target in the suite is, not coincide with one.
+    private static final int MAX_CRAFTS_PER_PLOT_PER_TARGET = 600;
 
     private record Participant(PlotRecord plot, List<Container> boxes) {
     }
@@ -710,13 +717,19 @@ public final class PlannedInventoryClearing {
     }
 
     /**
-     * One unit-attempt of {@link #enqueueCraftableResource}'s own job chain -- re-checks real stock
+     * One batch-attempt of {@link #enqueueCraftableResource}'s own job chain -- re-checks real stock
      * (2026-10-18 fix, unchanged: a self-craft of a multi-output recipe can net several units at
-     * once, so a fixed-count loop would over-consume ingredients for units nobody still needs) and,
-     * if progress is still possible, re-enqueues itself for the next unit instead of looping inline.
-     * {@code attemptsSoFar} is the same {@link #MAX_CRAFTS_PER_PLOT_PER_TARGET} safety bound the old
-     * inline loop had, against looping forever if {@link #fulfillOneUnit} ever "succeeds" without
-     * actually moving stock toward target.
+     * once, so a fixed-count loop would over-consume ingredients for units nobody still needs),
+     * requests the FULL remaining deficit from {@link #fulfillUnits} in one call (2026-10-24 real
+     * correction -- "how can it be faster to do N transactions than... purchase all 25 at once" --
+     * see that method's own doc for why the buy side was never a genuine one-at-a-time necessity),
+     * and only re-enqueues itself if real progress was made but the deficit isn't fully met yet (e.g.
+     * the cheapest seller ran out partway, or crafting only ever nets one unit per attempt). {@code
+     * attemptsSoFar} is the same {@link #MAX_CRAFTS_PER_PLOT_PER_TARGET} safety bound the old inline
+     * loop had, against looping forever if {@link #fulfillUnits} ever "succeeds" without actually
+     * moving stock toward target -- now bounds the number of distinct re-decisions needed (normally
+     * just one per deficit for a simple buy), not the raw unit count, so it rarely comes close to
+     * being hit even for a large target like the Watch Tower's own 560 Coal.
      */
     private static void attemptOneCraftableUnit(ServerLevel level, List<Participant> participants, Participant buyer,
                                                  ResourceKey key, int desiredStock, PlotCraftingCapability capability,
@@ -728,21 +741,38 @@ public final class PlannedInventoryClearing {
         if (currentStock >= desiredStock) {
             return;
         }
-        if (!fulfillOneUnit(level, participants, buyer, key, capability, new LinkedHashSet<>())) {
+        int remaining = desiredStock - currentStock;
+        int fulfilled = fulfillUnits(level, participants, buyer, key, capability, new LinkedHashSet<>(), remaining);
+        if (fulfilled <= 0) {
             return; // Can't make further progress on this resource for this buyer this round.
         }
         queue.enqueue(() -> attemptOneCraftableUnit(level, participants, buyer, key, desiredStock, capability, queue, attemptsSoFar + 1));
     }
 
-    /**
-     * Obtains exactly one unit of {@code key} for {@code buyer}, choosing whichever of direct-buy or
-     * self-craft is cheaper (or the only achievable one), and actually executes it. Returns whether it
-     * succeeded. {@code visiting} is the cycle guard for the self-craft recursion below.
-     */
+    /** Exactly-one-unit convenience over {@link #fulfillUnits} -- used only by the recursive material-fetch call sites inside {@link #executeCraftOne}, which genuinely do want one ingredient unit per craft attempt, re-checked fresh each time. */
     private static boolean fulfillOneUnit(ServerLevel level, List<Participant> participants, Participant buyer,
                                            ResourceKey key, PlotCraftingCapability capability, Set<Identifier> visiting) {
-        if (visiting.contains(key.id())) {
-            return false;
+        return fulfillUnits(level, participants, buyer, key, capability, visiting, 1) > 0;
+    }
+
+    /**
+     * Obtains up to {@code desiredUnits} of {@code key} for {@code buyer} in as few real transactions
+     * as possible, choosing whichever of direct-buy or self-craft is cheaper (or the only achievable
+     * one) -- same cost comparison this method always made, {@code desiredUnits} is new (2026-10-24).
+     * The buy side now batches fully in one call via {@link #executeDirectBuyBatch} instead of
+     * fulfilling one unit per call -- there was never a real performance reason it needed to be
+     * unit-granular (unlike the craft side below, whose recursive cost search genuinely is expensive
+     * and already only runs once per call either way, see this method's own {@code costMemo} doc).
+     * The craft side still only ever nets one unit per call (unchanged) -- a real craft consumes the
+     * plot's own stock and can recurse into fetching missing ingredients via {@link #fulfillOneUnit}
+     * itself, which needs to re-check real state between individual crafts, not just between batches.
+     * Returns the number of units actually obtained (0 if neither option is achievable at all).
+     * {@code visiting} is the cycle guard for the self-craft recursion below.
+     */
+    private static int fulfillUnits(ServerLevel level, List<Participant> participants, Participant buyer,
+                                     ResourceKey key, PlotCraftingCapability capability, Set<Identifier> visiting, int desiredUnits) {
+        if (visiting.contains(key.id()) || desiredUnits <= 0) {
+            return 0;
         }
         long directCost = cheapestSellerPrice(level, participants, buyer, key);
 
@@ -760,12 +790,12 @@ public final class PlannedInventoryClearing {
 
         boolean useCraft = craftOption.isPresent() && (directCost < 0 || craftOption.get().cost() <= directCost);
         if (useCraft) {
-            return executeCraftOne(level, participants, buyer, craftOption.get().recipe(), capability, withAdded(visiting, key.id()));
+            return executeCraftOne(level, participants, buyer, craftOption.get().recipe(), capability, withAdded(visiting, key.id())) ? 1 : 0;
         }
         if (directCost >= 0) {
-            return executeDirectBuyOne(level, participants, buyer, key);
+            return executeDirectBuyBatch(level, participants, buyer, key, desiredUnits);
         }
-        return false;
+        return 0;
     }
 
     private record CraftOption(LyfeCraftingBridge.RecipeInfo recipe, long cost) {
@@ -889,8 +919,19 @@ public final class PlannedInventoryClearing {
         return best;
     }
 
-    /** Buys exactly one unit of {@code key} from the cheapest seller that actually has stock and that {@code buyer} can afford, walking sellers in ascending price order. */
-    private static boolean executeDirectBuyOne(ServerLevel level, List<Participant> participants, Participant buyer, ResourceKey key) {
+    /**
+     * Buys up to {@code desiredUnits} of {@code key}, across as many of the cheapest-first sellers as
+     * it takes to either satisfy the deficit or exhaust every seller that has stock the buyer can
+     * afford -- one real transaction/ledger line per seller actually used, not per unit. Replaces the
+     * old unit-at-a-time {@code executeDirectBuyOne}, 2026-10-24: real correction -- "how can it be
+     * faster to do N transactions than... purchase all 25 at once" -- there was never a performance
+     * reason the buy side needed to be unit-granular the way the craft side's recursive cost search
+     * did (see {@link #fulfillUnits}'s own doc); mirrors {@link #settleResource}'s own existing
+     * {@code min(deficit, seller surplus)} batching shape, which never had this problem to begin with.
+     * Reuses {@link #priceWithinBudget} for the same real per-stack quality-variant pricing {@link
+     * #settleResource} already relies on. Returns the number of units actually fulfilled.
+     */
+    private static int executeDirectBuyBatch(ServerLevel level, List<Participant> participants, Participant buyer, ResourceKey key, int desiredUnits) {
         ShopResource resource = key.toShopResource();
         List<Participant> candidates = new ArrayList<>(participants);
         candidates.remove(buyer);
@@ -898,35 +939,42 @@ public final class PlannedInventoryClearing {
             int price = p.plot().shopId().map(id -> sellPriceFor(level, id, resource)).orElse(0);
             return price <= 0 ? Integer.MAX_VALUE : price;
         }));
+        int remaining = desiredUnits;
+        int totalFulfilled = 0;
         for (Participant seller : candidates) {
+            if (remaining <= 0) {
+                break;
+            }
             if (seller.plot().shopId().isEmpty()) {
                 continue;
             }
             int price = sellPriceFor(level, seller.plot().shopId().get(), resource);
-            if (price <= 0 || ContainerWithdraw.countAvailable(seller.boxes(), resource) <= 0) {
+            int sellerStock = ContainerWithdraw.countAvailable(seller.boxes(), resource);
+            if (price <= 0 || sellerStock <= 0) {
                 continue;
             }
-            if (ContainerWithdraw.countAvailable(buyer.boxes(), GOLD_NUGGETS) < price) {
+            int buyerGold = ContainerWithdraw.countAvailable(buyer.boxes(), GOLD_NUGGETS);
+            if (buyerGold < price) {
                 continue;
             }
-            List<ItemStack> goods = ContainerWithdraw.drain(seller.boxes(), resource, 1);
+            List<ItemStack> goods = ContainerWithdraw.drain(seller.boxes(), resource, Math.min(remaining, sellerStock));
             if (goods.isEmpty()) {
                 continue;
             }
-            // Re-priced against the exact stack actually drained (2026-10-10, same "pay at that
-            // specific listing price" fix as settleResource's own doc) -- `price` above was only
-            // ever a pre-drain heuristic for sorting/affordability, generic across every quality
-            // variant this seller might list.
+            // Re-priced against the exact stacks actually drained (2026-10-10, same "pay at that
+            // specific listing price" fix as settleResource's own doc) -- `price` above was only ever
+            // a pre-drain heuristic for sorting/affordability, generic across every quality variant
+            // this seller might list; priceWithinBudget also caps to what buyerGold actually affords.
             List<YconomicsShopBridge.ShopListingView> sellerListings =
                     YconomicsShopBridge.getListings(level, seller.plot().shopId().get());
-            Optional<Integer> realPrice = priceForStack(sellerListings, goods.get(0));
-            if (realPrice.isEmpty() || realPrice.get() <= 0 || ContainerWithdraw.countAvailable(buyer.boxes(), GOLD_NUGGETS) < realPrice.get()) {
-                for (ItemStack stack : goods) {
-                    ContainerDeposit.depositIntoAny(seller.boxes(), stack);
-                }
+            PriceSplit split = priceWithinBudget(goods, sellerListings, buyerGold);
+            for (ItemStack back : split.unaffordableOrUnpriced()) {
+                ContainerDeposit.depositIntoAny(seller.boxes(), back);
+            }
+            if (split.totalUnits() <= 0) {
                 continue;
             }
-            for (ItemStack stack : goods) {
+            for (ItemStack stack : split.toDeliver()) {
                 ContainerDeposit.depositIntoAny(buyer.boxes(), stack);
             }
             com.github.cerealklla.settlemynts.watchtower.WatchTowerRefuelNotifier.notifyPlotBoxesChanged(level, buyer.plot().plotId());
@@ -934,18 +982,19 @@ public final class PlannedInventoryClearing {
                 com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.notifyPlotBoxesChanged(level, buyer.plot());
             }
             com.github.cerealklla.settlemynts.guardhouse.GuardEquipBoxChangeListener.notifyPlotBoxesChanged(level, buyer.plot());
-            for (ItemStack stack : ContainerWithdraw.drain(buyer.boxes(), GOLD_NUGGETS, realPrice.get())) {
+            for (ItemStack stack : ContainerWithdraw.drain(buyer.boxes(), GOLD_NUGGETS, (int) split.totalCost())) {
                 ContainerDeposit.depositIntoAny(seller.boxes(), stack);
             }
-            SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} direct-bought 1x {} from plot {} for {} nuggets (craftable resource)",
-                    buyer.plot().plotId(), key.id(), seller.plot().plotId(), realPrice.get());
-            appendLedger(level, buyer.plot(), "Bought 1x " + key.displayName() + " from neighboring plot for " + realPrice.get() + " nuggets");
-            appendLedger(level, seller.plot(), "Sold 1x " + key.displayName() + " to neighboring plot for " + realPrice.get() + " nuggets");
+            SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} direct-bought {}x {} from plot {} for {} nuggets (craftable resource)",
+                    buyer.plot().plotId(), split.totalUnits(), key.id(), seller.plot().plotId(), split.totalCost());
+            appendLedger(level, buyer.plot(), "Bought " + split.totalUnits() + "x " + key.displayName() + " from neighboring plot for " + split.totalCost() + " nuggets");
+            appendLedger(level, seller.plot(), "Sold " + split.totalUnits() + "x " + key.displayName() + " to neighboring plot for " + split.totalCost() + " nuggets");
             ShopWishlistCache.invalidate(buyer.plot().plotId());
             ShopWishlistCache.invalidate(seller.plot().plotId());
-            return true;
+            remaining -= split.totalUnits();
+            totalFulfilled += split.totalUnits();
         }
-        return false;
+        return totalFulfilled;
     }
 
     /**
