@@ -384,6 +384,15 @@ public final class PlannedInventoryClearing {
         if (stonecutting.isPresent()) {
             return List.of(stonecutting.get());
         }
+        // Plain vanilla crafting-table recipe (e.g. Lyfe's own "String from Wheat") -- added
+        // 2026-10-24, see CraftingTableRecipes' own class doc. Deliberately independent of Lyfe/
+        // LyfeCraftingBridge.isLoaded(), same reasoning as the Furnace/Stonecutter checks above (a
+        // real vanilla recipe needs no Lyfe at all, even though this specific one happens to ship
+        // from a Lyfe datapack).
+        Optional<LyfeCraftingBridge.RecipeInfo> craftingTable = CraftingTableRecipes.get(level, id);
+        if (craftingTable.isPresent()) {
+            return List.of(craftingTable.get());
+        }
         if (LyfeCraftingBridge.isLoaded()) {
             Optional<LyfeCraftingBridge.RecipeInfo> lyfe = LyfeCraftingBridge.getRecipe(id);
             if (lyfe.isPresent()) {
@@ -398,6 +407,18 @@ public final class PlannedInventoryClearing {
             List<LyfeCraftingBridge.RecipeInfo> food = LyfeCraftingBridge.getFoodRecipeAlternates(level, id);
             if (!food.isEmpty()) {
                 return food;
+            }
+            // Real gap found and fixed, 2026-10-24: a resource that's only ever a recipe's SECONDARY
+            // output (e.g. Gravel, a byproduct of MiscRecipes' Cobblestone -> Flint/Gravel conversion,
+            // never the primary resultId of any recipe of its own) was invisible to every lookup above,
+            // so it could never be considered a craft option at all -- see estimateCraftCost's own doc
+            // for how its cost is correctly amortized against secondaryOutputCount, not outputCount,
+            // once resolved this way.
+            List<LyfeCraftingBridge.RecipeInfo> bySecondaryOutput = LyfeCraftingBridge.getAllRecipes().stream()
+                    .filter(r -> r.secondaryResultId().isPresent() && r.secondaryResultId().get().equals(id))
+                    .toList();
+            if (!bySecondaryOutput.isEmpty()) {
+                return bySecondaryOutput;
             }
         }
         return List.of();
@@ -784,9 +805,9 @@ public final class PlannedInventoryClearing {
         // alternate count rather than staying bounded by the number of distinct resources involved.
         // Fresh per real unit-fulfillment attempt (costs can legitimately change between attempts as
         // stock/participants shift), threaded down through the whole recursive search below.
-        Map<ResourceKey, Long> costMemo = new HashMap<>();
-        Optional<CraftOption> craftOption = key.isTag() ? Optional.empty()
-                : cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting, costMemo);
+        Optional<CraftOption> craftOption = key.isTag()
+                ? cheapestCraftOptionForTag(level, participants, buyer, key.id(), capability, visiting)
+                : cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting, new HashMap<>());
 
         boolean useCraft = craftOption.isPresent() && (directCost < 0 || craftOption.get().cost() <= directCost);
         if (useCraft) {
@@ -820,9 +841,38 @@ public final class PlannedInventoryClearing {
             if (!candidate.craftableWith(capability)) {
                 continue;
             }
-            long cost = estimateCraftCost(level, participants, buyer, candidate, capability, nextVisiting, costMemo);
+            long cost = estimateCraftCost(level, participants, buyer, candidate, id, capability, nextVisiting, costMemo);
             if (cost >= 0 && (best == null || cost < best.cost())) {
                 best = new CraftOption(candidate, cost);
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    /**
+     * Like {@link #cheapestCraftOption} but for a TAG-based key (e.g. the Coal tag, which covers both
+     * Coal and Charcoal) -- a tag has no single "recipe" of its own, so this checks every concrete
+     * item the tag currently resolves to and returns whichever one is cheapest to craft. Real
+     * correction, 2026-10-24: "charcoal does have a craft capability so I'd want that considered
+     * still" -- previously, {@link #fulfillUnits} skipped crafting outright for any tag-based target,
+     * which meant a Watch Tower's Coal target could only ever be bought from a neighboring plot, never
+     * smelted from Logs even when that would be cheaper or no seller exists at all. A fresh {@code
+     * costMemo} per member (not shared across members, unlike {@link #estimateCraftCost}'s own
+     * memoization within a single recipe's ingredient tree) -- different tag members can have
+     * completely different ingredient trees, so there's nothing valid to share between them.
+     */
+    private static Optional<CraftOption> cheapestCraftOptionForTag(ServerLevel level, List<Participant> participants, Participant buyer,
+                                                                     Identifier tagId, PlotCraftingCapability capability, Set<Identifier> visiting) {
+        TagKey<net.minecraft.world.item.Item> tag = TagKey.create(net.minecraft.core.registries.Registries.ITEM, tagId);
+        CraftOption best = null;
+        for (net.minecraft.core.Holder<net.minecraft.world.item.Item> member : BuiltInRegistries.ITEM.getTagOrEmpty(tag)) {
+            Identifier memberId = BuiltInRegistries.ITEM.getKey(member.value());
+            if (visiting.contains(memberId)) {
+                continue;
+            }
+            Optional<CraftOption> option = cheapestCraftOption(level, participants, buyer, memberId, capability, visiting, new HashMap<>());
+            if (option.isPresent() && (best == null || option.get().cost() < best.cost())) {
+                best = option.get();
             }
         }
         return Optional.ofNullable(best);
@@ -841,9 +891,17 @@ public final class PlannedInventoryClearing {
      * self-craft look far more expensive than buying, every time. Rounds UP (never down) so a
      * per-unit cost is never under-stated to the point a buy could wrongly look relatively pricier
      * than it really is.
+     *
+     * <p>{@code targetId} (added 2026-10-24, for {@link #resolveRecipes}' new secondary-output
+     * fallback -- e.g. the Flint recipe's Gravel byproduct) -- amortizes down to whichever of the
+     * recipe's two outputs {@code targetId} actually names, not always the primary one: {@code
+     * recipe.outputCount()} if {@code targetId} is the primary {@code resultId()}, else {@code
+     * recipe.secondaryOutputCount()}. Getting this wrong (always dividing by the primary count) would
+     * silently price "cost per unit of Gravel" as "cost per unit of Flint" whenever this recipe was
+     * resolved specifically as a Gravel candidate.
      */
     private static long estimateCraftCost(ServerLevel level, List<Participant> participants, Participant buyer,
-                                           LyfeCraftingBridge.RecipeInfo recipe, PlotCraftingCapability capability, Set<Identifier> visiting,
+                                           LyfeCraftingBridge.RecipeInfo recipe, Identifier targetId, PlotCraftingCapability capability, Set<Identifier> visiting,
                                            Map<ResourceKey, Long> costMemo) {
         long total = 0;
         for (Map.Entry<Identifier, Integer> entry : recipe.specificComponents().entrySet()) {
@@ -866,7 +924,8 @@ public final class PlannedInventoryClearing {
             }
             total += cheapestMemberUnitCost * entry.getValue();
         }
-        int outputCount = Math.max(1, recipe.outputCount());
+        boolean wantsSecondary = !recipe.resultId().equals(targetId) && recipe.secondaryResultId().isPresent() && recipe.secondaryResultId().get().equals(targetId);
+        int outputCount = Math.max(1, wantsSecondary ? recipe.secondaryOutputCount() : recipe.outputCount());
         return (total + outputCount - 1) / outputCount;
     }
 

@@ -87,5 +87,13 @@ public final class CraftingExecutor {
             LyfeCraftingBridge.bakeFoodIcons(result, capability.cookingStructureTier(), recipe.foodSlotsUsed());
         }
         ContainerDeposit.depositIntoAny(boxes, result);
+        // Real gap found and fixed, 2026-10-24: a recipe's optional secondary output (e.g. MiscRecipes'
+        // Cobblestone -> Flint/Gravel, which also yields 4 Gravel alongside its primary Flint) used to
+        // be silently dropped here -- RecipeInfo never carried it at all until today, so every NPC/plot
+        // craft of that recipe quietly destroyed the Gravel it should have produced.
+        if (recipe.secondaryResultId().isPresent() && recipe.secondaryOutputCount() > 0) {
+            ItemStack secondary = new ItemStack(BuiltInRegistries.ITEM.getValue(recipe.secondaryResultId().get()), recipe.secondaryOutputCount());
+            ContainerDeposit.depositIntoAny(boxes, secondary);
+        }
     }
 }

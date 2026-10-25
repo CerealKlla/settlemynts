@@ -170,6 +170,47 @@ public final class PlotCraftingStructures {
         return false;
     }
 
+    /**
+     * Whether a plain vanilla Crafting Table is physically present on the plot -- added 2026-10-24
+     * for {@link CraftingTableRecipes}, same "recognize the X as a valid crafting structure" pattern
+     * as {@link #hasFurnace}/{@link #hasStonecutter}. A Crafting Table, like a Stonecutter, has no
+     * {@link BlockEntity} (a stateless block), so this reuses the identical bounded column-scan shape
+     * {@link #hasStonecutter} already established rather than {@link #forEachBlockEntityInArea}.
+     */
+    public static boolean hasCraftingTable(ServerLevel level, UUID plotId) {
+        Optional<Geometry.Polygon> polygon = Settlemynts.resolvePlotPolygon(level, plotId);
+        return polygon.isPresent() && hasCraftingTable(level, polygon.get());
+    }
+
+    /** Same as {@link #hasCraftingTable(ServerLevel, UUID)}, for a polygon the caller already has in hand -- avoids its own world scan. */
+    public static boolean hasCraftingTable(ServerLevel level, Geometry.Polygon area) {
+        int minX = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (Geometry.Polygon.Vertex v : area.vertices()) {
+            minX = Math.min(minX, v.x());
+            minZ = Math.min(minZ, v.z());
+            maxX = Math.max(maxX, v.x());
+            maxZ = Math.max(maxZ, v.z());
+        }
+        int scanned = 0;
+        for (int x = minX; x <= maxX; x++) {
+            for (int z = minZ; z <= maxZ; z++) {
+                if (!area.contains(x, z)) {
+                    continue;
+                }
+                if (scanned++ > STONECUTTER_SCAN_MAX_COLUMNS) {
+                    return false;
+                }
+                int topY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                for (int y = topY - STONECUTTER_SCAN_BELOW; y <= topY + STONECUTTER_SCAN_ABOVE; y++) {
+                    if (level.getBlockState(new BlockPos(x, y, z)).is(Blocks.CRAFTING_TABLE)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     private static void forEachBlockEntityInArea(ServerLevel level, Geometry.Polygon area,
                                                    java.util.function.BiConsumer<BlockPos, BlockEntity> consumer) {
         int minX = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE, maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;

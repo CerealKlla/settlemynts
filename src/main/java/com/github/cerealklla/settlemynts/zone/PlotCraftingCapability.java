@@ -22,9 +22,9 @@ import net.minecraft.server.level.ServerLevel;
  * cookingStructureTier} (a Lyfe Cooking Station/Grill/Stove/Oven/Chef Set, structurally distinct
  * from a Lyfe crafting structure) for Lyfe's cooking recipes.
  */
-public record PlotCraftingCapability(int lyfeStructureTier, int cookingStructureTier, boolean hasFurnace, boolean hasStonecutter) {
+public record PlotCraftingCapability(int lyfeStructureTier, int cookingStructureTier, boolean hasFurnace, boolean hasStonecutter, boolean hasCraftingTable) {
 
-    public static final PlotCraftingCapability NONE = new PlotCraftingCapability(0, 0, false, false);
+    public static final PlotCraftingCapability NONE = new PlotCraftingCapability(0, 0, false, false, false);
 
     public static PlotCraftingCapability resolve(ServerLevel level, UUID plotId) {
         Optional<Geometry.Polygon> polygon = Settlemynts.resolvePlotPolygon(level, plotId);
@@ -37,6 +37,7 @@ public record PlotCraftingCapability(int lyfeStructureTier, int cookingStructure
                 PlotCraftingStructures.maxCraftingStructureTier(level, area),
                 PlotCraftingStructures.maxCookingStructureTier(level, area),
                 PlotCraftingStructures.hasFurnace(level, area),
-                PlotCraftingStructures.hasStonecutter(level, area));
+                PlotCraftingStructures.hasStonecutter(level, area),
+                PlotCraftingStructures.hasCraftingTable(level, area));
     }
 }

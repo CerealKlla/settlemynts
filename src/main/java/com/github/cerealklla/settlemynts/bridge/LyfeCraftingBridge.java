@@ -69,9 +69,9 @@ public final class LyfeCraftingBridge {
      */
     public record RecipeInfo(Identifier resultId, int tier, Map<Identifier, Integer> specificComponents,
                               Map<String, Integer> genericComponents, StructureRequirement requirement,
-                              int foodSlotsUsed, int outputCount) {
+                              int foodSlotsUsed, int outputCount, Optional<Identifier> secondaryResultId, int secondaryOutputCount) {
 
-        public enum StructureRequirement { LYFE_STRUCTURE, COOKING_STRUCTURE, FURNACE, STONECUTTER }
+        public enum StructureRequirement { LYFE_STRUCTURE, COOKING_STRUCTURE, FURNACE, STONECUTTER, CRAFTING_TABLE }
 
         /**
          * Convenience constructor for every source that produces exactly 1 unit of {@code resultId}
@@ -82,7 +82,7 @@ public final class LyfeCraftingBridge {
          */
         public RecipeInfo(Identifier resultId, int tier, Map<Identifier, Integer> specificComponents,
                            Map<String, Integer> genericComponents, StructureRequirement requirement, int foodSlotsUsed) {
-            this(resultId, tier, specificComponents, genericComponents, requirement, foodSlotsUsed, 1);
+            this(resultId, tier, specificComponents, genericComponents, requirement, foodSlotsUsed, 1, Optional.empty(), 0);
         }
 
         /** Whether {@code capability} is enough to craft this recipe. */
@@ -92,6 +92,7 @@ public final class LyfeCraftingBridge {
                 case COOKING_STRUCTURE -> capability.cookingStructureTier() >= tier;
                 case FURNACE -> capability.hasFurnace();
                 case STONECUTTER -> capability.hasStonecutter();
+                case CRAFTING_TABLE -> capability.hasCraftingTable();
             };
         }
     }
@@ -182,6 +183,7 @@ public final class LyfeCraftingBridge {
 
     private static RecipeInfo toLocal(GeneratedRecipe recipe) {
         return new RecipeInfo(recipe.resultId(), recipe.tier(), recipe.specificComponents(), recipe.genericComponents(),
-                RecipeInfo.StructureRequirement.LYFE_STRUCTURE, 0, recipe.outputCount());
+                RecipeInfo.StructureRequirement.LYFE_STRUCTURE, 0, recipe.outputCount(),
+                recipe.secondaryResultId(), recipe.secondaryOutputCount());
     }
 }
