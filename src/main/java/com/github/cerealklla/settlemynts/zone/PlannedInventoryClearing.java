@@ -783,7 +783,7 @@ public final class PlannedInventoryClearing {
      * The buy side now batches fully in one call via {@link #executeDirectBuyBatch} instead of
      * fulfilling one unit per call -- there was never a real performance reason it needed to be
      * unit-granular (unlike the craft side below, whose recursive cost search genuinely is expensive
-     * and already only runs once per call either way, see this method's own {@code costMemo} doc).
+     * and already only runs once per call either way, see this method's own {@link CostMemo} doc).
      * The craft side still only ever nets one unit per call (unchanged) -- a real craft consumes the
      * plot's own stock and can recurse into fetching missing ingredients via {@link #fulfillOneUnit}
      * itself, which needs to re-check real state between individual crafts, not just between batches.
@@ -805,9 +805,10 @@ public final class PlannedInventoryClearing {
         // alternate count rather than staying bounded by the number of distinct resources involved.
         // Fresh per real unit-fulfillment attempt (costs can legitimately change between attempts as
         // stock/participants shift), threaded down through the whole recursive search below.
+        CostMemo memo = CostMemo.fresh();
         Optional<CraftOption> craftOption = key.isTag()
-                ? cheapestCraftOptionForTag(level, participants, buyer, key.id(), capability, visiting)
-                : cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting, new HashMap<>());
+                ? cheapestCraftOptionForTag(level, participants, buyer, key.id(), capability, visiting, memo)
+                : cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting, memo);
 
         boolean useCraft = craftOption.isPresent() && (directCost < 0 || craftOption.get().cost() <= directCost);
         if (useCraft) {
@@ -823,6 +824,21 @@ public final class PlannedInventoryClearing {
     }
 
     /**
+     * The two memo maps one top-level {@link #fulfillUnits}/{@link #cheapestGroupMember} search
+     * shares across its whole recursive descent -- added 2026-10-24 (second real crash of the night)
+     * to carry {@link #sellerPrice} alongside the pre-existing {@link #craftCost} cache without
+     * threading two separate {@code Map} parameters through every method in this search. See {@link
+     * #cheapestCostForOneUnit}'s own doc for why these two caches have genuinely different safety
+     * rules (one path-independent and always safe to cache, one path-dependent and only safe to
+     * cache on success).
+     */
+    private record CostMemo(Map<ResourceKey, Long> craftCost, Map<ResourceKey, Long> sellerPrice) {
+        static CostMemo fresh() {
+            return new CostMemo(new HashMap<>(), new HashMap<>());
+        }
+    }
+
+    /**
      * The cheapest craftable alternate recipe for {@code id} (e.g. whichever furnace fuel is cheapest
      * to obtain), or empty if {@code id} has no recipe at all, none are craftable with {@code
      * capability}, or every alternate's ingredients are themselves unobtainable. {@code visiting} must
@@ -831,7 +847,7 @@ public final class PlannedInventoryClearing {
      */
     private static Optional<CraftOption> cheapestCraftOption(ServerLevel level, List<Participant> participants, Participant buyer,
                                                                Identifier id, PlotCraftingCapability capability, Set<Identifier> visiting,
-                                                               Map<ResourceKey, Long> costMemo) {
+                                                               CostMemo memo) {
         if (visiting.contains(id)) {
             return Optional.empty();
         }
@@ -841,7 +857,7 @@ public final class PlannedInventoryClearing {
             if (!candidate.craftableWith(capability)) {
                 continue;
             }
-            long cost = estimateCraftCost(level, participants, buyer, candidate, id, capability, nextVisiting, costMemo);
+            long cost = estimateCraftCost(level, participants, buyer, candidate, id, capability, nextVisiting, memo);
             if (cost >= 0 && (best == null || cost < best.cost())) {
                 best = new CraftOption(candidate, cost);
             }
@@ -856,13 +872,15 @@ public final class PlannedInventoryClearing {
      * correction, 2026-10-24: "charcoal does have a craft capability so I'd want that considered
      * still" -- previously, {@link #fulfillUnits} skipped crafting outright for any tag-based target,
      * which meant a Watch Tower's Coal target could only ever be bought from a neighboring plot, never
-     * smelted from Logs even when that would be cheaper or no seller exists at all. A fresh {@code
-     * costMemo} per member (not shared across members, unlike {@link #estimateCraftCost}'s own
-     * memoization within a single recipe's ingredient tree) -- different tag members can have
-     * completely different ingredient trees, so there's nothing valid to share between them.
+     * smelted from Logs even when that would be cheaper or no seller exists at all. Shares {@code
+     * memo} across every member (widened from an original per-member-fresh map, 2026-10-24, same
+     * crash-fix pass as {@link CostMemo} itself) -- different tag members can have completely
+     * different ingredient trees, but a shared ingredient between two members' trees (or the shared
+     * {@link CostMemo#sellerPrice} cache specifically) still benefits from not being recomputed twice.
      */
     private static Optional<CraftOption> cheapestCraftOptionForTag(ServerLevel level, List<Participant> participants, Participant buyer,
-                                                                     Identifier tagId, PlotCraftingCapability capability, Set<Identifier> visiting) {
+                                                                     Identifier tagId, PlotCraftingCapability capability, Set<Identifier> visiting,
+                                                                     CostMemo memo) {
         TagKey<net.minecraft.world.item.Item> tag = TagKey.create(net.minecraft.core.registries.Registries.ITEM, tagId);
         CraftOption best = null;
         for (net.minecraft.core.Holder<net.minecraft.world.item.Item> member : BuiltInRegistries.ITEM.getTagOrEmpty(tag)) {
@@ -870,7 +888,7 @@ public final class PlannedInventoryClearing {
             if (visiting.contains(memberId)) {
                 continue;
             }
-            Optional<CraftOption> option = cheapestCraftOption(level, participants, buyer, memberId, capability, visiting, new HashMap<>());
+            Optional<CraftOption> option = cheapestCraftOption(level, participants, buyer, memberId, capability, visiting, memo);
             if (option.isPresent() && (best == null || option.get().cost() < best.cost())) {
                 best = option.get();
             }
@@ -902,10 +920,10 @@ public final class PlannedInventoryClearing {
      */
     private static long estimateCraftCost(ServerLevel level, List<Participant> participants, Participant buyer,
                                            LyfeCraftingBridge.RecipeInfo recipe, Identifier targetId, PlotCraftingCapability capability, Set<Identifier> visiting,
-                                           Map<ResourceKey, Long> costMemo) {
+                                           CostMemo memo) {
         long total = 0;
         for (Map.Entry<Identifier, Integer> entry : recipe.specificComponents().entrySet()) {
-            long unitCost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(entry.getKey(), false), capability, visiting, costMemo);
+            long unitCost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(entry.getKey(), false), capability, visiting, memo);
             if (unitCost < 0) {
                 return -1;
             }
@@ -914,7 +932,7 @@ public final class PlannedInventoryClearing {
         for (Map.Entry<String, Integer> entry : recipe.genericComponents().entrySet()) {
             long cheapestMemberUnitCost = -1;
             for (Identifier member : LyfeCraftingBridge.componentGroupMembers(entry.getKey())) {
-                long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), capability, visiting, costMemo);
+                long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), capability, visiting, memo);
                 if (cost >= 0 && (cheapestMemberUnitCost < 0 || cost < cheapestMemberUnitCost)) {
                     cheapestMemberUnitCost = cost;
                 }
@@ -931,33 +949,53 @@ public final class PlannedInventoryClearing {
 
     /**
      * Non-mutating: the cheaper of direct-buy or recursive self-craft for one unit of {@code key}, or
-     * {@code -1} if neither is achievable. Checks/populates {@code costMemo} first -- see {@link
-     * #fulfillOneUnit}'s own doc for why this exists (real incident: unmemoized, this recursion could
-     * take 44+ real seconds for one single resource with a deep/wide alternate-fuel dependency chain).
-     * Only ever caches a successfully-resolved ({@code >= 0}) result, never a {@code -1} -- a {@code -1}
-     * can legitimately depend on which cyclic path reached this key first (the {@code visiting} guard),
-     * so caching it risks reusing a cycle artifact from one path as a false negative for a different,
-     * genuinely-unblocked path to the same resource; a real resolved cost has no such path-dependence
-     * (the world state it's computed from doesn't change mid-search), so it's always safe to reuse.
+     * {@code -1} if neither is achievable. Checks/populates {@code memo.craftCost()} first -- see
+     * {@link #fulfillOneUnit}'s own doc for why this exists (real incident: unmemoized, this
+     * recursion could take 44+ real seconds for one single resource with a deep/wide alternate-fuel
+     * dependency chain). Only ever caches a successfully-resolved ({@code >= 0}) *combined* result
+     * there, never a {@code -1} -- a {@code -1} can legitimately depend on which cyclic path reached
+     * this key first (the {@code visiting} guard), so caching it risks reusing a cycle artifact from
+     * one path as a false negative for a different, genuinely-unblocked path to the same resource; a
+     * real resolved cost has no such path-dependence (the world state it's computed from doesn't
+     * change mid-search), so it's always safe to reuse.
+     *
+     * <p>{@code direct}'s own {@link #cheapestSellerPrice} lookup is a different story -- real crash,
+     * 2026-10-24 (second watchdog kill the same night, 60.01s single tick): that call has NO
+     * dependence on {@code visiting}/cycles at all (sellers and their listed prices don't change
+     * based on which recursive path reached them), so it's always safe to cache unconditionally,
+     * success or failure -- caught here specifically via {@link CostMemo#sellerPrice}, separate from
+     * the combined craft-vs-buy result above. Before this fix, a resource with no seller and no valid
+     * craft path (a genuine dead end) silently re-ran the full participant/shop-listing scan every
+     * single time it was reached in the recursion, with nothing above ever caching the failure --
+     * confirmed directly in the crash report's own stack, dozens of {@code cheapestCraftOption} ->
+     * {@code estimateCraftCost} -> {@code cheapestCostForOneUnit} -> {@code cheapestSellerPrice}
+     * frames deep.
      */
     private static long cheapestCostForOneUnit(ServerLevel level, List<Participant> participants, Participant buyer,
                                                 ResourceKey key, PlotCraftingCapability capability, Set<Identifier> visiting,
-                                                Map<ResourceKey, Long> costMemo) {
-        Long cached = costMemo.get(key);
+                                                CostMemo memo) {
+        Long cached = memo.craftCost().get(key);
         if (cached != null) {
             return cached;
         }
-        long direct = cheapestSellerPrice(level, participants, buyer, key);
+        Long cachedDirect = memo.sellerPrice().get(key);
+        long direct;
+        if (cachedDirect != null) {
+            direct = cachedDirect;
+        } else {
+            direct = cheapestSellerPrice(level, participants, buyer, key);
+            memo.sellerPrice().put(key, direct);
+        }
         long craft = -1;
         if (!key.isTag()) {
-            Optional<CraftOption> option = cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting, costMemo);
+            Optional<CraftOption> option = cheapestCraftOption(level, participants, buyer, key.id(), capability, visiting, memo);
             if (option.isPresent()) {
                 craft = option.get().cost();
             }
         }
         long result = direct < 0 ? craft : (craft < 0 ? direct : Math.min(direct, craft));
         if (result >= 0) {
-            costMemo.put(key, result);
+            memo.craftCost().put(key, result);
         }
         return result;
     }
@@ -1105,12 +1143,12 @@ public final class PlannedInventoryClearing {
 
     private static Identifier cheapestGroupMember(ServerLevel level, List<Participant> participants, Participant buyer,
                                                     List<Identifier> members, PlotCraftingCapability capability, Set<Identifier> visiting) {
-        // Fresh per call, same reasoning as fulfillOneUnit's own costMemo -- see that method's doc.
-        Map<ResourceKey, Long> costMemo = new HashMap<>();
+        // Fresh per call, same reasoning as fulfillUnits' own CostMemo -- see that method's doc.
+        CostMemo memo = CostMemo.fresh();
         Identifier best = null;
         long bestCost = -1;
         for (Identifier member : members) {
-            long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), capability, visiting, costMemo);
+            long cost = cheapestCostForOneUnit(level, participants, buyer, new ResourceKey(member, false), capability, visiting, memo);
             if (cost >= 0 && (bestCost < 0 || cost < bestCost)) {
                 bestCost = cost;
                 best = member;
