@@ -222,10 +222,10 @@ public class SettlemyntsMod {
         // Replaces the old unconditional-on-login debug item grant (removed 2026-10-02, see
         // decisions.md) -- the Settlement Claim Flag is now only ever handed out via Kyt's
         // mod-managed "Dev" Kyt (/kyt getDev). Same soft-dependency gate as KytGuardhouseBridge's
-        // own usage below.
+        // own usage below. Quantity dropped 2 -> 1, 2026-10-25, explicit user request.
         if (ModList.get().isLoaded("kyt")) {
             com.github.cerealklla.kyt.api.Kyt.registerDevKytContribution(() ->
-                    java.util.List.of(new ItemStack(ModItems.SETTLEMENT_CLAIM_FLAG.get(), 2)));
+                    java.util.List.of(new ItemStack(ModItems.SETTLEMENT_CLAIM_FLAG.get(), 1)));
         }
 
         modEventBus.addListener(this::commonSetup);
