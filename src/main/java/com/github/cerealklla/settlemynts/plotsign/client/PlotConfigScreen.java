@@ -57,6 +57,12 @@ public final class PlotConfigScreen extends NuclyusContainerScreen<PlotConfigMen
         return menu.hasShop() && menu.signData().canManage() ? ShopTab.SUB_TAB_BAR_HEIGHT : 0;
     }
 
+    /** Real report, 2026-10-24: "the whole window should shift up and left to make better use of the screen" -- see {@link NuclyusContainerScreen#anchorPanelTopLeft()}'s own doc. */
+    @Override
+    protected boolean anchorPanelTopLeft() {
+        return true;
+    }
+
     private static List<NuclyusMenu> buildTabs(PlotConfigMenu menu) {
         var data = menu.signData();
         List<NuclyusMenu> tabs = new ArrayList<>();
