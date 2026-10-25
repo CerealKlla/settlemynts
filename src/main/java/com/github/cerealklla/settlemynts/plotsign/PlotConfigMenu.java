@@ -176,12 +176,7 @@ public class PlotConfigMenu extends AbstractContainerMenu implements ShopCartLik
             });
         }
         for (int i = 0; i < buyContainer.getContainerSize(); i++) {
-            addSlot(new ConjuredOnlySlot(buyContainer, i, BUY_X, TOP_Y + i * ROW_HEIGHT) {
-                @Override
-                public boolean isActive() {
-                    return shopSlotsActive;
-                }
-            });
+            addSlot(new BuySlot(buyContainer, i, BUY_X, TOP_Y + i * ROW_HEIGHT, this::listings));
         }
         for (int i = 0; i < sellContainer.getContainerSize(); i++) {
             addSlot(new SellSlot(sellContainer, i, SELL_X, TOP_Y + i * ROW_HEIGHT, this::listings));
@@ -372,6 +367,39 @@ public class PlotConfigMenu extends AbstractContainerMenu implements ShopCartLik
         @Override
         public boolean isActive() {
             return shopSlotsActive;
+        }
+    }
+
+    /**
+     * Stock-aware gating for the Buy side -- added 2026-10-24, real report (screenshot): a listing
+     * showing "0 in stock" could still be conjured into a Buy slot, with no feedback that it would
+     * come back empty at Confirm. Mirrors {@link SellSlot}'s own {@code plannedInventoryRemaining}
+     * membership gate exactly, same "UX-only, not an exact quantity cap" precedent -- the real
+     * enforcement was already correct and unchanged: {@code SettlemyntsMod#processBuyLine} ->
+     * {@code bridge.YconomicsShopBridge#purchase} -> {@code api.Yconomics#purchaseFromShop} already
+     * drains real stock and only charges/delivers however much it actually found, refunding nothing
+     * extra -- this never risked a dupe or overcharge, it just let a doomed-to-fail 0/low-stock
+     * listing sit in the cart with nothing telling the player why.
+     */
+    private final class BuySlot extends ConjuredOnlySlot {
+        private final Supplier<List<ShopListingEntry>> listingsSupplier;
+
+        BuySlot(Container container, int index, int x, int y, Supplier<List<ShopListingEntry>> listingsSupplier) {
+            super(container, index, x, y);
+            this.listingsSupplier = listingsSupplier;
+        }
+
+        @Override
+        public boolean isActive() {
+            return shopSlotsActive;
+        }
+
+        @Override
+        public boolean mayPlace(ItemStack stack) {
+            if (!super.mayPlace(stack)) {
+                return false;
+            }
+            return listingsSupplier.get().stream().anyMatch(l -> l.shopStock() > 0 && l.matches(stack));
         }
     }
 
