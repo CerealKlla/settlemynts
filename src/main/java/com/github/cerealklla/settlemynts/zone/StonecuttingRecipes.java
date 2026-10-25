@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.zone;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -12,6 +13,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.SingleRecipeInput;
 import net.minecraft.world.item.crafting.StonecutterRecipe;
 
@@ -39,13 +41,29 @@ public final class StonecuttingRecipes {
     private StonecuttingRecipes() {
     }
 
+    // Real crash, 2026-10-24 (watchdog: 60.01s single tick, stack bottoming out here): this used to
+    // scan the server's ENTIRE RecipeManager from scratch on every single call, same bug
+    // SmeltingRecipes#buildCache's own doc already describes fixing once (2026-10-20) -- this file
+    // was never given the same fix at the time, and PlannedInventoryClearing's unmemoized-per-call
+    // recursive buy-vs-craft search (cheapestCraftOption/estimateCraftCost/cheapestCostForOneUnit)
+    // calls this once per ingredient at every recursion level, same mechanism, same precedent, same
+    // fix: a cache keyed by the RecipeManager's own identity, rebuilt for free on every data reload.
+    private static RecipeManager cachedManager;
+    private static Map<Identifier, LyfeCraftingBridge.RecipeInfo> cache = Map.of();
+
     /** The 1:1 stonecutting-derived recipe for {@code resultId}, if any real vanilla Stonecutter recipe produces it. */
     public static Optional<LyfeCraftingBridge.RecipeInfo> get(ServerLevel level, Identifier resultId) {
-        Item resultItem = BuiltInRegistries.ITEM.getOptional(resultId).orElse(null);
-        if (resultItem == null) {
-            return Optional.empty();
+        RecipeManager manager = level.getServer().getRecipeManager();
+        if (manager != cachedManager) {
+            cachedManager = manager;
+            cache = buildCache(manager);
         }
-        for (RecipeHolder<?> holder : level.getServer().getRecipeManager().getRecipes()) {
+        return Optional.ofNullable(cache.get(resultId));
+    }
+
+    private static Map<Identifier, LyfeCraftingBridge.RecipeInfo> buildCache(RecipeManager manager) {
+        Map<Identifier, LyfeCraftingBridge.RecipeInfo> result = new HashMap<>();
+        for (RecipeHolder<?> holder : manager.getRecipes()) {
             if (!(holder.value() instanceof StonecutterRecipe recipe)) {
                 continue;
             }
@@ -53,14 +71,18 @@ public final class StonecuttingRecipes {
             if (firstInput.isEmpty()) {
                 continue;
             }
-            ItemStack result = recipe.assemble(new SingleRecipeInput(new ItemStack(firstInput.get())));
-            if (result.isEmpty() || result.getItem() != resultItem) {
+            ItemStack resultStack = recipe.assemble(new SingleRecipeInput(new ItemStack(firstInput.get())));
+            if (resultStack.isEmpty()) {
                 continue;
             }
+            Identifier resultId = BuiltInRegistries.ITEM.getKey(resultStack.getItem());
+            if (result.containsKey(resultId)) {
+                continue; // First matching recipe wins -- same semantics the old scan-and-return-first had.
+            }
             Identifier inputId = BuiltInRegistries.ITEM.getKey(firstInput.get().value());
-            return Optional.of(new LyfeCraftingBridge.RecipeInfo(resultId, 0, Map.of(inputId, 1), Map.of(),
+            result.put(resultId, new LyfeCraftingBridge.RecipeInfo(resultId, 0, Map.of(inputId, 1), Map.of(),
                     LyfeCraftingBridge.RecipeInfo.StructureRequirement.STONECUTTER, 0));
         }
-        return Optional.empty();
+        return result;
     }
 }

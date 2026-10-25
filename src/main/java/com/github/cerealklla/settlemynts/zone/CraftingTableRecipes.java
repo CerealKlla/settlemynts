@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.zone;
 
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -16,6 +17,7 @@ import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.display.RecipeDisplay;
 import net.minecraft.world.item.crafting.display.SlotDisplay;
 
@@ -49,20 +51,43 @@ public final class CraftingTableRecipes {
     private CraftingTableRecipes() {
     }
 
+    // Real crash, 2026-10-24 (watchdog: 60.00s/60.01s single tick, two real server crashes same
+    // night): this scanned the server's ENTIRE RecipeManager from scratch on every single call --
+    // the exact same bug SmeltingRecipes#buildCache's own doc already documents fixing once
+    // (2026-10-20), repeated here by not following that precedent when this file was first written.
+    // PlannedInventoryClearing's unmemoized-per-call recursive buy-vs-craft search (cheapestCraftOption/
+    // estimateCraftCost/cheapestCostForOneUnit) calls this once per ingredient at every recursion
+    // level with no caching of its own, so an uncached full scan here gets paid for repeatedly,
+    // combinatorially, across a real recursion that can legitimately run 20+ levels deep. Fixed with
+    // the identical cache-keyed-by-RecipeManager-identity pattern SmeltingRecipes/StonecuttingRecipes
+    // already use -- rebuilt for free on every data reload, no manual invalidation needed.
+    private static RecipeManager cachedManager;
+    private static Map<Identifier, LyfeCraftingBridge.RecipeInfo> cache = Map.of();
+
     /** The vanilla crafting-table-derived recipe for {@code resultId}, if any real vanilla crafting recipe produces it. */
     public static Optional<LyfeCraftingBridge.RecipeInfo> get(ServerLevel level, Identifier resultId) {
-        Item resultItem = BuiltInRegistries.ITEM.getOptional(resultId).orElse(null);
-        if (resultItem == null) {
-            return Optional.empty();
+        RecipeManager manager = level.getServer().getRecipeManager();
+        if (manager != cachedManager) {
+            cachedManager = manager;
+            cache = buildCache(manager);
         }
-        for (RecipeHolder<?> holder : level.getServer().getRecipeManager().getRecipes()) {
+        return Optional.ofNullable(cache.get(resultId));
+    }
+
+    private static Map<Identifier, LyfeCraftingBridge.RecipeInfo> buildCache(RecipeManager manager) {
+        Map<Identifier, LyfeCraftingBridge.RecipeInfo> result = new HashMap<>();
+        for (RecipeHolder<?> holder : manager.getRecipes()) {
             Recipe<?> recipe = holder.value();
             if (!(recipe instanceof CraftingRecipe)) {
                 continue;
             }
-            ItemStack result = resultOf(recipe);
-            if (result == null || result.isEmpty() || result.getItem() != resultItem) {
+            ItemStack resultStack = resultOf(recipe);
+            if (resultStack == null || resultStack.isEmpty()) {
                 continue;
+            }
+            Identifier resultId = BuiltInRegistries.ITEM.getKey(resultStack.getItem());
+            if (result.containsKey(resultId)) {
+                continue; // First matching recipe wins -- same semantics the old scan-and-return-first had.
             }
             Map<Identifier, Integer> components = new LinkedHashMap<>();
             for (Ingredient ingredient : recipe.placementInfo().ingredients()) {
@@ -76,10 +101,10 @@ public final class CraftingTableRecipes {
             if (components.isEmpty()) {
                 continue; // No real ingredient cost to derive from (e.g. a special-crafting recipe).
             }
-            return Optional.of(new LyfeCraftingBridge.RecipeInfo(resultId, 0, components, Map.of(),
-                    LyfeCraftingBridge.RecipeInfo.StructureRequirement.CRAFTING_TABLE, 0, result.getCount(), Optional.empty(), 0));
+            result.put(resultId, new LyfeCraftingBridge.RecipeInfo(resultId, 0, components, Map.of(),
+                    LyfeCraftingBridge.RecipeInfo.StructureRequirement.CRAFTING_TABLE, 0, resultStack.getCount(), Optional.empty(), 0));
         }
-        return Optional.empty();
+        return result;
     }
 
     private static ItemStack resultOf(Recipe<?> recipe) {
