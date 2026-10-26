@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.github.cerealklla.kyt.generic.GenericFamily;
 import com.github.cerealklla.lyfe.craft.EquipmentTierLadder;
+import com.github.cerealklla.lyfe.craft.FocusLadder;
 import com.github.cerealklla.lyfe.craft.NatureStaffLadder;
 
 import net.minecraft.resources.Identifier;
@@ -43,6 +44,7 @@ public final class LyfeEquipmentFamiliesBridge {
             case BOW -> List.of(Identifier.withDefaultNamespace("bow"));
             case CROSSBOW -> List.of(Identifier.withDefaultNamespace("crossbow"));
             case NATURE_STAFF -> NatureStaffLadder.allIds();
+            case FOCUS -> FocusLadder.allIds();
             case HELMET -> armorIds(ArmorType.HELMET);
             case CHESTPLATE -> armorIds(ArmorType.CHESTPLATE);
             case LEGGINGS -> armorIds(ArmorType.LEGGINGS);
