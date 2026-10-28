@@ -1286,8 +1286,15 @@ public class SettlemyntsMod {
      * BillTransferEngine}-based path that never calls this method or {@link #depositSalesTax} at
      * all. Don't "fix" either of those paths to also collect tax later -- the exemption is
      * intentional, not a gap.
+     *
+     * <p>Widened from {@code private} to {@code public}, 2026-10-28 -- real report: "the only tax I
+     * see going to town hall is from player purchases, why are plots auto-buying not being taxed?"
+     * Unlike the Guardhouse-food exemption above, general inter-plot midnight auto-buying
+     * ({@code zone.PlannedInventoryClearing#executeDirectBuyBatch}) had no documented reasoning for
+     * skipping tax at all -- a genuine gap, not a mirrored intentional exemption. See that method's
+     * own new tax call for the fix.
      */
-    private static int resolveSalesTax(com.github.cerealklla.settlemynts.zone.PlotOwner owner, int quantity, int transactionValue) {
+    public static int resolveSalesTax(com.github.cerealklla.settlemynts.zone.PlotOwner owner, int quantity, int transactionValue) {
         if (!(owner instanceof GhostTownHallCoreEntity core) || quantity <= 0 || transactionValue <= 0 || core.townHallPlot().isEmpty()) {
             return 0;
         }
@@ -1302,7 +1309,7 @@ public class SettlemyntsMod {
      * guardhouse.DefenseSpendingTransfer} already uses for its own Town-Hall-to-plot gold transfer.
      * No-op if {@code amount <= 0}.
      */
-    private static void depositSalesTax(ServerLevel level, GhostTownHallCoreEntity core, PlotRecord sellerPlot, int amount, String sellerLabel) {
+    public static void depositSalesTax(ServerLevel level, GhostTownHallCoreEntity core, PlotRecord sellerPlot, int amount, String sellerLabel) {
         if (amount <= 0) {
             return;
         }

@@ -16,7 +16,10 @@ import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge;
 import com.github.cerealklla.settlemynts.bridge.LyfeCraftingBridge;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
+import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
+import com.github.cerealklla.settlemynts.founding.SettlementCoreIndex;
 
+import net.minecraft.core.GlobalPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
@@ -1098,6 +1101,19 @@ public final class PlannedInventoryClearing {
             for (ItemStack stack : ContainerWithdraw.drain(buyer.boxes(), GOLD_NUGGETS, (int) split.totalCost())) {
                 ContainerDeposit.depositIntoAny(seller.boxes(), stack);
             }
+            // Real fix, 2026-10-28: this inter-plot auto-buy never applied settlement sales tax at
+            // all, unlike player-driven Shop purchases (SettlemyntsMod#buyFromShop/#sellToShop,
+            // which already call resolveSalesTax/depositSalesTax). Same convention: tax comes out of
+            // the seller's own boxes (which just received totalCost above) and moves to the Town
+            // Hall. No-op (0 tax) for a natural-village seller, which has no real core to resolve.
+            resolveOwningCore(level, seller.plot().plotId()).ifPresent(sellerCore -> {
+                int tax = SettlemyntsMod.resolveSalesTax(sellerCore, split.totalUnits(), (int) split.totalCost());
+                if (tax > 0) {
+                    List<ItemStack> withdrawnTax = ContainerWithdraw.drain(seller.boxes(), GOLD_NUGGETS, tax);
+                    int actuallyTaxed = withdrawnTax.stream().mapToInt(ItemStack::getCount).sum();
+                    SettlemyntsMod.depositSalesTax(level, sellerCore, seller.plot(), actuallyTaxed, "plot " + seller.plot().plotId());
+                }
+            });
             SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} direct-bought {}x {} from plot {} for {} nuggets (craftable resource)",
                     buyer.plot().plotId(), split.totalUnits(), key.id(), seller.plot().plotId(), split.totalCost());
             appendLedger(level, buyer.plot(), "Bought " + split.totalUnits() + "x " + key.displayName() + " from neighboring plot for " + split.totalCost() + " nuggets");
@@ -1171,6 +1187,30 @@ public final class PlannedInventoryClearing {
             }
         }
         return best;
+    }
+
+    /**
+     * The real {@link GhostTownHallCoreEntity} that owns {@code plotId}, if any -- empty for a
+     * natural-village plot (no real core exists for one at all) or if the owning core's chunk isn't
+     * currently loaded. Mirrors {@code ShopMidnightRestockTicker}'s own real settlement-resolution
+     * pattern (iterate {@link SettlementCoreIndex}, resolve each {@link GlobalPos} via the matching
+     * dimension, check {@code core.getPlots()}) rather than threading a core reference through this
+     * class's own deep call chain (settleGroup -> ... -> executeDirectBuyBatch) just for this one
+     * tax lookup. {@link SettlementCoreIndex} is small (one entry per settlement, not per plot), so
+     * this linear scan is cheap relative to the rest of one midnight trade pass.
+     */
+    private static Optional<GhostTownHallCoreEntity> resolveOwningCore(ServerLevel level, UUID plotId) {
+        for (Map.Entry<UUID, GlobalPos> entry : SettlementCoreIndex.get(level.getServer()).all().entrySet()) {
+            ServerLevel coreLevel = level.getServer().getLevel(entry.getValue().dimension());
+            if (coreLevel == null) {
+                continue;
+            }
+            if (coreLevel.getEntity(entry.getKey()) instanceof GhostTownHallCoreEntity core
+                    && core.getPlots().stream().anyMatch(p -> p.plotId().equals(plotId))) {
+                return Optional.of(core);
+            }
+        }
+        return Optional.empty();
     }
 
     private static Set<Identifier> withAdded(Set<Identifier> set, Identifier id) {
