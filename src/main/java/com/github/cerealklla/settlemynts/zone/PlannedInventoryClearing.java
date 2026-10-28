@@ -1111,7 +1111,7 @@ public final class PlannedInventoryClearing {
                 if (tax > 0) {
                     List<ItemStack> withdrawnTax = ContainerWithdraw.drain(seller.boxes(), GOLD_NUGGETS, tax);
                     int actuallyTaxed = withdrawnTax.stream().mapToInt(ItemStack::getCount).sum();
-                    SettlemyntsMod.depositSalesTax(level, sellerCore, seller.plot(), actuallyTaxed, "plot " + seller.plot().plotId());
+                    SettlemyntsMod.depositSalesTax(level, sellerCore, seller.plot(), actuallyTaxed, "plot " + seller.plot().name());
                 }
             });
             SettlemyntsMod.LOGGER.info("PlannedInventoryClearing: plot {} direct-bought {}x {} from plot {} for {} nuggets (craftable resource)",
