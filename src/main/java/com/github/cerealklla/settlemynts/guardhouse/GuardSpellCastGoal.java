@@ -8,8 +8,10 @@ import com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge;
 
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 
 /**
@@ -166,8 +168,14 @@ public final class GuardSpellCastGoal extends Goal {
         // every staff-wielding guard). Remove once the real culprit is confirmed.
         long diagStart = System.nanoTime();
         AABB scanBox = guard.getBoundingBox().inflate(HEAL_SCAN_RADIUS);
+        // Real bug fix, 2026-10-28: a plain LivingEntity scan swept up Caryvan's Wagon/Carriage
+        // entities (real LivingEntity subclasses with real HP as of that mod's new HP/repair
+        // system, but not actual combatants) -- guards were healing a Broken, 0-HP wagon forever.
+        // Only a Player or a real Mob is a sensible ally to heal; see SparkOfLifeProjectile's own
+        // identical fix (Lyfe side) for the direct-hit-path half of this.
         List<LivingEntity> candidates = guard.level().getEntitiesOfClass(LivingEntity.class, scanBox,
-                e -> e != guard && e.isAlive() && !(e instanceof Enemy) && e.getHealth() < e.getMaxHealth() * healthFraction);
+                e -> e != guard && e.isAlive() && !(e instanceof Enemy) && (e instanceof Player || e instanceof Mob)
+                        && e.getHealth() < e.getMaxHealth() * healthFraction);
         LivingEntity result = candidates.stream().min(Comparator.comparingDouble(e -> e.getHealth() / e.getMaxHealth())).orElse(null);
         long diagElapsedNanos = System.nanoTime() - diagStart;
         if (diagElapsedNanos >= 2_000_000L) {

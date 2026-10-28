@@ -3044,7 +3044,7 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
             return;
         }
-        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenConfigurePlotPayload(payload.signPos(), plot.mineSpecialization()));
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenConfigurePlotPayload(payload.signPos(), plot.mineSpecialization(), plot.tier()));
     }
 
     /** "Specialization" Ore/Stone buttons on the "Configure" tab (2026-10-23, explicit user request) -- re-checks canManage and that this is actually a Mineshaft plot server-side. */

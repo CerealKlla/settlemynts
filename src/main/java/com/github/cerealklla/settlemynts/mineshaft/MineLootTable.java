@@ -1,5 +1,8 @@
 package com.github.cerealklla.settlemynts.mineshaft;
 
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 
 import net.minecraft.util.RandomSource;
@@ -44,7 +47,8 @@ import net.minecraft.world.item.Items;
  */
 public final class MineLootTable {
 
-    private record Entry(Item item, int weight) {
+    /** Widened from {@code private}, 2026-10-28, so the Configure tab's new odds display can read a tier's real weighted entries -- see {@link #entriesFor}. */
+    public record Entry(Item item, int weight) {
     }
 
     private static final Entry[][] ORE_TIERS = {
@@ -146,5 +150,23 @@ public final class MineLootTable {
             roll -= entry.weight();
         }
         return Optional.empty(); // Unreachable (weights always sum to totalWeight), kept as a safe fallback.
+    }
+
+    /**
+     * The real weighted entries for {@code tier}+{@code specialization}, sorted highest-weight-first
+     * -- for the Configure tab's new "what can this Mineshaft find, and roughly how often" display
+     * (explicit user request, 2026-10-28). Same tier-clamping as {@link #rollLoot}. Deliberately
+     * returns raw weights, not a 0-5 dot rating -- the caller derives that relative to the group's
+     * own highest weight (the user's own spec: "0% (0 dots) to the highest % available in this table
+     * (5 dots)"), since "highest" only means something once every entry in the table is in hand.
+     */
+    public static List<Entry> entriesFor(int tier, MineSpecialization specialization) {
+        Entry[][] tiers = switch (specialization) {
+            case STONE -> STONE_TIERS;
+            case EXCAVATION -> EXCAVATION_TIERS;
+            case ORE -> ORE_TIERS;
+        };
+        Entry[] pool = tiers[Math.max(1, Math.min(tiers.length, tier)) - 1];
+        return Arrays.stream(pool).sorted(Comparator.comparingInt(Entry::weight).reversed()).toList();
     }
 }
