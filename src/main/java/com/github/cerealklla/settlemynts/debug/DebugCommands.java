@@ -92,6 +92,8 @@ public final class DebugCommands {
                         .executes(ctx -> resyncProtection(ctx.getSource())))
                 .then(Commands.literal("resyncshop")
                         .executes(ctx -> resyncShop(ctx.getSource())))
+                .then(Commands.literal("resyncnpcprices")
+                        .executes(ctx -> resyncNpcShopPrices(ctx.getSource())))
                 .then(Commands.literal("removelisting")
                         .then(Commands.argument("itemId", StringArgumentType.string())
                                 .executes(ctx -> removeListing(ctx.getSource(), StringArgumentType.getString(ctx, "itemId")))))
@@ -633,6 +635,63 @@ public final class DebugCommands {
             source.sendSuccess(() -> Component.literal("  - " + id + (suppressed ? " (SUPPRESSED)" : " (not suppressed -- should have just been added)")), false);
         }
         return 1;
+    }
+
+    /**
+     * One-time data fix, 2026-10-28 -- real report: "why would an armorer be asking for Gold and
+     * Iron ingots, but only paying 2g for them?" Confirmed live via {@code /yconomics derivedprice}:
+     * the recipe-derivation engine correctly computes both at 62 gold today, so this is NOT a
+     * derivation bug -- it's the same shape of staleness {@link #resyncShop} already exists for
+     * (player-founded plots), just for natural villages instead: {@code zone.ShopSeeding
+     * #effectivePrice}'s own doc confirms a listing's price is only ever set ONCE, at seed time, and
+     * is deliberately never retroactively touched afterward (so a manually-customized price is never
+     * silently overwritten) -- these two listings were evidently seeded before this server's
+     * recipe-derived pricing had a real value for them, and nothing has corrected them since.
+     *
+     * <p>Scoped to natural villages only ({@link NaturalSettlementPlotStore}, trivially scannable
+     * whole-server with no "stand inside the plot" requirement) since that's what's actually
+     * confirmed affected ("Starter Armorer") -- a player-founded settlement's own NPC-owned shops
+     * aren't touched by this pass; {@link #resyncShop} is the per-plot tool for those if the same
+     * staleness ever surfaces there. Only ever touches a listing on a plot with no real owner
+     * ({@link PlotRecord#owner()} empty) -- a player-owned shop's price is that owner's own choice,
+     * never silently overwritten.
+     */
+    private static int resyncNpcShopPrices(CommandSourceStack source) {
+        if (!(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run in a real level."));
+            return 0;
+        }
+        if (!YconomicsShopBridge.isAvailable()) {
+            source.sendFailure(Component.literal("Yconomics isn't loaded -- nothing to resync."));
+            return 0;
+        }
+        int[] checked = {0};
+        int[] updated = {0};
+        for (List<PlotRecord> plots : NaturalSettlementPlotStore.get(level.getServer()).all().values()) {
+            for (PlotRecord plot : plots) {
+                if (plot.owner().isPresent() || plot.shopId().isEmpty()) {
+                    continue;
+                }
+                UUID shopId = plot.shopId().get();
+                for (YconomicsShopBridge.ShopListingView listing : YconomicsShopBridge.getListings(level, shopId)) {
+                    checked[0]++;
+                    Optional<Identifier> itemId = listing.resource().itemId();
+                    if (itemId.isEmpty()) {
+                        continue;
+                    }
+                    Optional<Integer> derived = YconomicsShopBridge.getDerivedPrice(level, itemId.get());
+                    if (derived.isPresent() && derived.get() != listing.pricePerUnit()) {
+                        YconomicsShopBridge.setListingPrice(level, shopId, listing.resource(), derived.get());
+                        updated[0]++;
+                    }
+                }
+            }
+        }
+        int finalChecked = checked[0];
+        int finalUpdated = updated[0];
+        source.sendSuccess(() -> Component.literal("Resynced " + finalUpdated + "/" + finalChecked
+                + " NPC shop listing(s) across every tracked natural village to current recipe-derived prices."), true);
+        return finalUpdated;
     }
 
     /**
