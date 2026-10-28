@@ -70,6 +70,8 @@ public class LumberjackWorkGoal extends Goal {
     // the real structural fix alongside this widening -- a single fixed target point, however
     // generous the radius around it, was still the wrong thing to measure distance to.
     private static final double HARVEST_ARRIVE_DIST_SQ = 16.0;
+    /** Bonus Sapling chance on tree harvest -- see {@link #harvest}'s own doc, 2026-10-28. */
+    private static final float BONUS_SAPLING_CHANCE = 0.15F;
     // Randomized per scan (2026-10-05, explicit user request: "5-7 instead of flat 4") -- varies the
     // plot's planting pattern instead of a perfectly uniform grid.
     private static final int MIN_SAPLING_SPACING_BLOCKS = 5;
@@ -574,11 +576,22 @@ public class LumberjackWorkGoal extends Goal {
         if (!PLANTABLE_SOIL.contains(level.getBlockState(pos.below()).getBlock())) {
             return;
         }
-        Item sapling = LumberjackSaplingSpecies.localSpeciesSapling(level, pos);
+        Item sapling = chooseSaplingToPlant(level, pos);
         Block saplingBlock = Block.byItem(sapling);
         if (saplingBlock != net.minecraft.world.level.block.Blocks.AIR) {
             level.setBlock(pos, saplingBlock.defaultBlockState(), 3);
         }
+    }
+
+    /** Random pick among this plot's configured Sapling slots (see {@link com.github.cerealklla.settlemynts.zone.WorkerPlantSelection}), falling back to the existing single biome-based pick if nothing's configured -- same shape as {@code farm.FarmerWorkGoal#chooseCropToPlant}, Plant Selection, 2026-10-28. */
+    private Item chooseSaplingToPlant(ServerLevel level, BlockPos pos) {
+        Item fallback = LumberjackSaplingSpecies.localSpeciesSapling(level, pos);
+        Optional<com.github.cerealklla.settlemynts.zone.PlotRecord> plot = Settlemynts.findPlotRecord(level, worker.plotId());
+        if (plot.isEmpty()) {
+            return fallback;
+        }
+        return com.github.cerealklla.settlemynts.zone.WorkerPlantSelection.chooseRandom(
+                plot.get().plantSelections(), plot.get().tier(), level.getRandom(), fallback);
     }
 
     // Bounds the log flood-fill's worst case, mirroring Lyfe's own Lumberjack-skill cap exactly
@@ -701,6 +714,25 @@ public class LumberjackWorkGoal extends Goal {
                         }
                     }
                 }
+            }
+        }
+
+        // Bonus Sapling chance, 2026-10-28 (explicit user spec): "Every Tree or Plant destroyed by
+        // an NPC should give a chance to retrieve an additional sapling... which can then enter the
+        // town's economy." Rolled once per whole tree harvested (not per leaf block -- a real
+        // vanilla sapling drop is already deliberately discarded above, per that doc's own earlier
+        // explicit instruction; this is a separate, explicit bonus roll, same flat untuned rate
+        // {@code farm.FarmerWorkGoal#BONUS_SEED_CHANCE} uses). Uses the tree's own local-species
+        // sapling (same pick #plant would make here), not this plot's currently-configured slots --
+        // a bonus from a harvested tree should match what was actually growing, not a random
+        // reconfigured choice.
+        if (!logs.isEmpty() && level.getRandom().nextFloat() < BONUS_SAPLING_CHANCE) {
+            Item sapling = LumberjackSaplingSpecies.localSpeciesSapling(level, base);
+            if (boxes == null) {
+                boxes = Settlemynts.resolvePlotBoxes(level, worker.plotId());
+            }
+            if (!boxes.isEmpty()) {
+                ContainerDeposit.depositIntoAny(boxes, new ItemStack(sapling, 1));
             }
         }
     }

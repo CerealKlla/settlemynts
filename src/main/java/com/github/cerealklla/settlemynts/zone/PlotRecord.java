@@ -148,21 +148,27 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
      * {@code mineSpecialization} is this plot's Ore/Stone Mineshaft loot focus (ignored for any
      * non-Mineshaft plot) -- see {@link MineSpecialization}'s own doc.
      */
-    public record PlotMiscState(int tieredDefaultsAppliedTier, MineSpecialization mineSpecialization) {
-        public static final PlotMiscState NONE = new PlotMiscState(0, MineSpecialization.ORE);
+    public record PlotMiscState(int tieredDefaultsAppliedTier, MineSpecialization mineSpecialization, List<String> plantSelections) {
+        public static final PlotMiscState NONE = new PlotMiscState(0, MineSpecialization.ORE, List.of());
 
         public static final Codec<PlotMiscState> CODEC = RecordCodecBuilder.create(i -> i.group(
                 Codec.INT.optionalFieldOf("tiered_defaults_applied_tier", 0).forGetter(PlotMiscState::tieredDefaultsAppliedTier),
                 Codec.STRING.xmap(MineSpecialization::valueOf, MineSpecialization::name)
-                        .optionalFieldOf("mine_specialization", MineSpecialization.ORE).forGetter(PlotMiscState::mineSpecialization)
+                        .optionalFieldOf("mine_specialization", MineSpecialization.ORE).forGetter(PlotMiscState::mineSpecialization),
+                Codec.STRING.listOf().optionalFieldOf("plant_selections", List.of()).forGetter(PlotMiscState::plantSelections)
         ).apply(i, PlotMiscState::new));
 
         public PlotMiscState withTieredDefaultsAppliedTier(int tieredDefaultsAppliedTier) {
-            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization);
+            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization, plantSelections);
         }
 
         public PlotMiscState withMineSpecialization(MineSpecialization mineSpecialization) {
-            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization);
+            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization, plantSelections);
+        }
+
+        /** {@link WorkerPlantSelection}'s own storage -- see that class's own doc for the slot shape/semantics. */
+        public PlotMiscState withPlantSelections(List<String> plantSelections) {
+            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization, plantSelections);
         }
     }
 
@@ -234,6 +240,10 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
         return misc.mineSpecialization();
     }
 
+    public List<String> plantSelections() {
+        return misc.plantSelections();
+    }
+
     /**
      * Reassigns this plot's Owner after the fact (added 2026-10-17 for {@code debug.DebugCommands}'
      * admin-only {@code /settlemynts setplotowner} -- every other owner assignment only ever happens
@@ -280,6 +290,11 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
     public PlotRecord withMineSpecialization(MineSpecialization mineSpecialization) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
                 boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc.withMineSpecialization(mineSpecialization), hiredNpc, guardKitStandsIssued);
+    }
+
+    public PlotRecord withPlantSelections(List<String> plantSelections) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc.withPlantSelections(plantSelections), hiredNpc, guardKitStandsIssued);
     }
 
     /** Sets whether this plot currently has (or should have, through a funds-driven despawn) a hired

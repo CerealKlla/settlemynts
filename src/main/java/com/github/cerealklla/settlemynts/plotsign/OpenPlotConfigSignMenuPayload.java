@@ -43,10 +43,15 @@ import net.minecraft.resources.Identifier;
  * rework) -- {@code true} only for a Mineshaft-typed plot ({@code
  * zone.PlotWorkerKind#MINESHAFT_ZONE_TYPE_ID}). Gates the new "Specialization" (Ore/Stone) control
  * inside {@code client.ConfigureTab}.
+ *
+ * <p>{@code isFarm}/{@code isLumberyard} (added 2026-10-28, Plant Selection, "similar way to the
+ * Mine") -- gate the new per-slot Seed/Sapling Plant Selection control inside {@code
+ * client.ConfigureTab}, same shape as {@code isMineshaft}'s own gate.
  */
 public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage, boolean hasGarrison, boolean isTownHall,
                                              boolean hasConstructionBox, int tier, int maxPlotTier, boolean canHireNpc,
-                                             int guardKitStandsAvailable, boolean isMineshaft) implements CustomPacketPayload {
+                                             int guardKitStandsAvailable, boolean isMineshaft, boolean isFarm,
+                                             boolean isLumberyard) implements CustomPacketPayload {
 
     public static final Type<OpenPlotConfigSignMenuPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_plot_config_sign_menu"));
@@ -62,6 +67,8 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::canHireNpc,
             ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::guardKitStandsAvailable,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::isMineshaft,
+            ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::isFarm,
+            ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::isLumberyard,
             OpenPlotConfigSignMenuPayload::new);
 
     @Override

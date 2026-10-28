@@ -1,5 +1,8 @@
 package com.github.cerealklla.settlemynts.farm;
 
+import java.util.List;
+import java.util.Optional;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.server.level.ServerLevel;
@@ -30,13 +33,40 @@ final class FarmCropSpecies {
         STEM_FRUIT
     }
 
-    record CropChoice(PlantKind kind, Block plantBlock, Block fruitBlock, Item produceItem, int produceCount) {
+    /**
+     * {@code seedItem} added 2026-10-28 (Plant Selection) -- the real item a player holds to
+     * configure/plant this crop; {@code null} for Potato/Carrot, vanilla's own "self-seeding" crops
+     * where the harvested produce item doubles as the planting material (no separate Seeds item
+     * exists for either). {@link #forSeedItem} is the reverse lookup this feature actually needs.
+     */
+    record CropChoice(PlantKind kind, Block plantBlock, Block fruitBlock, Item produceItem, int produceCount, Item seedItem) {
     }
 
-    static final CropChoice WHEAT = new CropChoice(PlantKind.SIMPLE_CROP, Blocks.WHEAT, null, Items.WHEAT, 1);
-    static final CropChoice POTATO = new CropChoice(PlantKind.SIMPLE_CROP, Blocks.POTATOES, null, Items.POTATO, 2);
-    static final CropChoice BEETROOT = new CropChoice(PlantKind.SIMPLE_CROP, Blocks.BEETROOTS, null, Items.BEETROOT, 1);
-    static final CropChoice MELON = new CropChoice(PlantKind.STEM_FRUIT, Blocks.MELON_STEM, Blocks.MELON, Items.MELON_SLICE, 4);
+    static final CropChoice WHEAT = new CropChoice(PlantKind.SIMPLE_CROP, Blocks.WHEAT, null, Items.WHEAT, 1, Items.WHEAT_SEEDS);
+    static final CropChoice POTATO = new CropChoice(PlantKind.SIMPLE_CROP, Blocks.POTATOES, null, Items.POTATO, 2, Items.POTATO);
+    static final CropChoice BEETROOT = new CropChoice(PlantKind.SIMPLE_CROP, Blocks.BEETROOTS, null, Items.BEETROOT, 1, Items.BEETROOT_SEEDS);
+    static final CropChoice MELON = new CropChoice(PlantKind.STEM_FRUIT, Blocks.MELON_STEM, Blocks.MELON, Items.MELON_SLICE, 4, Items.MELON_SEEDS);
+    /** Added 2026-10-28 (Plant Selection, "All Seeds should be listed") -- same STEM_FRUIT shape as Melon, vanilla's identical Pumpkin Stem/Pumpkin pair. */
+    static final CropChoice PUMPKIN = new CropChoice(PlantKind.STEM_FRUIT, Blocks.PUMPKIN_STEM, Blocks.PUMPKIN, Items.PUMPKIN, 1, Items.PUMPKIN_SEEDS);
+    /** Added 2026-10-28, Carrot's own self-seeding twin to Potato (same reasoning as {@link #POTATO}'s own doc). */
+    static final CropChoice CARROT = new CropChoice(PlantKind.SIMPLE_CROP, Blocks.CARROTS, null, Items.CARROT, 2, Items.CARROT);
+
+    /**
+     * Every crop this mod knows how to grow -- the Plant Selection config screen only ever accepts a
+     * held item that resolves to one of these via {@link #forSeedItem}, and the default (never-
+     * configured) worker behavior still falls back to {@link #chooseFor}'s single biome pick,
+     * unaffected by this list's existence. Torchflower/Pitcher Pod are a deliberate, documented scope
+     * cut -- real vanilla seeds, but with no existing harvest-cycle precedent anywhere in this class
+     * (Torchflower is a non-replanting decorative flower, Pitcher Pod a two-stage sideways-growing
+     * plant neither mechanic here was built to handle) -- not added without a closer look at their
+     * real growth mechanics first.
+     */
+    static final List<CropChoice> ALL = List.of(WHEAT, POTATO, BEETROOT, MELON, PUMPKIN, CARROT);
+
+    /** Reverse of each {@link CropChoice#seedItem} -- what a held item configures/plants, if it's a real known crop's seed at all. */
+    static Optional<CropChoice> forSeedItem(final Item seedItem) {
+        return ALL.stream().filter(choice -> choice.seedItem() == seedItem).findFirst();
+    }
 
     private FarmCropSpecies() {
     }

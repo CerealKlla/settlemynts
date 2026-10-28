@@ -52,6 +52,8 @@ public class FarmerWorkGoal extends Goal {
     private static final double ARRIVE_DIST_SQ = 4.0;
     private static final int ROW_SPACING = 2;
     private static final int MAX_COLUMNS_SCANNED = 400;
+    /** Bonus Seed chance on harvest -- see {@link #harvest}'s own doc, 2026-10-28. */
+    private static final float BONUS_SEED_CHANCE = 0.15F;
     private static final Set<Block> TILLABLE_SOIL = Set.of(
             Blocks.GRASS_BLOCK, Blocks.DIRT, Blocks.COARSE_DIRT, Blocks.ROOTED_DIRT);
 
@@ -148,13 +150,48 @@ public class FarmerWorkGoal extends Goal {
             return;
         }
         Optional<Geometry.Polygon> area = worker.resolvePatrolArea(level);
-        CropChoice crop = FarmCropSpecies.chooseFor(level, area.map(this::boundingBoxCenter).orElse(pendingTarget));
+        BlockPos biomeRef = area.map(this::boundingBoxCenter).orElse(pendingTarget);
         if (pendingIsHarvest) {
-            harvest(level, pendingTarget, crop);
+            // Harvest the real crop actually growing there -- resolved from live block state against
+            // every known crop type (see #cropAt), never randomly chosen (you harvest what's there).
+            CropChoice crop = cropAt(level, pendingTarget);
+            if (crop != null) {
+                harvest(level, pendingTarget, crop);
+            }
         } else {
-            plant(level, pendingTarget, crop);
+            // Plant Selection, 2026-10-28 (explicit user spec): "each time a sappling/seed is
+            // planted, chosen at random from the configured options" -- a fresh random pick on every
+            // single planting, not once per plot/worker. Falls back to the existing biome-based pick
+            // for a plot nobody's configured yet (see WorkerPlantSelection#chooseRandom's own doc).
+            plant(level, pendingTarget, chooseCropToPlant(level, biomeRef));
         }
         pendingTarget = null;
+    }
+
+    /** The real {@link CropChoice} actually growing/ripe at {@code pos} right now, or {@code null} if none of the known crop types match (drifted since the scan). */
+    private CropChoice cropAt(ServerLevel level, BlockPos pos) {
+        BlockState state = level.getBlockState(pos);
+        for (CropChoice choice : FarmCropSpecies.ALL) {
+            boolean matches = choice.kind() == PlantKind.STEM_FRUIT
+                    ? state.is(choice.fruitBlock())
+                    : state.is(choice.plantBlock()) && state.getBlock() instanceof CropBlock cropBlock && cropBlock.isMaxAge(state);
+            if (matches) {
+                return choice;
+            }
+        }
+        return null;
+    }
+
+    /** Random pick among this plot's configured Seed slots (see {@link com.github.cerealklla.settlemynts.zone.WorkerPlantSelection}), falling back to the existing single biome-based pick if nothing's configured. */
+    private CropChoice chooseCropToPlant(ServerLevel level, BlockPos biomeRef) {
+        CropChoice fallback = FarmCropSpecies.chooseFor(level, biomeRef);
+        Optional<com.github.cerealklla.settlemynts.zone.PlotRecord> plot = Settlemynts.findPlotRecord(level, worker.plotId());
+        if (plot.isEmpty()) {
+            return fallback;
+        }
+        net.minecraft.world.item.Item chosen = com.github.cerealklla.settlemynts.zone.WorkerPlantSelection.chooseRandom(
+                plot.get().plantSelections(), plot.get().tier(), level.getRandom(), fallback.seedItem());
+        return FarmCropSpecies.forSeedItem(chosen).orElse(fallback);
     }
 
     private record WorkTarget(BlockPos pos, boolean isHarvest) {
@@ -186,7 +223,6 @@ public class FarmerWorkGoal extends Goal {
             maxX = Math.max(maxX, v.x());
             maxZ = Math.max(maxZ, v.z());
         }
-        CropChoice crop = FarmCropSpecies.chooseFor(level, boundingBoxCenter(minX, minZ, maxX, maxZ));
         // "private residence farmers and lumberjacks are only supposed to harvest and re-plant
         // existing plants, not plant wholly new ones" (explicit user spec, 2026-10-16) -- a hired
         // Farmer on any Zone Type other than its own native Farm never tills new ground at all; a
@@ -208,15 +244,20 @@ public class FarmerWorkGoal extends Goal {
                 BlockPos topSolid = new BlockPos(x, topY - 1, z);
                 BlockState topState = level.getBlockState(topSolid);
 
-                if (crop.kind() == PlantKind.STEM_FRUIT && topState.is(crop.fruitBlock()) && !isAvoided(level, topSolid)) {
-                    return new WorkTarget(topSolid, true); // A ripe melon fruit -- harvest wins immediately.
-                }
-                if (crop.kind() == PlantKind.SIMPLE_CROP && topState.is(Blocks.FARMLAND)) {
-                    BlockPos cropPos = topSolid.above();
-                    BlockState cropState = level.getBlockState(cropPos);
-                    if (cropState.is(crop.plantBlock()) && cropState.getBlock() instanceof CropBlock cropBlock
-                            && cropBlock.isMaxAge(cropState) && !isAvoided(level, cropPos)) {
-                        return new WorkTarget(cropPos, true);
+                // Checks every known crop type now (2026-10-28, Plant Selection), not just one
+                // pre-chosen biome pick -- a plot can have several different crop types actually
+                // growing at once once planting is randomized across configured slots.
+                for (CropChoice crop : FarmCropSpecies.ALL) {
+                    if (crop.kind() == PlantKind.STEM_FRUIT && topState.is(crop.fruitBlock()) && !isAvoided(level, topSolid)) {
+                        return new WorkTarget(topSolid, true); // A ripe fruit -- harvest wins immediately.
+                    }
+                    if (crop.kind() == PlantKind.SIMPLE_CROP && topState.is(Blocks.FARMLAND)) {
+                        BlockPos cropPos = topSolid.above();
+                        BlockState cropState = level.getBlockState(cropPos);
+                        if (cropState.is(crop.plantBlock()) && cropState.getBlock() instanceof CropBlock cropBlock
+                                && cropBlock.isMaxAge(cropState) && !isAvoided(level, cropPos)) {
+                            return new WorkTarget(cropPos, true);
+                        }
                     }
                 }
 
@@ -277,6 +318,14 @@ public class FarmerWorkGoal extends Goal {
         List<Container> boxes = Settlemynts.resolvePlotBoxes(level, worker.plotId());
         if (!boxes.isEmpty()) {
             ContainerDeposit.depositIntoAny(boxes, new ItemStack(crop.produceItem(), crop.produceCount()));
+            // Bonus Seed chance, 2026-10-28 (explicit user spec): "Every Tree or Plant destroyed by
+            // an NPC should give a chance to retrieve an additional sapling/seed, which can then
+            // enter the town's economy." Flat, untuned placeholder rate -- same "flagged tunable"
+            // convention this suite already uses for a first-pass magnitude with no existing
+            // reference number to match.
+            if (level.getRandom().nextFloat() < BONUS_SEED_CHANCE) {
+                ContainerDeposit.depositIntoAny(boxes, new ItemStack(crop.seedItem(), 1));
+            }
         }
         if (crop.kind() == PlantKind.SIMPLE_CROP) {
             level.setBlock(pos, crop.plantBlock().defaultBlockState(), 3); // Replant at age 0 immediately.

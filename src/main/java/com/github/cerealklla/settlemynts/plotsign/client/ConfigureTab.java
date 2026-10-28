@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.plotsign.client;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,10 @@ import com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload;
 import com.github.cerealklla.settlemynts.plotsign.RelocatePlotSignPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestConfigurePlotPayload;
 import com.github.cerealklla.settlemynts.plotsign.SetMineSpecializationPayload;
+import com.github.cerealklla.settlemynts.plotsign.SetPlantSelectionPayload;
+import com.github.cerealklla.settlemynts.zone.WorkerPlantSelection;
+
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -44,6 +49,11 @@ public final class ConfigureTab implements NuclyusMenu {
     private Button oreButton;
     private Button stoneButton;
     private Button excavationButton;
+    // Farm/Lumberyard Plant Selection, 2026-10-28 ("similar way to the Mine") -- one Set/Clear
+    // button per slot, only as many as the plot's current Tier unlocks (WorkerPlantSelection
+    // #MAX_SLOTS wide at most). Rebuilt in #onShown and every time a fresh OpenConfigurePlotPayload
+    // arrives (slot count can change -- plot got Tier'd up while this tab was already open).
+    private final List<Button> plantSlotButtons = new ArrayList<>();
 
     public ConfigureTab(OpenPlotConfigSignMenuPayload data) {
         this.data = data;
@@ -67,7 +77,7 @@ public final class ConfigureTab implements NuclyusMenu {
     @Override
     public void onShown() {
         configured = null;
-        if (data.isMineshaft()) {
+        if (data.isMineshaft() || data.isFarm() || data.isLumberyard()) {
             send(new RequestConfigurePlotPayload(data.signPos()));
         }
 
@@ -86,6 +96,9 @@ public final class ConfigureTab implements NuclyusMenu {
             excavationButton = host.addMenuWidget(Button.builder(Component.literal("Specialization: Excavation"), b -> setSpecialization(MineSpecialization.EXCAVATION))
                     .bounds(centerX + 85, y, 150, 20).build());
             refreshSpecializationButtons();
+        }
+        if (data.isFarm() || data.isLumberyard()) {
+            buildPlantSlotButtons(area, y);
         }
     }
 
@@ -107,15 +120,73 @@ public final class ConfigureTab implements NuclyusMenu {
             host.removeMenuWidget(excavationButton);
             excavationButton = null;
         }
+        for (Button button : plantSlotButtons) {
+            host.removeMenuWidget(button);
+        }
+        plantSlotButtons.clear();
+    }
+
+    /**
+     * One button per unlocked slot ({@link WorkerPlantSelection#slotsForTier}, {@code data.tier()}).
+     * Each button's own label shows the slot's currently-configured item name (or "(empty)") -- the
+     * real set/clear action is "hold the item you want (or hold nothing to clear) and click the
+     * slot," per the approved spec, so there's no separate item-picker UI to build. Rebuilt whenever
+     * a fresh {@link OpenConfigurePlotPayload} arrives, not just once in {@link #onShown}, since the
+     * label needs the real current selections the server just sent.
+     */
+    private void buildPlantSlotButtons(Rect2i area, int startY) {
+        for (Button button : plantSlotButtons) {
+            host.removeMenuWidget(button);
+        }
+        plantSlotButtons.clear();
+        int centerX = area.getX() + area.getWidth() / 2;
+        int visibleSlots = WorkerPlantSelection.slotsForTier(data.tier());
+        List<String> selections = configured != null ? configured.plantSelections() : WorkerPlantSelection.normalized(List.of());
+        String kind = data.isFarm() ? "Seed" : "Sapling";
+        for (int i = 0; i < visibleSlots; i++) {
+            int slotIndex = i;
+            String raw = i < selections.size() ? selections.get(i) : "";
+            String label = "Slot " + (i + 1) + ": " + labelFor(raw, kind);
+            int y = startY + i * 22;
+            Button button = host.addMenuWidget(Button.builder(Component.literal(label), b -> setPlantSlot(slotIndex))
+                    .bounds(centerX - 150, y, 300, 20).build());
+            plantSlotButtons.add(button);
+        }
+    }
+
+    private static String labelFor(String raw, String kind) {
+        if (raw.isEmpty()) {
+            return "(empty, hold a " + kind + " to set)";
+        }
+        net.minecraft.resources.Identifier id = net.minecraft.resources.Identifier.tryParse(raw);
+        Item item = id == null ? null : BuiltInRegistries.ITEM.getValue(id);
+        return item == null || item == net.minecraft.world.item.Items.AIR
+                ? "(unknown item)"
+                : new ItemStack(item).getHoverName().getString();
+    }
+
+    /** Also re-requests fresh config (not just fire-and-forget) so the slot labels pick up the real new selection once the server replies -- see {@link #render}'s own widened re-check for Farm/Lumberyard. */
+    private void setPlantSlot(int slotIndex) {
+        send(new SetPlantSelectionPayload(data.signPos(), slotIndex));
+        send(new RequestConfigurePlotPayload(data.signPos()));
     }
 
     @Override
     public void render(GuiGraphicsExtractor graphics, Rect2i area, int mouseX, int mouseY, float partialTick) {
-        if (data.isMineshaft() && configured == null) {
-            ClientPlotSignRequests.takePendingConfigurePlot().ifPresent(payload -> {
-                configured = payload;
-                refreshSpecializationButtons();
-            });
+        // Mineshaft only ever needs its first real response (nothing here changes it afterward);
+        // Farm/Lumberyard keeps re-checking after every Set/Clear click re-requests fresh data (see
+        // #setPlantSlot), so its own slot labels can refresh in place without reopening the tab.
+        boolean keepChecking = data.isFarm() || data.isLumberyard();
+        if (data.isMineshaft() || keepChecking) {
+            if (configured == null || keepChecking) {
+                ClientPlotSignRequests.takePendingConfigurePlot().ifPresent(payload -> {
+                    configured = payload;
+                    refreshSpecializationButtons();
+                    if (keepChecking) {
+                        buildPlantSlotButtons(area, area.getY() + 50);
+                    }
+                });
+            }
         }
         if (data.isMineshaft() && configured != null) {
             renderFindOdds(graphics, area);
@@ -206,7 +277,8 @@ public final class ConfigureTab implements NuclyusMenu {
 
     private void setSpecialization(MineSpecialization specialization) {
         send(new SetMineSpecializationPayload(data.signPos(), specialization));
-        configured = new OpenConfigurePlotPayload(data.signPos(), specialization, configured == null ? 1 : configured.tier());
+        configured = new OpenConfigurePlotPayload(data.signPos(), specialization, configured == null ? 1 : configured.tier(),
+                configured == null ? List.of() : configured.plantSelections());
         refreshSpecializationButtons();
     }
 

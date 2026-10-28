@@ -78,6 +78,8 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
         boolean canHireNpc = false;
         int guardKitStandsAvailable = 0;
         boolean isMineshaft = false;
+        boolean isFarm = false;
+        boolean isLumberyard = false;
         if (sign.settlementCoreId() != null && serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core) {
             PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
             if (plot != null) {
@@ -85,6 +87,8 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
                 hasGarrison = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID);
                 isTownHall = plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID);
                 isMineshaft = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.MINESHAFT_ZONE_TYPE_ID);
+                isFarm = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.FARM_ZONE_TYPE_ID);
+                isLumberyard = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.LUMBERYARD_ZONE_TYPE_ID);
                 hasConstructionBox = plot.constructionBoxId().isPresent();
                 tier = plot.tier();
                 maxPlotTier = isTownHall ? 5 : core.townHallPlot().map(PlotRecord::tier).orElse(5);
@@ -103,7 +107,7 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
         // (2026-10-24, see PlotConfigMenu's own doc) -- used to just send this payload standalone
         // and let the client build a plain, non-container NuclyusMenuScreen from it.
         com.github.cerealklla.settlemynts.SettlemyntsMod.openPlotConfigMenu(serverPlayer,
-                new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc, guardKitStandsAvailable, isMineshaft));
+                new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc, guardKitStandsAvailable, isMineshaft, isFarm, isLumberyard));
         return InteractionResult.SUCCESS_SERVER;
     }
 

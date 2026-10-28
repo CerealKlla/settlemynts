@@ -492,6 +492,11 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.SetMineSpecializationPayload.STREAM_CODEC,
                 (payload, context) -> setMineSpecialization(payload, context));
 
+        // Farm/Lumberyard Plant Selection (explicit user spec, 2026-10-28, "similar way to the Mine").
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetPlantSelectionPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SetPlantSelectionPayload.STREAM_CODEC,
+                (payload, context) -> setPlantSelection(payload, context));
+
         // Real Shop system (2026-10-05, replacing the old inert placeholder) -- see
         // bridge.YconomicsShopBridge and api.Settlemynts' Shop methods' own docs.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestShopPayload.TYPE,
@@ -3051,7 +3056,64 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
             return;
         }
-        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenConfigurePlotPayload(payload.signPos(), plot.mineSpecialization(), plot.tier()));
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenConfigurePlotPayload(
+                payload.signPos(), plot.mineSpecialization(), plot.tier(),
+                com.github.cerealklla.settlemynts.zone.WorkerPlantSelection.normalized(plot.plantSelections())));
+    }
+
+    /**
+     * "Configure" tab's per-slot Set/Clear button for Farm/Lumberyard Plant Selection -- explicit
+     * user spec, 2026-10-28. Re-validates everything server-side rather than trusting the client's
+     * own gating: real {@code canManage}, that the plot is actually Farm- or Lumberyard-typed, that
+     * {@code slotIndex} is within the plot's currently-unlocked Tier range, and (for a Set -- the
+     * player is holding something) that the held item is a real Seed (Farm,
+     * {@code net.minecraft.tags.ItemTags.VILLAGER_PLANTABLE_SEEDS} -- confirmed to cover every real
+     * vanilla crop seed this mod's own Farm already understands, Wheat/Beetroot/Melon/Pumpkin/
+     * Torchflower/Pitcher Pod) or Sapling (Lumberyard, {@code
+     * net.minecraft.tags.ItemTags.SAPLINGS}) before consuming 1 from the player's own main inventory
+     * (same 27-slot scan range every other crafting-adjacent consumption in this suite uses).
+     */
+    private static void setPlantSelection(com.github.cerealklla.settlemynts.plotsign.SetPlantSelectionPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
+            return;
+        }
+        PlotRecord plot = resolved.get().plot();
+        boolean isFarm = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.FARM_ZONE_TYPE_ID);
+        boolean isLumberyard = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.LUMBERYARD_ZONE_TYPE_ID);
+        if (!isFarm && !isLumberyard) {
+            player.sendSystemMessage(Component.literal("This plot isn't a Farm or Lumberyard."));
+            return;
+        }
+        int slotIndex = payload.slotIndex();
+        int visibleSlots = com.github.cerealklla.settlemynts.zone.WorkerPlantSelection.slotsForTier(plot.tier());
+        if (slotIndex < 0 || slotIndex >= visibleSlots) {
+            player.sendSystemMessage(Component.literal("That slot isn't unlocked at this plot's current Tier."));
+            return;
+        }
+
+        net.minecraft.world.item.ItemStack held = player.getMainHandItem();
+        if (held.isEmpty()) {
+            resolved.get().core().updatePlot(plot.withPlantSelections(
+                    com.github.cerealklla.settlemynts.zone.WorkerPlantSelection.withSlot(plot.plantSelections(), slotIndex, null)));
+            player.sendSystemMessage(Component.literal("Cleared slot " + (slotIndex + 1) + "."));
+            return;
+        }
+        boolean validKind = isFarm ? held.is(net.minecraft.tags.ItemTags.VILLAGER_PLANTABLE_SEEDS) : held.is(net.minecraft.tags.ItemTags.SAPLINGS);
+        if (!validKind) {
+            player.sendSystemMessage(Component.literal(isFarm ? "Hold a real Seed to set this slot." : "Hold a real Sapling to set this slot."));
+            return;
+        }
+        net.minecraft.resources.Identifier itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(held.getItem());
+        String heldName = held.getHoverName().getString();
+        held.shrink(1);
+        resolved.get().core().updatePlot(plot.withPlantSelections(
+                com.github.cerealklla.settlemynts.zone.WorkerPlantSelection.withSlot(plot.plantSelections(), slotIndex, itemId)));
+        player.sendSystemMessage(Component.literal("Set slot " + (slotIndex + 1) + " to " + heldName + "."));
     }
 
     /** "Specialization" Ore/Stone buttons on the "Configure" tab (2026-10-23, explicit user request) -- re-checks canManage and that this is actually a Mineshaft plot server-side. */
