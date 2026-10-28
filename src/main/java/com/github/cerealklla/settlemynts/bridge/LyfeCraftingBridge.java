@@ -101,8 +101,24 @@ public final class LyfeCraftingBridge {
         return ServerRecipeStore.get(resultId).map(LyfeCraftingBridge::toLocal);
     }
 
+    // Real production crash fix, 2026-10-28: this used to rebuild the FULL mapped list from scratch
+    // (stream + toLocal + toList over every registered recipe server-wide) on every single call, with
+    // zero caching. zone.PlannedInventoryClearing's resolveRecipes calls this deep inside an uncached
+    // recursive craft-cost search for every dead-end ingredient it encounters -- confirmed live via a
+    // real Watchdog "60.00 seconds" kill whose thread dump's own hottest frame was this method. Safe to
+    // cache unconditionally: ServerRecipeStore is generated once at boot and never changes for the rest
+    // of that server's life (see its own class doc), and #toLocal is a pure data reshape with no live
+    // state read.
+    private static List<RecipeInfo> allRecipesCache;
+    private static int allRecipesCacheGeneration = -1;
+
     public static List<RecipeInfo> getAllRecipes() {
-        return ServerRecipeStore.all().values().stream().map(LyfeCraftingBridge::toLocal).toList();
+        int currentGeneration = ServerRecipeStore.generation();
+        if (allRecipesCache == null || allRecipesCacheGeneration != currentGeneration) {
+            allRecipesCache = ServerRecipeStore.all().values().stream().map(LyfeCraftingBridge::toLocal).toList();
+            allRecipesCacheGeneration = currentGeneration;
+        }
+        return allRecipesCache;
     }
 
     /**

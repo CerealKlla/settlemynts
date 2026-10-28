@@ -832,9 +832,22 @@ public final class PlannedInventoryClearing {
      * rules (one path-independent and always safe to cache, one path-dependent and only safe to
      * cache on success).
      */
-    private record CostMemo(Map<ResourceKey, Long> craftCost, Map<ResourceKey, Long> sellerPrice) {
+    /**
+     * {@code visitBudget[0]} is a hard, generous cap on total {@link #cheapestCraftOption} calls for
+     * one top-level search -- a real production-crashing Watchdog kill, 2026-10-28, confirmed via its
+     * own thread dump to be an enormous, uncapped chain of {@code cheapestCraftOption ->
+     * cheapestCostForOneUnit -> estimateCraftCost -> cheapestCraftOption -> ...} frames (the actual
+     * root cause -- an unindexed, uncached O(N) recipe-list rebuild on every dead-end ingredient, see
+     * {@code bridge.LyfeCraftingBridge#getAllRecipes}'s own fix doc -- made each individual frame far
+     * more expensive than intended, but this budget exists as a second, independent line of defense:
+     * this is the THIRD watchdog-killing crash from this same recursive search (see the 2026-10-24
+     * doc below for the first two), so a hard worst-case bound that can never be blown through by
+     * some future, not-yet-discovered slow path is worth having even with the real cause fixed.
+     * 20,000 is far beyond what any legitimate recipe graph in this game should ever need to visit.
+     */
+    private record CostMemo(Map<ResourceKey, Long> craftCost, Map<ResourceKey, Long> sellerPrice, int[] visitBudget) {
         static CostMemo fresh() {
-            return new CostMemo(new HashMap<>(), new HashMap<>());
+            return new CostMemo(new HashMap<>(), new HashMap<>(), new int[] {20_000});
         }
     }
 
@@ -849,6 +862,9 @@ public final class PlannedInventoryClearing {
                                                                Identifier id, PlotCraftingCapability capability, Set<Identifier> visiting,
                                                                CostMemo memo) {
         if (visiting.contains(id)) {
+            return Optional.empty();
+        }
+        if (--memo.visitBudget()[0] < 0) {
             return Optional.empty();
         }
         Set<Identifier> nextVisiting = withAdded(visiting, id);
