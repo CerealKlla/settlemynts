@@ -1,6 +1,8 @@
 package com.github.cerealklla.settlemynts.plotsign.client;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.github.cerealklla.nuclyus.menu.client.NuclyusMenu;
 import com.github.cerealklla.nuclyus.menu.client.WidgetHost;
@@ -21,6 +23,7 @@ import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 
 /**
@@ -131,6 +134,7 @@ public final class ConfigureTab implements NuclyusMenu {
     private static final int ROW_HEIGHT = 20;
     private static final int FILLED_COLOR = 0xFF55AAFF;
     private static final int EMPTY_COLOR = 0xFF888888;
+    private static final int NEXT_TIER_CHANGE_COLOR = 0xFF55FF55;
 
     private void renderFindOdds(GuiGraphicsExtractor graphics, Rect2i area) {
         List<MineLootTable.Entry> entries = MineLootTable.entriesFor(configured.tier(), configured.specialization());
@@ -144,6 +148,17 @@ public final class ConfigureTab implements NuclyusMenu {
                 Component.literal("Mineshaft Finds -- Tier " + configured.tier() + ", " + configured.specialization().label() + ":"),
                 area.getX() + 10, headerY, 0xFFFFFFFF);
 
+        // Next-tier preview, explicit user request, 2026-10-28: a green border on any pip whose
+        // filled/empty state is about to change at the next tier -- "Tier 5 would obviously have no
+        // green boxes anywhere" falls out for free, since entriesFor's own tier-clamping makes
+        // "tier + 1" resolve back to the same table at the max tier, so every diff is naturally zero.
+        List<MineLootTable.Entry> nextEntries = MineLootTable.entriesFor(configured.tier() + 1, configured.specialization());
+        int nextMaxWeight = nextEntries.stream().mapToInt(MineLootTable.Entry::weight).max().orElse(0);
+        Map<Item, Integer> nextWeightByItem = new HashMap<>();
+        for (MineLootTable.Entry nextEntry : nextEntries) {
+            nextWeightByItem.put(nextEntry.item(), nextEntry.weight());
+        }
+
         int gridY = headerY + 14;
         int columnWidth = area.getWidth() / ODDS_COLUMNS;
         for (int i = 0; i < entries.size(); i++) {
@@ -156,14 +171,21 @@ public final class ConfigureTab implements NuclyusMenu {
             graphics.item(new ItemStack(entry.item()), x, y);
 
             int dots = maxWeight <= 0 ? 0 : (int) Math.round(PIP_COUNT * (double) entry.weight() / maxWeight);
+            int nextWeight = nextWeightByItem.getOrDefault(entry.item(), 0);
+            int nextDots = nextMaxWeight <= 0 ? 0 : (int) Math.round(PIP_COUNT * (double) nextWeight / nextMaxWeight);
             int pipX = x + 20;
             int pipY = y + 5;
             for (int pip = 0; pip < PIP_COUNT; pip++) {
                 int px = pipX + pip * (PIP_SIZE + PIP_GAP);
-                if (pip < dots) {
+                boolean filled = pip < dots;
+                boolean changing = filled != (pip < nextDots);
+                if (filled) {
                     graphics.fill(px, pipY, px + PIP_SIZE, pipY + PIP_SIZE, FILLED_COLOR);
                 } else {
                     graphics.outline(px, pipY, PIP_SIZE, PIP_SIZE, EMPTY_COLOR);
+                }
+                if (changing) {
+                    graphics.outline(px, pipY, PIP_SIZE, PIP_SIZE, NEXT_TIER_CHANGE_COLOR);
                 }
             }
         }
