@@ -3096,24 +3096,48 @@ public class SettlemyntsMod {
             return;
         }
 
-        net.minecraft.world.item.ItemStack held = player.getMainHandItem();
-        if (held.isEmpty()) {
+        if (payload.itemId().isBlank()) {
             resolved.get().core().updatePlot(plot.withPlantSelections(
                     com.github.cerealklla.settlemynts.zone.WorkerPlantSelection.withSlot(plot.plantSelections(), slotIndex, null)));
             player.sendSystemMessage(Component.literal("Cleared slot " + (slotIndex + 1) + "."));
             return;
         }
-        boolean validKind = isFarm ? held.is(net.minecraft.tags.ItemTags.VILLAGER_PLANTABLE_SEEDS) : held.is(net.minecraft.tags.ItemTags.SAPLINGS);
-        if (!validKind) {
-            player.sendSystemMessage(Component.literal(isFarm ? "Hold a real Seed to set this slot." : "Hold a real Sapling to set this slot."));
+        net.minecraft.resources.Identifier itemId = net.minecraft.resources.Identifier.tryParse(payload.itemId());
+        net.minecraft.world.item.Item item = itemId == null ? null : net.minecraft.core.registries.BuiltInRegistries.ITEM.getValue(itemId);
+        if (item == null || item == net.minecraft.world.item.Items.AIR) {
+            player.sendSystemMessage(Component.literal("Unknown item."));
             return;
         }
-        net.minecraft.resources.Identifier itemId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(held.getItem());
-        String heldName = held.getHoverName().getString();
-        held.shrink(1);
+        net.minecraft.world.item.ItemStack sample = new net.minecraft.world.item.ItemStack(item);
+        boolean validKind = isFarm ? sample.is(net.minecraft.tags.ItemTags.VILLAGER_PLANTABLE_SEEDS) : sample.is(net.minecraft.tags.ItemTags.SAPLINGS);
+        if (!validKind) {
+            player.sendSystemMessage(Component.literal(isFarm ? "That isn't a real Seed." : "That isn't a real Sapling."));
+            return;
+        }
+        if (!consumeOneFromMainInventory(player, item)) {
+            player.sendSystemMessage(Component.literal("You're not carrying any " + sample.getHoverName().getString() + " anymore."));
+            return;
+        }
         resolved.get().core().updatePlot(plot.withPlantSelections(
                 com.github.cerealklla.settlemynts.zone.WorkerPlantSelection.withSlot(plot.plantSelections(), slotIndex, itemId)));
-        player.sendSystemMessage(Component.literal("Set slot " + (slotIndex + 1) + " to " + heldName + "."));
+        player.sendSystemMessage(Component.literal("Set slot " + (slotIndex + 1) + " to " + sample.getHoverName().getString() + "."));
+    }
+
+    // Main-inventory-only (excludes hotbar/armor/offhand), matching this suite's own established
+    // crafting-consumption convention (see Lyfe's CraftingStructureMenu#attemptCraft -- scanning the
+    // full range could silently eat something sitting in the hotbar instead).
+    private static final int MAIN_INVENTORY_START = 9;
+    private static final int MAIN_INVENTORY_END = 36;
+
+    private static boolean consumeOneFromMainInventory(final ServerPlayer player, final net.minecraft.world.item.Item item) {
+        for (int i = MAIN_INVENTORY_START; i < MAIN_INVENTORY_END; i++) {
+            net.minecraft.world.item.ItemStack stack = player.getInventory().getItem(i);
+            if (!stack.isEmpty() && stack.getItem() == item) {
+                stack.shrink(1);
+                return true;
+            }
+        }
+        return false;
     }
 
     /** "Specialization" Ore/Stone buttons on the "Configure" tab (2026-10-23, explicit user request) -- re-checks canManage and that this is actually a Mineshaft plot server-side. */
