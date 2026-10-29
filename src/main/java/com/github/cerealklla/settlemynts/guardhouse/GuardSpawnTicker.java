@@ -78,6 +78,18 @@ public final class GuardSpawnTicker {
                 || !(level.getEntity(stand.settlementCoreId()) instanceof com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity core)) {
             return; // Chunk not loaded, or the stand/core couldn't be resolved -- skip this scan.
         }
+        // Real bug fix, 2026-10-29 -- see GuardPendingDeathIndex's own doc for the full incident.
+        // Applied as the very first thing once this stand is actually reachable, so by the time the
+        // assignedGuardId() check below runs, a real death (however long ago, in whatever
+        // dimension) has already been correctly reflected -- restoring "present means alive" as a
+        // trustworthy invariant instead of trying to re-derive it via a cross-dimension entity
+        // lookup, which an earlier version of this fix attempted and which risked duplicating a
+        // guard that's genuinely alive but simply standing in a different dimension right now (see
+        // that class's own doc for why).
+        GuardPendingDeathIndex.get(level.getServer()).take(standId).ifPresent(respawnReadyAtGameTime -> {
+            stand.clearAssignedGuardId();
+            stand.setRespawnReadyAtGameTime(respawnReadyAtGameTime);
+        });
         if (stand.boundKytName().isEmpty()) {
             return;
         }
@@ -92,12 +104,12 @@ public final class GuardSpawnTicker {
         }
 
         if (stand.assignedGuardId().isPresent()) {
-            // Guard already alive (GuardEntity#die clears this field, so "present" means genuinely
-            // alive, same assumption the old early-return here already made) -- gear top-up is
-            // event-driven now (GuardEquipBoxChangeListener). A companion's cooldown elapsing has no
-            // real event to react to at all (pure wall-clock time passing) -- this 5-second scan,
-            // already visiting every stand for the guard's own death/respawn timer, is the closest
-            // thing to a "timer" available without a dedicated new scheduling mechanism; see
+            // Guard already alive (GuardEntity#die reliably clears this via GuardPendingDeathIndex
+            // now, applied above, so "present" is trustworthy again) -- gear top-up is event-driven
+            // now (GuardEquipBoxChangeListener). A companion's cooldown elapsing has no real event
+            // to react to at all (pure wall-clock time passing) -- this 5-second scan, already
+            // visiting every stand for the guard's own death/respawn timer, is the closest thing to
+            // a "timer" available without a dedicated new scheduling mechanism; see
             // GuardEntity#recheckCompanions's own doc.
             if (level.getEntity(stand.assignedGuardId().get()) instanceof GuardEntity guard) {
                 guard.recheckCompanions(level);

@@ -135,9 +135,21 @@ public class GuardPatrolAreaGoal extends Goal {
         }
         double dx = guard.getX() - (nextFinalDestination.getX() + 0.5);
         double dz = guard.getZ() - (nextFinalDestination.getZ() + 0.5);
-        boolean arrived = guard.getNavigation().isDone() || (dx * dx + dz * dz) <= ARRIVE_DIST_SQ;
-        if (!arrived) {
-            return true;
+        boolean withinArriveDistance = (dx * dx + dz * dz) <= ARRIVE_DIST_SQ;
+        if (!withinArriveDistance) {
+            if (!guard.getNavigation().isDone()) {
+                return true; // still actively en route
+            }
+            // Real bug fix, 2026-10-29 -- explicit user spec: "it should never say it succeeded
+            // when it didn't... I'm fine with it marking it as failed and then re-assigning to the
+            // new oldest stake." navigation.isDone() means the pathfinder gave UP (stuck/blocked/no
+            // route), not that the guard actually reached this waypoint -- the old code treated
+            // those as the same thing (an OR), so a guard that got stuck anywhere along the way was
+            // silently marked as having arrived right where it gave up, with no retry. Now a failed
+            // leg releases the claim and ends the goal without ever stamping markVisited, so the
+            // next canUse()/start() cycle genuinely re-rolls through the same recency-weighted pool.
+            releaseClaim();
+            return false;
         }
         if (guard.level() instanceof ServerLevel level) {
             // Re-resolved by UUID rather than trusting the stored reference -- the stake's chunk may

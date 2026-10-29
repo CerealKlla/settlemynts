@@ -196,6 +196,10 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     protected void registerGoals() {
         this.goalSelector.addGoal(1, new FloatGoal(this));
         // Priority 2 (melee vs. bow) is deliberately NOT added here -- see reassessWeaponGoal().
+        // Also priority 2 -- a Guard stranded outside its home dimension with nothing to fight or
+        // heal paths back to the nearest portal instead of patrolling nonsensically; see that
+        // class's own doc for why sharing this tier with the weapon/spell goals is safe.
+        this.goalSelector.addGoal(2, new GuardReturnToDimensionGoal(this, 0.8));
         this.goalSelector.addGoal(3, new GuardPatrolAreaGoal(this, 0.8));
         // Real wooden doors (explicit live report, 2026-10-16: "not opening/closing doors/gates when
         // they get stuck") -- same priority/shape vanilla's own Vindicator uses for the identical
@@ -325,14 +329,12 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         if (plotId == null || assignedStandId == null || !(level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        GuardKitStandIndex.get(serverLevel.getServer()).get(assignedStandId).ifPresent(standPos -> {
-            ServerLevel standLevel = serverLevel.getServer().getLevel(standPos.dimension());
-            if (standLevel == null || !(standLevel.getEntity(assignedStandId) instanceof GuardKitStandEntity stand)) {
-                return;
-            }
-            stand.clearAssignedGuardId();
-            stand.setRespawnReadyAtGameTime(serverLevel.getGameTime() + fundFastRespawn(serverLevel));
-        });
+        // Real bug fix, 2026-10-29 -- see GuardPendingDeathIndex's own doc for the full incident.
+        // Always reliable (a plain Map write, no chunk/entity/dimension dependency at all), unlike
+        // the old direct stand-notification this replaced, which silently no-op'd whenever the
+        // stand's own chunk wasn't loaded at this exact instant.
+        long respawnReadyAtGameTime = serverLevel.getGameTime() + fundFastRespawn(serverLevel);
+        GuardPendingDeathIndex.get(serverLevel.getServer()).recordDeath(assignedStandId, respawnReadyAtGameTime);
     }
 
     /** Resolves the plot's Tier and its Guardhouse's food store, attempts {@link GuardRespawnFunding#tryFundFastRespawn}, and returns how many ticks until the stand should be allowed to spawn a replacement. */
