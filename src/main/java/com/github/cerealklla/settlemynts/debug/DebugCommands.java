@@ -17,6 +17,9 @@ import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.YconomicsBillBridge;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
+import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity;
+import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandIndex;
+import com.github.cerealklla.settlemynts.guardhouse.GuardPendingDeathIndex;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.roadway.HighwayConnectionMarkerEntity;
 import com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity;
@@ -37,7 +40,9 @@ import net.minecraft.core.GlobalPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.fml.ModList;
@@ -94,6 +99,8 @@ public final class DebugCommands {
                         .executes(ctx -> resyncShop(ctx.getSource())))
                 .then(Commands.literal("resyncnpcprices")
                         .executes(ctx -> resyncNpcShopPrices(ctx.getSource())))
+                .then(Commands.literal("fixstuckguards")
+                        .executes(ctx -> fixStuckGuards(ctx.getSource())))
                 .then(Commands.literal("removelisting")
                         .then(Commands.argument("itemId", StringArgumentType.string())
                                 .executes(ctx -> removeListing(ctx.getSource(), StringArgumentType.getString(ctx, "itemId")))))
@@ -757,6 +764,59 @@ public final class DebugCommands {
         String plotName = foundPlot.name();
         source.sendSuccess(() -> Component.literal("Removed listing \"" + itemId + "\" from \"" + plotName + "\"'s Shop (if it existed)."), true);
         return 1;
+    }
+
+    /**
+     * One-time data fix, 2026-10-29 -- real report: several Guard Kit Stands showed "Ready to spawn"
+     * despite their guard having genuinely died already. Root cause: these guards died under the old
+     * pre-{@link GuardPendingDeathIndex} regime (see that class's own doc for the full incident),
+     * which could permanently leave a stand's {@code assignedGuardId} pointing at a now-gone entity
+     * with no pending-death record ever created to let {@code GuardSpawnTicker} notice and clear it --
+     * that ticker's own "already alive" check short-circuits forever once {@code assignedGuardId} is
+     * present, regardless of whether the entity it points to still exists. The fix shipped the same
+     * day only makes future deaths reliable; it can't retroactively repair a stand already stuck in
+     * this state, so this is a manual, one-time sweep rather than new permanent self-healing logic in
+     * the ticker itself.
+     *
+     * <p>Deliberately re-checks every server dimension (not just the stand's own level) before
+     * concluding a guard is really gone -- the same cross-dimension gap that made an earlier, reverted
+     * attempt at this fix unsound (see {@code GuardPendingDeathIndex}'s own doc): a guard genuinely
+     * alive in a different dimension (e.g. pathing home via {@code GuardReturnToDimensionGoal}) must
+     * never be misreported as dead here. Also skips any stand that already has a pending death record
+     * -- {@code GuardSpawnTicker} will clear those on its own very shortly, no intervention needed.
+     */
+    private static int fixStuckGuards(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        int checked = 0;
+        int fixed = 0;
+        for (Map.Entry<UUID, GlobalPos> entry : GuardKitStandIndex.get(server).all().entrySet()) {
+            GlobalPos pos = entry.getValue();
+            ServerLevel level = server.getLevel(pos.dimension());
+            if (level == null || !(level.getEntity(entry.getKey()) instanceof GuardKitStandEntity stand)
+                    || stand.assignedGuardId().isEmpty()) {
+                continue;
+            }
+            checked++;
+            UUID guardId = stand.assignedGuardId().get();
+            boolean trulyAlive = false;
+            for (ServerLevel candidate : server.getAllLevels()) {
+                if (candidate.getEntity(guardId) instanceof LivingEntity guard && guard.isAlive()) {
+                    trulyAlive = true;
+                    break;
+                }
+            }
+            if (trulyAlive || GuardPendingDeathIndex.get(server).peek(entry.getKey()).isPresent()) {
+                continue;
+            }
+            stand.clearAssignedGuardId();
+            stand.setRespawnReadyAtGameTime(level.getGameTime());
+            fixed++;
+        }
+        int finalChecked = checked;
+        int finalFixed = fixed;
+        source.sendSuccess(() -> Component.literal("Checked " + finalChecked + " Guard Kit Stand(s) presumed to have a live guard -- "
+                + finalFixed + " were actually dead in every dimension with no pending respawn record, now cleared and ready to respawn."), true);
+        return fixed;
     }
 
     private static int plotInfo(CommandSourceStack source) {

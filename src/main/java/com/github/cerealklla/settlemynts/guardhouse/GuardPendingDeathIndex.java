@@ -94,4 +94,9 @@ public final class GuardPendingDeathIndex extends SavedData {
         }
         return Optional.ofNullable(value);
     }
+
+    /** Non-destructive check, for callers (e.g. a debug command) that only need to know a record is pending without consuming it -- {@link GuardSpawnTicker} is still the only consumer. */
+    public Optional<Long> peek(UUID standId) {
+        return Optional.ofNullable(respawnReadyAtGameTimeByStand.get(standId));
+    }
 }
