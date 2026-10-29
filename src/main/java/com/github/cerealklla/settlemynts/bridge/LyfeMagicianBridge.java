@@ -41,4 +41,14 @@ public final class LyfeMagicianBridge {
     public static boolean attemptCastSparkOfLife(LivingEntity caster) {
         return com.github.cerealklla.lyfe.api.Lyfe.attemptCastSparkOfLife(caster);
     }
+
+    /** Whether {@code caster} casting Spark of Life could affect {@code target} at all right now -- see {@code api.Lyfe#canSpellAffectEntity}'s own doc. Lets {@code GuardSpellCastGoal} stop treating a target it can never affect (e.g. a Caryvan Wagon) as a valid heal/attack candidate. */
+    public static boolean canSparkOfLifeAffect(LivingEntity caster, LivingEntity target) {
+        return com.github.cerealklla.lyfe.api.Lyfe.canSpellAffectEntity(caster, target);
+    }
+
+    /** Clears {@code caster}'s cached {@code canSparkOfLifeAffect} results -- call whenever its available spells change (e.g. mainhand/offhand equip change), same as {@code GuardEntity#onEquipItem} already does. */
+    public static void invalidateSpellTargetCache(LivingEntity caster) {
+        com.github.cerealklla.lyfe.magician.SpellTargetCache.invalidate(caster);
+    }
 }

@@ -71,13 +71,22 @@ public final class GuardSpellCastGoal extends Goal {
         if (findInjuredAlly(CRITICAL_HEAL_THRESHOLD) != null) {
             return true;
         }
-        LivingEntity enemy = guard.getTarget();
-        if (enemy != null && enemy.isAlive()) {
+        LivingEntity enemy = attackTarget();
+        if (enemy != null) {
             // An enemy is present -- either cast at it, or defer to melee entirely (tier 2 still
             // "wins" over tier 3 even on cooldown; never top-off heal while there's something to fight).
             return LyfeMagicianBridge.canCastSparkOfLife(guard);
         }
         return findInjuredAlly(TOP_OFF_HEAL_THRESHOLD) != null;
+    }
+
+    /** {@code guard.getTarget()}, but {@code null} if Spark of Life could never affect it (e.g. a Caryvan Wagon) -- stops this goal from treating such a target as a cast candidate at all. */
+    private LivingEntity attackTarget() {
+        LivingEntity target = guard.getTarget();
+        if (target == null || !target.isAlive() || !LyfeMagicianBridge.canSparkOfLifeAffect(guard, target)) {
+            return null;
+        }
+        return target;
     }
 
     @Override
@@ -101,8 +110,8 @@ public final class GuardSpellCastGoal extends Goal {
             engage(criticalAlly);
             return;
         }
-        LivingEntity enemy = guard.getTarget();
-        if (enemy != null && enemy.isAlive()) {
+        LivingEntity enemy = attackTarget();
+        if (enemy != null) {
             engage(enemy);
             return;
         }
@@ -175,7 +184,8 @@ public final class GuardSpellCastGoal extends Goal {
         // identical fix (Lyfe side) for the direct-hit-path half of this.
         List<LivingEntity> candidates = guard.level().getEntitiesOfClass(LivingEntity.class, scanBox,
                 e -> e != guard && e.isAlive() && !(e instanceof Enemy) && (e instanceof Player || e instanceof Mob)
-                        && e.getHealth() < e.getMaxHealth() * healthFraction);
+                        && e.getHealth() < e.getMaxHealth() * healthFraction
+                        && LyfeMagicianBridge.canSparkOfLifeAffect(guard, e));
         LivingEntity result = candidates.stream().min(Comparator.comparingDouble(e -> e.getHealth() / e.getMaxHealth())).orElse(null);
         long diagElapsedNanos = System.nanoTime() - diagStart;
         if (diagElapsedNanos >= 2_000_000L) {

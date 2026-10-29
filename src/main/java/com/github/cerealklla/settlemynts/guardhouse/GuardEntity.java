@@ -227,6 +227,12 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         if (this.level() == null || this.level().isClientSide()) {
             return;
         }
+        if (com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge.isLoaded()) {
+            // Mainhand/offhand equipment is exactly "this guard's available spells changed" (today,
+            // the only spell source is a Nature Staff/Focus) -- clear any cached
+            // canSparkOfLifeAffect results so a stale "can't affect this target" doesn't linger.
+            com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge.invalidateSpellTargetCache(this);
+        }
         this.goalSelector.removeGoal(this.meleeGoal);
         this.goalSelector.removeGoal(this.bowGoal);
         this.goalSelector.removeGoal(this.spellCastGoal);
