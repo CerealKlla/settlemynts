@@ -6,6 +6,7 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.phys.AABB;
@@ -88,7 +89,7 @@ public class GuardSightGoal extends Goal {
     private LivingEntity findNearestVisibleHostile(ServerLevel level) {
         AABB searchBox = guard.getBoundingBox().inflate(MAX_SEARCH_RADIUS_BLOCKS);
         List<LivingEntity> candidates = level.getEntitiesOfClass(LivingEntity.class, searchBox,
-                e -> e.isAlive() && e instanceof Enemy);
+                e -> e.isAlive() && e instanceof Enemy && isActivelyHostile(e));
         LivingEntity nearest = null;
         double nearestDistSq = Double.MAX_VALUE;
         for (LivingEntity candidate : candidates) {
@@ -106,6 +107,24 @@ public class GuardSightGoal extends Goal {
             }
         }
         return nearest;
+    }
+
+    /**
+     * Real report, 2026-10-30: a Guard was attacking a Zombified Piglin on sight -- confirmed
+     * against the decompiled source that {@code ZombifiedPiglin implements NeutralMob} and its own
+     * vanilla target goal only ever picks a {@code Player} it's already angry at ({@code
+     * NearestAttackableTargetGoal<>(this, Player.class, ..., this::isAngryAt)}) -- it never
+     * initiates combat against anything unprovoked, players included. This scan's plain {@code
+     * instanceof Enemy} check missed that distinction entirely, so a Guard would walk up and attack
+     * a calm, unprovoked piglin, which then correctly retaliated and killed the Guard/a bystander --
+     * i.e. the Guard was the one breaking the piglin's default neutrality, not the other way
+     * around. A {@link NeutralMob} candidate is now only treated as hostile once it's actually
+     * {@link NeutralMob#isAngry() angry} (already provoked by something), matching the exact same
+     * "neutral until provoked" default players already get -- every other {@link Enemy} (Zombie,
+     * Skeleton, Phantom, Enderman, etc., none of which implement {@link NeutralMob}) is unaffected.
+     */
+    private static boolean isActivelyHostile(LivingEntity candidate) {
+        return !(candidate instanceof NeutralMob neutral) || neutral.isAngry();
     }
 
     private static double sightRangeFor(ServerLevel level, LivingEntity candidate) {
