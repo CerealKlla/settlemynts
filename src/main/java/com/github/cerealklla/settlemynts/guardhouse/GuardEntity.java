@@ -157,7 +157,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         this.homeDimension = homeDimension;
     }
 
-    /** {@code null} for a guard saved before this field existed -- callers must treat that the same as "assume Overworld," matching this goal's own prior hardcoded behavior, not crash or silently misbehave. */
+    /** {@code null} for a guard saved before this field existed -- {@link GuardReturnToDimensionGoal#isStrandedWithNoTarget} lazily adopts the guard's current dimension as home the first time it sees {@code null}, rather than assuming a fixed dimension. */
     public ResourceKey<Level> homeDimension() {
         return homeDimension;
     }

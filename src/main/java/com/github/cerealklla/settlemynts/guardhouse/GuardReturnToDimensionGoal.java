@@ -27,8 +27,11 @@ import net.minecraft.world.level.Level;
  * dimension each guard actually spawned into (see {@code GuardSpawnTicker}) -- instead of a fixed
  * dimension, so a Nether settlement's own guards correctly read as "home" there and patrol normally;
  * only a guard that's truly strayed into a *different* dimension than its own settlement still
- * triggers this goal. Falls back to the old Overworld-hardcoded check only for a guard saved before
- * this field existed (see that method's own doc), not a new per-settlement lookup.
+ * triggers this goal. A guard saved before this field existed lazily adopts wherever it currently
+ * is as home the first time this runs, rather than falling back to the same hardcoded assumption
+ * that caused the bug (see {@link #isStrandedWithNoTarget}'s own doc) -- so an existing Nether
+ * settlement's already-spawned guards self-correct immediately, with no need to wait for them to
+ * die and respawn.
  *
  * <p>{@link GuardEntity#getTarget()} doubles as the "actively engaged" signal for both combat AND
  * healing (see {@code GuardSpellCastGoal#engage}'s own doc -- it sets the same field either way),
@@ -73,13 +76,27 @@ public final class GuardReturnToDimensionGoal extends Goal {
         return isStrandedWithNoTarget() && portalTarget != null && !guard.getNavigation().isDone();
     }
 
+    /**
+     * A guard saved before {@link GuardEntity#homeDimension} existed has {@code null} there --
+     * rather than fall back to the same hardcoded-Overworld assumption that caused this bug in the
+     * first place (which would leave every already-spawned guard in an existing Nether settlement
+     * stuck exactly as broken until it happens to die and respawn), this lazily adopts whichever
+     * dimension the guard is already in as home the first time this ever runs post-update. Correct
+     * by construction for the overwhelming common case (a guard is almost always sitting in its own
+     * settlement whenever it's not actively fighting/healing, which is the only time this class's
+     * own {@code canUse()}/{@code canContinueToUse()} even call this at all) -- and, unlike the old
+     * permanent hardcoded assumption, this one-time learn self-corrects the moment it runs, not
+     * every single tick forever after.
+     */
     private boolean isStrandedWithNoTarget() {
         if (!(guard.level() instanceof ServerLevel level) || guard.getTarget() != null) {
             return false;
         }
-        net.minecraft.resources.ResourceKey<Level> home = guard.homeDimension();
-        net.minecraft.resources.ResourceKey<Level> expected = home != null ? home : Level.OVERWORLD;
-        return level.dimension() != expected;
+        if (guard.homeDimension() == null) {
+            guard.setHomeDimension(level.dimension());
+            return false;
+        }
+        return level.dimension() != guard.homeDimension();
     }
 
     @Override
