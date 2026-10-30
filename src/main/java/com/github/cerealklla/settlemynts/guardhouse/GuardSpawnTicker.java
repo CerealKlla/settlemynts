@@ -128,6 +128,7 @@ public final class GuardSpawnTicker {
         guard.setPlotIdentity(stand.settlementCoreId(), stand.plotId());
         guard.setAssignedStandId(standId);
         guard.setHomePos(spawnPos);
+        guard.setHomeDimension(level.dimension());
         level.addFreshEntity(guard);
         stand.setAssignedGuardId(guard.getUUID());
     }

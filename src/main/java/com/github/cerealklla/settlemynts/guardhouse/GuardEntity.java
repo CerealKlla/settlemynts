@@ -21,7 +21,9 @@ import com.github.cerealklla.settlemynts.zone.ShopResource;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.Container;
@@ -101,6 +103,13 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     private UUID plotId;
     private UUID assignedStandId;
     private net.minecraft.core.BlockPos homePos;
+    // Real bug fix, 2026-10-29: a Nether-founded settlement's guards were permanently stuck
+    // beelining for the nearest Nether portal and parking under it, no matter what -- see
+    // GuardReturnToDimensionGoal's own doc for the full root cause (it used to hardcode "home" as
+    // Level.OVERWORLD, which is simply wrong for a settlement that's genuinely built in the Nether).
+    // Captured once at spawn (GuardSpawnTicker, same moment as homePos) -- whichever dimension the
+    // guard was actually spawned into IS home, by definition, no settlement-specific lookup needed.
+    private ResourceKey<Level> homeDimension;
     // Patrol routing (2026-10-18) -- which RoadwayStakeEntity (if any) this guard currently has
     // claimed as its final patrol destination, see GuardPatrolAreaGoal's own doc. Not persisted --
     // a claim only matters for the lifetime of one in-progress patrol leg, and every claim across
@@ -141,6 +150,16 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     /** Called once by {@link GuardSpawnTicker} right after construction -- this guard's own spawn point (its assigned stand's position), the rescue destination {@link #stuckWatchdog} teleports back to if this guard ever gets stuck. */
     public void setHomePos(net.minecraft.core.BlockPos homePos) {
         this.homePos = homePos;
+    }
+
+    /** Called once by {@link GuardSpawnTicker} right after construction -- the dimension this guard actually spawned into, i.e. its settlement's real home dimension. See {@link GuardReturnToDimensionGoal#isStrandedWithNoTarget}, the one consumer. */
+    public void setHomeDimension(ResourceKey<Level> homeDimension) {
+        this.homeDimension = homeDimension;
+    }
+
+    /** {@code null} for a guard saved before this field existed -- callers must treat that the same as "assume Overworld," matching this goal's own prior hardcoded behavior, not crash or silently misbehave. */
+    public ResourceKey<Level> homeDimension() {
+        return homeDimension;
     }
 
     /** Set by {@code GuardPatrolAreaGoal} while this guard has a {@link RoadwayStakeEntity} claimed as its final patrol destination -- {@code null} otherwise. Read by {@link #die} to release the claim if this guard dies en route. */
@@ -458,6 +477,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
         output.storeNullable("AssignedStandId", UUIDUtil.CODEC, assignedStandId);
         output.storeNullable("HomePos", net.minecraft.core.BlockPos.CODEC, homePos);
+        output.storeNullable("HomeDimension", ResourceKey.codec(Registries.DIMENSION), homeDimension);
         output.store("CompanionItems", ItemStack.OPTIONAL_CODEC.listOf(), companionItems);
     }
 
@@ -468,6 +488,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
         assignedStandId = input.read("AssignedStandId", UUIDUtil.CODEC).orElse(null);
         homePos = input.read("HomePos", net.minecraft.core.BlockPos.CODEC).orElse(null);
+        homeDimension = input.read("HomeDimension", ResourceKey.codec(Registries.DIMENSION)).orElse(null);
         companionItems.clear();
         companionItems.addAll(input.read("CompanionItems", ItemStack.OPTIONAL_CODEC.listOf()).orElse(List.of()));
         // Real bug found live, 2026-10-08: a guard that existed before the ranged-attack fix shot

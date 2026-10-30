@@ -16,6 +16,20 @@ import net.minecraft.world.level.Level;
  * real portal, in either direction, has to stay possible, since the user explicitly wants to keep
  * the door open for a future Nether trade route.
  *
+ * <p><b>Real bug fix, 2026-10-29, same day</b> -- "I have made a settlement in the nether with a
+ * guardhouse... The guards are immediately walking to the nether portal in the settlement... and
+ * standing directly under it, no matter what." Root cause: {@link #isStrandedWithNoTarget}
+ * originally hardcoded "home" as {@code Level.OVERWORLD} -- correct for every settlement built so
+ * far, but simply wrong for one genuinely founded in the Nether, where it made this goal's
+ * {@code canUse()} return {@code true} *permanently* (every guard is always "not in the Overworld"
+ * there), completely starving {@link GuardPatrolAreaGoal}/the weapon goals at the same priority tier
+ * of ever running at all. Now compares against {@link GuardEntity#homeDimension()} -- the real
+ * dimension each guard actually spawned into (see {@code GuardSpawnTicker}) -- instead of a fixed
+ * dimension, so a Nether settlement's own guards correctly read as "home" there and patrol normally;
+ * only a guard that's truly strayed into a *different* dimension than its own settlement still
+ * triggers this goal. Falls back to the old Overworld-hardcoded check only for a guard saved before
+ * this field existed (see that method's own doc), not a new per-settlement lookup.
+ *
  * <p>{@link GuardEntity#getTarget()} doubles as the "actively engaged" signal for both combat AND
  * healing (see {@code GuardSpellCastGoal#engage}'s own doc -- it sets the same field either way),
  * so checking for "no target" alone already covers "not fighting or healing allies" exactly as
@@ -60,7 +74,12 @@ public final class GuardReturnToDimensionGoal extends Goal {
     }
 
     private boolean isStrandedWithNoTarget() {
-        return guard.level() instanceof ServerLevel level && level.dimension() != Level.OVERWORLD && guard.getTarget() == null;
+        if (!(guard.level() instanceof ServerLevel level) || guard.getTarget() != null) {
+            return false;
+        }
+        net.minecraft.resources.ResourceKey<Level> home = guard.homeDimension();
+        net.minecraft.resources.ResourceKey<Level> expected = home != null ? home : Level.OVERWORLD;
+        return level.dimension() != expected;
     }
 
     @Override
