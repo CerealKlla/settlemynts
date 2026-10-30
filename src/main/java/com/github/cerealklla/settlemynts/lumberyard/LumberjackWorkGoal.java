@@ -113,6 +113,19 @@ public class LumberjackWorkGoal extends Goal {
     // for a plant target (no tree to measure against).
     private Set<BlockPos> pendingConnectedLogs;
     private boolean pendingIsHarvest;
+    // Real live report, 2026-10-30: "the lumberyard npc is just standing here, despite there being
+    // trees to cut in the plot." Confirmed via RCON: the worker was motionless exactly at its own
+    // spawn point (the Plot Config Sign), on a real, large (76-vertex) plot. Root cause:
+    // LumberjackWorkerEntity#registerGoals gives this goal as the worker's ONLY movement-granting
+    // goal -- no separate wander/patrol goal exists at all, unlike GuardEntity's own
+    // GuardPatrolAreaGoal -- so findTarget's spiral scan, bounded to MAX_SCAN_RADIUS_BLOCKS (80)
+    // from wherever the worker currently stands, simply never reaches a tree sitting farther away
+    // in a large plot, and with nothing else to do, the worker never moves at all, forever. When
+    // findTarget finds no real harvest/plant work, it now falls back to picking a random reachable
+    // point elsewhere in the plot (see #pickWanderTarget) -- marked here so tick()'s arrival branch
+    // knows not to harvest/plant on arrival, just clear and let the next canUse roll scan again
+    // from this new, hopefully-closer-to-the-trees position.
+    private boolean pendingIsWander;
     private int repathCooldown;
     private int pursueTicks;
     private final List<AvoidedTarget> recentlyAvoided = new ArrayList<>();
@@ -167,6 +180,7 @@ public class LumberjackWorkGoal extends Goal {
         pendingIsHarvest = found.isHarvest();
         pendingHarvestIdentity = found.identityBase();
         pendingConnectedLogs = found.connectedLogs();
+        pendingIsWander = found.isWander();
         return true;
     }
 
@@ -189,6 +203,7 @@ public class LumberjackWorkGoal extends Goal {
         pendingTarget = null;
         pendingHarvestIdentity = null;
         pendingConnectedLogs = null;
+        pendingIsWander = false;
     }
 
     // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc.
@@ -265,6 +280,14 @@ public class LumberjackWorkGoal extends Goal {
         // future failure.
         consecutiveStuckGiveUps = 0;
         stuckGiveUpPos = null;
+        if (pendingIsWander) {
+            // Nothing to do here -- this was never real work, just a relocation closer to
+            // unexplored plot territory (see pendingIsWander's own field doc). Clearing pendingTarget
+            // lets the next canUse roll scan fresh from this new position.
+            pendingTarget = null;
+            pendingHarvestIdentity = null;
+            return;
+        }
         if (pendingIsHarvest) {
             // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc. A
             // real harvest (flood-fill + leaf-bounding-box clear) only happens occasionally (once
@@ -283,8 +306,21 @@ public class LumberjackWorkGoal extends Goal {
         pendingHarvestIdentity = null;
     }
 
-    // identityBase/connectedLogs are only meaningful when isHarvest is true -- both null for a plant target.
-    private record WorkTarget(BlockPos pos, boolean isHarvest, BlockPos identityBase, Set<BlockPos> connectedLogs) {
+    // identityBase/connectedLogs are only meaningful when isHarvest is true -- both null for a plant
+    // or wander target. isWander true means this is only a relocation, not real work -- see its own
+    // field doc on pendingIsWander.
+    private record WorkTarget(BlockPos pos, boolean isHarvest, BlockPos identityBase, Set<BlockPos> connectedLogs, boolean isWander) {
+        static WorkTarget harvest(BlockPos pos, BlockPos identityBase, Set<BlockPos> connectedLogs) {
+            return new WorkTarget(pos, true, identityBase, connectedLogs, false);
+        }
+
+        static WorkTarget plant(BlockPos pos) {
+            return new WorkTarget(pos, false, null, null, false);
+        }
+
+        static WorkTarget wander(BlockPos pos) {
+            return new WorkTarget(pos, false, null, null, true);
+        }
     }
 
     /** {@code from}'s squared distance to the nearest position in {@code logs}, or to {@code fallback} if {@code logs} is null/empty (a plant target, or a safety net). */
@@ -383,7 +419,7 @@ public class LumberjackWorkGoal extends Goal {
                 continue;
             }
             if (scanned++ > MAX_COLUMNS_SCANNED) {
-                return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null, null);
+                return finishScan(level, area, firstPlantCandidate, minX, minZ, maxX, maxZ);
             }
             // GroundHeightFinder, not a raw Heightmap lookup -- see that class's own doc (2026-10-29
             // Nether-ceiling fix). Anchored to the worker's own current Y.
@@ -415,7 +451,7 @@ public class LumberjackWorkGoal extends Goal {
                     // -- almost always something near the worker's own height, genuinely
                     // reachable on foot, not the base specifically.
                     BlockPos approach = nearestOf(connected, workerPos, base);
-                    return new WorkTarget(approach, true, base, connected); // Harvest always wins immediately once found.
+                    return WorkTarget.harvest(approach, base, connected); // Harvest always wins immediately once found.
                 }
                 // Not a real tree (no leaves anywhere nearby) -- almost certainly a player-built
                 // log structure (2026-10-05, real report: "destroyed the building to try to plant
@@ -434,7 +470,48 @@ public class LumberjackWorkGoal extends Goal {
                 firstPlantCandidate = topSolid.above();
             }
         }
-        return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null, null);
+        return finishScan(level, area, firstPlantCandidate, minX, minZ, maxX, maxZ);
+    }
+
+    private static final int MAX_WANDER_ATTEMPTS = 20;
+
+    /**
+     * A real plant candidate wins if one was found; otherwise falls back to a random reachable
+     * "wander" point elsewhere in the plot (see {@link #pendingIsWander}'s own field doc for why
+     * this fallback exists at all) rather than giving up and reporting no work found -- only when
+     * even that fails (e.g. a genuinely tiny/degenerate polygon with no room to pick a point) does
+     * this finally return {@code null}.
+     */
+    private WorkTarget finishScan(ServerLevel level, Geometry.Polygon area, BlockPos firstPlantCandidate,
+            int minX, int minZ, int maxX, int maxZ) {
+        if (firstPlantCandidate != null) {
+            return WorkTarget.plant(firstPlantCandidate);
+        }
+        BlockPos wanderTarget = pickWanderTarget(level, area, minX, minZ, maxX, maxZ);
+        return wanderTarget == null ? null : WorkTarget.wander(wanderTarget);
+    }
+
+    /**
+     * Rejection-samples a random reachable ground point anywhere in the plot's polygon -- real live
+     * report, 2026-10-30: "the lumberyard npc is just standing here, despite there being trees to
+     * cut in the plot." See {@link #pendingIsWander}'s own field doc for the full root-cause
+     * writeup; this is the actual fix, giving the worker somewhere to go when nothing within {@link
+     * #MAX_SCAN_RADIUS_BLOCKS} of its current position qualifies as real work, so a later scan gets
+     * a fresh, closer-to-the-trees origin instead of the worker standing frozen forever.
+     */
+    private BlockPos pickWanderTarget(ServerLevel level, Geometry.Polygon area, int minX, int minZ, int maxX, int maxZ) {
+        int spanX = Math.max(1, maxX - minX + 1);
+        int spanZ = Math.max(1, maxZ - minZ + 1);
+        for (int attempt = 0; attempt < MAX_WANDER_ATTEMPTS; attempt++) {
+            int x = minX + worker.getRandom().nextInt(spanX);
+            int z = minZ + worker.getRandom().nextInt(spanZ);
+            if (!area.contains(x, z)) {
+                continue;
+            }
+            int topY = com.github.cerealklla.settlemynts.util.GroundHeightFinder.findNear(level, x, z, worker.blockPosition().getY());
+            return new BlockPos(x, topY, z);
+        }
+        return null;
     }
 
     /**
