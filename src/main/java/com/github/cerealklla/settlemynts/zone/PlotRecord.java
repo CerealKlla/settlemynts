@@ -256,6 +256,12 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
                 boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc, hiredNpc, guardKitStandsIssued);
     }
 
+    /** Re-anchors {@code boxPos} after the Construction Box itself is physically moved (e.g. {@code debug.DebugCommands#resetPlotStructures}) -- the box's own {@code constructionBoxId} never changes, only where it's known to be. */
+    public PlotRecord withBoxPos(BlockPos boxPos) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                Optional.of(boxPos), constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc, hiredNpc, guardKitStandsIssued);
+    }
+
     /** Stamps in a freshly-registered Shop id -- see this record's own class doc on when this happens. */
     public PlotRecord withShopId(UUID shopId) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,

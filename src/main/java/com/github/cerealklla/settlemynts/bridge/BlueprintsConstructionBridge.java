@@ -67,6 +67,11 @@ public final class BlueprintsConstructionBridge {
         return new Placement(site.pos(), constructionId);
     }
 
+    /** Thin pass-through to {@code Blueprynts#relocateConstructionBox} -- see its own doc, added 2026-10-29 for {@code debug.DebugCommands#resetPlotStructures}. */
+    public static boolean relocateConstructionBox(ServerLevel level, BlockPos oldPos, BlockPos newPos) {
+        return Blueprynts.relocateConstructionBox(level, oldPos, newPos);
+    }
+
     /**
      * A plot's Building Supply Box status by its own {@code constructionBoxId} -- added 2026-09-30
      * for the Plot Config Sign's own "Relocate" flow's plot-bounds validation. Centralizes the raw

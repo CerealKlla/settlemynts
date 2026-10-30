@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.debug;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,6 +32,7 @@ import com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 import com.github.cerealklla.settlemynts.zone.SettlementKey;
 import com.github.cerealklla.settlemynts.zone.ShopResource;
+import com.github.cerealklla.settlemynts.util.GroundHeightFinder;
 
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -101,6 +103,11 @@ public final class DebugCommands {
                         .executes(ctx -> resyncNpcShopPrices(ctx.getSource())))
                 .then(Commands.literal("fixstuckguards")
                         .executes(ctx -> fixStuckGuards(ctx.getSource())))
+                .then(Commands.literal("resetplot")
+                        // ADMIN ONLY -- mutates live block positions directly (see #resetPlotStructures's
+                        // own doc), same gating reasoning as setplotowner below.
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .executes(ctx -> resetPlotStructures(ctx.getSource())))
                 .then(Commands.literal("removelisting")
                         .then(Commands.argument("itemId", StringArgumentType.string())
                                 .executes(ctx -> removeListing(ctx.getSource(), StringArgumentType.getString(ctx, "itemId")))))
@@ -817,6 +824,140 @@ public final class DebugCommands {
         source.sendSuccess(() -> Component.literal("Checked " + finalChecked + " Guard Kit Stand(s) presumed to have a live guard -- "
                 + finalFixed + " were actually dead in every dimension with no pending respawn record, now cleared and ready to respawn."), true);
         return fixed;
+    }
+
+    /**
+     * ADMIN ONLY (LEVEL_GAMEMASTERS, or RCON) -- added 2026-10-29, real report: a Town Hall founded
+     * in the Nether had its plots' structures (Plot Config Sign, Construction Box, Guardhouse) spawn
+     * right under the world's ceiling, nowhere near the actual founding location -- see {@code
+     * util.GroundHeightFinder}'s own doc for the full root-cause writeup. That fix makes every
+     * *newly*-placed structure land correctly from here on, but can't retroactively move a structure
+     * already stuck up there -- this is the manual, one-time repair for that, same "prefer a one-time
+     * fix over permanent self-healing code" reasoning as {@link #fixStuckGuards}.
+     *
+     * <p>Resolves the target plot the same "stand inside it" way {@link #setPlotOwner}/{@link
+     * #resyncShop} already do. Deliberately only ever touches each structure's Y, never its X/Z --
+     * the Nether-ceiling bug was purely vertical (a top-down heightmap scan hitting the roof), so
+     * there's no reason to recompute where a structure *should* sit horizontally, just drop it down
+     * to the real ground directly below (or above, in principle) where it already is, anchored to
+     * the executing player's own current Y (they're presumably standing on the real ground right
+     * now). Each structure's full state (bound Blueprint/funding progress for the box, NPC worker
+     * UUIDs for the sign, food inventory for the Guardhouse) is preserved via a generic block-entity
+     * NBT round-trip ({@link #relocateBlockPreservingState}) -- not the existing player-facing
+     * "Relocate"/Locator-item flows, which only preserve a sign's bare identity (see {@code
+     * plotsign.PendingPlotConfigSignRelocation}'s own doc) and require manual placement, neither of
+     * which fits a fully-automated repair command. The Construction Box is Blueprynts' own block,
+     * so it goes through a new {@code api.Blueprynts#relocateConstructionBox} (via {@code
+     * bridge.BlueprintsConstructionBridge}) instead of this class reaching into Blueprynts directly.
+     */
+    private static int resetPlotStructures(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof net.minecraft.world.entity.player.Player player) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world (stand inside the target plot)."));
+            return 0;
+        }
+        AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+        BlockPos playerPos = player.blockPosition();
+        GhostTownHallCoreEntity foundCore = null;
+        PlotRecord foundPlot = null;
+        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+            Optional<PlotRecord> plot = com.github.cerealklla.settlemynts.zone.PlotGeometry.findContainingPlot(level, core, playerPos.getX(), playerPos.getZ());
+            if (plot.isPresent()) {
+                foundCore = core;
+                foundPlot = plot.get();
+                break;
+            }
+        }
+        if (foundPlot == null) {
+            source.sendFailure(Component.literal("You're not standing inside any finalized plot."));
+            return 0;
+        }
+        final GhostTownHallCoreEntity core = foundCore;
+        final PlotRecord plot = foundPlot;
+        final int referenceY = (int) Math.floor(player.getY());
+        MinecraftServer server = level.getServer();
+        List<String> moved = new ArrayList<>();
+
+        com.github.cerealklla.settlemynts.plotsign.PlotConfigSignIndex signIndex =
+                com.github.cerealklla.settlemynts.plotsign.PlotConfigSignIndex.get(server);
+        signIndex.get(plot.plotId())
+                .filter(global -> global.dimension().equals(level.dimension()))
+                .ifPresent(global -> {
+                    BlockPos oldPos = global.pos();
+                    int newY = GroundHeightFinder.findNear(level, oldPos.getX(), oldPos.getZ(), referenceY);
+                    if (newY != oldPos.getY()) {
+                        BlockPos newPos = new BlockPos(oldPos.getX(), newY, oldPos.getZ());
+                        if (relocateBlockPreservingState(level, oldPos, newPos)) {
+                            signIndex.put(plot.plotId(), GlobalPos.of(level.dimension(), newPos));
+                            moved.add("Plot Config Sign");
+                        }
+                    }
+                });
+
+        if (plot.boxPos().isPresent() && ModList.get().isLoaded("blueprynts")) {
+            BlockPos oldPos = plot.boxPos().get();
+            int newY = GroundHeightFinder.findNear(level, oldPos.getX(), oldPos.getZ(), referenceY);
+            if (newY != oldPos.getY()) {
+                BlockPos newPos = new BlockPos(oldPos.getX(), newY, oldPos.getZ());
+                if (com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.relocateConstructionBox(level, oldPos, newPos)) {
+                    core.updatePlot(plot.withBoxPos(newPos));
+                    moved.add("Construction Box");
+                }
+            }
+        }
+
+        com.github.cerealklla.settlemynts.guardhouse.GuardhouseIndex guardhouseIndex =
+                com.github.cerealklla.settlemynts.guardhouse.GuardhouseIndex.get(server);
+        guardhouseIndex.get(plot.plotId())
+                .filter(global -> global.dimension().equals(level.dimension()))
+                .ifPresent(global -> {
+                    BlockPos oldPos = global.pos();
+                    int newY = GroundHeightFinder.findNear(level, oldPos.getX(), oldPos.getZ(), referenceY);
+                    if (newY != oldPos.getY()) {
+                        BlockPos newPos = new BlockPos(oldPos.getX(), newY, oldPos.getZ());
+                        if (relocateBlockPreservingState(level, oldPos, newPos)) {
+                            guardhouseIndex.put(plot.plotId(), GlobalPos.of(level.dimension(), newPos));
+                            moved.add("Guardhouse");
+                        }
+                    }
+                });
+
+        if (moved.isEmpty()) {
+            source.sendSuccess(() -> Component.literal("No structures on this plot needed repositioning."), true);
+        } else {
+            source.sendSuccess(() -> Component.literal("Repositioned: " + String.join(", ", moved) + "."), true);
+        }
+        return moved.size();
+    }
+
+    /**
+     * Moves a block (and its block entity's full custom state) from {@code oldPos} to {@code
+     * newPos} via a plain vanilla {@code BlockEntity#saveCustomOnly}/{@code #loadCustomOnly} NBT
+     * round-trip -- works generically for any of this mod's own block entities (the Plot Config
+     * Sign, the Guardhouse) regardless of their specific fields. See {@code
+     * api.Blueprynts#relocateConstructionBox} for the identical, independently-implemented version
+     * used for the Construction Box, which this mod can't reach into directly.
+     *
+     * @return {@code false} if {@code newPos} isn't currently air (never overwrites something else).
+     */
+    private static boolean relocateBlockPreservingState(ServerLevel level, BlockPos oldPos, BlockPos newPos) {
+        if (oldPos.equals(newPos) || !level.getBlockState(newPos).isAir()) {
+            return false;
+        }
+        net.minecraft.world.level.block.entity.BlockEntity be = level.getBlockEntity(oldPos);
+        net.minecraft.world.level.block.state.BlockState state = level.getBlockState(oldPos);
+        net.minecraft.nbt.CompoundTag savedData = be != null ? be.saveCustomOnly(level.registryAccess()) : null;
+        level.removeBlock(oldPos, false);
+        level.setBlock(newPos, state, 3);
+        net.minecraft.world.level.block.entity.BlockEntity newBe = level.getBlockEntity(newPos);
+        if (savedData != null && newBe != null) {
+            try (net.minecraft.util.ProblemReporter.ScopedCollector reporter =
+                         new net.minecraft.util.ProblemReporter.ScopedCollector(newBe.problemPath(), com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER)) {
+                newBe.loadCustomOnly(net.minecraft.world.level.storage.TagValueInput.create(reporter, level.registryAccess(), savedData));
+            }
+            newBe.setChanged();
+        }
+        return true;
     }
 
     private static int plotInfo(CommandSourceStack source) {
