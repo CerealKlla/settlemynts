@@ -151,6 +151,12 @@ public class GuardPatrolAreaGoal extends Goal {
             return false;
         }
         if (guard.level() instanceof ServerLevel level) {
+            // One-shot fire scan, explicit user spec 2026-10-30: "reaches goal, scan 1 time" --
+            // every waypoint actually reached (intermediate hop or final destination/fallback
+            // target) counts as "reaching a destination." See GuardExtinguishFireGoal's own doc for
+            // why this is never polled continuously, and why priority 1 there is enough to make it
+            // win over everything else without any special-casing here.
+            guard.setPendingFireTarget(GuardExtinguishFireGoal.scanForVisibleFire(guard, level));
             // Re-resolved by UUID rather than trusting the stored reference -- the stake's chunk may
             // have unloaded and reloaded (a fresh deserialized instance) sometime during this
             // possibly-long walk, and a write to a stale detached reference would silently never
@@ -197,6 +203,15 @@ public class GuardPatrolAreaGoal extends Goal {
         } else {
             nextFinalDestination = fallbackTarget;
         }
+        // Temporary diagnostic (2026-10-30, live report: "they just moved to 1 more stake and
+        // stopped again") -- see diagnostics.LagDiagnostics' own doc for the pattern. Logs exactly
+        // why a guard went idle instead of guessing: which path (road route vs. fallback wander)
+        // was tried and what it came back with. Remove once the real cause is confirmed and fixed.
+        if (nextFinalDestination == null) {
+            com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
+                    "[LagDiagnostics] GuardPatrolAreaGoal: guard {} went idle -- route empty, fallback area present={}, fallbackTarget=null (settlementCoreId={}, plotId={})",
+                    guard.getUUID(), guard.resolvePatrolArea(level).isPresent(), guard.getSettlementCoreId(), guard.plotId());
+        }
         if (nextFinalDestination != null) {
             guard.getNavigation().moveTo(
                     nextFinalDestination.getX() + 0.5, nextFinalDestination.getY(), nextFinalDestination.getZ() + 0.5, speedModifier);
@@ -238,18 +253,22 @@ public class GuardPatrolAreaGoal extends Goal {
     private List<RoadwayStakeEntity> buildRoadRoute(ServerLevel level) {
         UUID settlementCoreId = guard.getSettlementCoreId();
         if (settlementCoreId == null || !(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
+            logRouteFailure("no settlementCoreId or core entity not found in this level");
             return List.of();
         }
         List<RoadwayStakeEntity> stakes = RoadwayStakeEntity.findByOwnerCore(level, settlementCoreId);
         if (stakes.isEmpty()) {
+            logRouteFailure("core found but zero stakes registered to it");
             return List.of();
         }
         RoadwayStakeEntity destination = pickRecencyWeightedTarget(level, core, stakes);
         if (destination == null) {
+            logRouteFailure(stakes.size() + " stake(s) total, but none eligible (claimed, or none pass isWithinAnyTownProper)");
             return List.of();
         }
         RoadwayStakeEntity entry = nearestStake(stakes);
         if (entry == null) {
+            logRouteFailure("destination picked but nearestStake(entry) came back null");
             return List.of();
         }
         List<RoadwayStakeEntity> path = findStakePath(stakes, entry, destination);
@@ -294,6 +313,11 @@ public class GuardPatrolAreaGoal extends Goal {
             }
         }
         return eligible.get(eligible.size() - 1); // floating-point fallback, should be unreachable
+    }
+
+    private void logRouteFailure(String reason) {
+        com.github.cerealklla.settlemynts.SettlemyntsMod.LOGGER.info(
+                "[LagDiagnostics] GuardPatrolAreaGoal.buildRoadRoute: guard {} -- {}", guard.getUUID(), reason);
     }
 
     private RoadwayStakeEntity nearestStake(List<RoadwayStakeEntity> stakes) {

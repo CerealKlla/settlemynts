@@ -15,37 +15,38 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * "Put out fires they can see within a certain distance when they reach a destination" (explicit
- * user spec, 2026-10-30, {@link #SEARCH_RADIUS_BLOCKS} = 15). A plain opportunistic goal, same
- * priority tier as {@link GuardGateOpenGoal}/{@link GuardPickUpItemsGoal} -- it only ever actually
- * gets a turn at the shared {@code Flag.MOVE} slot during the same idle windows
- * {@code GuardPatrolAreaGoal} already yields at (route just finished, about to re-pick), which is
- * what gives "when they reach a destination" its real effect without this goal needing to hook into
- * patrol arrival directly at all -- same established pattern this mod already uses for every other
- * "whatever a Guard notices along the way" behavior.
+ * "Put out fires they can see within a certain distance when they reach a destination, let's say
+ * 15 blocks. literal line of sight scan... priority 1 upon reaching a target, then looking for
+ * enemies, then picking a new stake to head toward" (explicit user spec, 2026-10-30).
  *
- * <p><b>Literal line-of-sight scan</b>, per the user's own explicit spec -- not just "nearest fire
- * within radius." Mirrors vanilla's own {@code LivingEntity#hasLineOfSight(Entity)} exactly (same
- * {@link ClipContext.Block#COLLIDER}/{@link ClipContext.Fluid#NONE} shape, same
- * {@code HitResult.Type.MISS} success check, confirmed against the decompiled source), just aimed at
- * a block position's own center instead of another entity's eye position.
+ * <p><b>Event-driven, not polled</b> -- explicit correction: "there should be no tick for this.
+ * Reaches goal, scan 1 time." This goal never scans on its own; {@link #scanForVisibleFire} is
+ * called exactly once by {@code GuardPatrolAreaGoal}'s own arrival handling (every waypoint/final-
+ * destination reached, the actual "reach a destination" moment), which stores the result on {@link
+ * GuardEntity#setPendingFireTarget}. This goal's own {@link #canUse()} is then a trivial check of
+ * that field -- no scanning cost at all on a tick where nothing changed.
  *
- * <p>Throttled to once every {@link #SCAN_COOLDOWN_TICKS} -- a full radius-15 cube scan
- * (~29,791 block-state reads) is real, non-trivial work compared to this mod's other opportunistic
- * goals (an entity-AABB query, which is spatially indexed), so this runs far less often than
- * {@code GuardSightGoal}'s own 10-tick entity scan. Fed into {@code diagnostics.TickProfiler} like
- * every other per-Goal cost in this mod, so a real problem would show up in the same slow-tick
- * breakdown rather than going unnoticed.
+ * <p><b>Priority 1</b> -- strictly above {@code GuardReturnToDimensionGoal}/the weapon-or-spell
+ * goal (priority 2, whose own internal order -- heal an ally under 50%, then an enemy, then heal-
+ * top-off -- is unchanged) and {@code GuardPatrolAreaGoal} (priority 3, picking a new stake).
+ * Vanilla's own {@code GoalSelector} priority-preemption rules enforce the whole "fire, then heal
+ * critical, then enemies, then heal top-off, then new stake" chain for free: the instant {@link
+ * GuardEntity#pendingFireTarget()} becomes non-null, this goal's higher priority lets it immediately
+ * take over the shared {@code Flag.MOVE} slot from whatever was running.
+ *
+ * <p>A genuine line-of-sight raycast per candidate (not just radius), mirroring vanilla's own {@code
+ * LivingEntity#hasLineOfSight(Entity)} exactly (same {@link ClipContext.Block#COLLIDER}/
+ * {@link ClipContext.Fluid#NONE} shape, same {@code HitResult.Type.MISS} success check, confirmed
+ * against the decompiled source), aimed at a block position's own center instead of another
+ * entity's eye position.
  */
 public class GuardExtinguishFireGoal extends Goal {
 
     private static final double SEARCH_RADIUS_BLOCKS = 15.0;
     private static final double EXTINGUISH_RANGE_SQ = 4.0; // 2 blocks.
-    private static final int SCAN_COOLDOWN_TICKS = 40; // 2 seconds.
 
     private final GuardEntity guard;
     private BlockPos target;
-    private int cooldown;
 
     public GuardExtinguishFireGoal(GuardEntity guard) {
         this.guard = guard;
@@ -54,20 +55,7 @@ public class GuardExtinguishFireGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        return com.github.cerealklla.settlemynts.diagnostics.TickProfiler.timeValue(
-                "GuardExtinguishFireGoal.canUse", this::canUseInternal);
-    }
-
-    private boolean canUseInternal() {
-        if (cooldown > 0) {
-            cooldown--;
-            return false;
-        }
-        if (!(guard.level() instanceof ServerLevel level)) {
-            return false;
-        }
-        cooldown = SCAN_COOLDOWN_TICKS;
-        target = findNearestVisibleFire(level);
+        target = guard.pendingFireTarget();
         return target != null;
     }
 
@@ -79,6 +67,7 @@ public class GuardExtinguishFireGoal extends Goal {
     @Override
     public void stop() {
         target = null;
+        guard.setPendingFireTarget(null);
     }
 
     @Override
@@ -105,9 +94,17 @@ public class GuardExtinguishFireGoal extends Goal {
         level.playSound(null, target, SoundEvents.FIRE_EXTINGUISH, SoundSource.BLOCKS, 1.0F, 1.0F);
         level.gameEvent(guard, GameEvent.BLOCK_CHANGE, target);
         target = null;
+        guard.setPendingFireTarget(null);
     }
 
-    private BlockPos findNearestVisibleFire(ServerLevel level) {
+    /**
+     * The one-shot scan -- called exactly once by {@code GuardPatrolAreaGoal} at the moment a guard
+     * actually arrives at a waypoint, never polled. Returns the nearest {@link
+     * net.minecraft.world.level.block.FireBlock}/soul-fire position within {@link
+     * #SEARCH_RADIUS_BLOCKS} that {@code guard} has a genuine, unobstructed line of sight to, or
+     * {@code null} if none.
+     */
+    static BlockPos scanForVisibleFire(GuardEntity guard, ServerLevel level) {
         BlockPos origin = guard.blockPosition();
         int radius = (int) Math.ceil(SEARCH_RADIUS_BLOCKS);
         double radiusSq = SEARCH_RADIUS_BLOCKS * SEARCH_RADIUS_BLOCKS;
@@ -122,7 +119,7 @@ public class GuardExtinguishFireGoal extends Goal {
             if (!isFire(level.getBlockState(pos))) {
                 continue;
             }
-            if (!hasLineOfSight(level, pos)) {
+            if (!hasLineOfSight(guard, level, pos)) {
                 continue;
             }
             nearest = pos.immutable();
@@ -135,7 +132,7 @@ public class GuardExtinguishFireGoal extends Goal {
         return state.is(Blocks.FIRE) || state.is(Blocks.SOUL_FIRE);
     }
 
-    private boolean hasLineOfSight(ServerLevel level, BlockPos pos) {
+    private static boolean hasLineOfSight(GuardEntity guard, ServerLevel level, BlockPos pos) {
         Vec3 from = new Vec3(guard.getX(), guard.getEyeY(), guard.getZ());
         Vec3 to = Vec3.atCenterOf(pos);
         return level.clip(new ClipContext(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, guard))

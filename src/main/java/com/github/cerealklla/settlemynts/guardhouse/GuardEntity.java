@@ -115,6 +115,10 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     // a claim only matters for the lifetime of one in-progress patrol leg, and every claim across
     // the whole settlement naturally clearing on a restart is harmless.
     private UUID claimedPatrolStakeId;
+    // Set by GuardPatrolAreaGoal's own one-shot arrival scan (never polled continuously -- see
+    // GuardExtinguishFireGoal's own doc) -- non-null tells that goal there's a real fire to go
+    // extinguish right now.
+    private net.minecraft.core.BlockPos pendingFireTarget;
 
     public GuardEntity(EntityType<? extends GuardEntity> type, Level level) {
         super(type, level);
@@ -172,6 +176,15 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         this.claimedPatrolStakeId = claimedPatrolStakeId;
     }
 
+    /** Set by {@code GuardPatrolAreaGoal}'s one-shot arrival scan; read and cleared by {@code GuardExtinguishFireGoal}. */
+    public void setPendingFireTarget(net.minecraft.core.BlockPos pendingFireTarget) {
+        this.pendingFireTarget = pendingFireTarget;
+    }
+
+    public net.minecraft.core.BlockPos pendingFireTarget() {
+        return pendingFireTarget;
+    }
+
     /** This guard's owning settlement -- used by {@code GuardPatrolAreaGoal} to find the WHOLE settlement's road network, not just this guard's own plot. */
     public UUID getSettlementCoreId() {
         return settlementCoreId;
@@ -224,6 +237,22 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         // heal paths back to the nearest portal instead of patrolling nonsensically; see that
         // class's own doc for why sharing this tier with the weapon/spell goals is safe.
         this.goalSelector.addGoal(2, new GuardReturnToDimensionGoal(this, 0.8));
+        // "Put out fires they can see... priority 1 upon reaching a target, then looking for
+        // enemies, then picking a new stake" (explicit user spec, 2026-10-30) -- priority 1, strictly
+        // above GuardReturnToDimensionGoal/the weapon-or-spell goal above (priority 2, which already
+        // internally orders heal<50% -> enemies -> heal-topoff, unchanged) and GuardPatrolAreaGoal
+        // below (priority 3) -- vanilla's own GoalSelector priority-preemption rules do the rest. See
+        // GuardExtinguishFireGoal's own doc for why this never polls continuously.
+        this.goalSelector.addGoal(1, new GuardExtinguishFireGoal(this));
+        // "They should still pick up items, but do that last before moving to a new stake" (explicit
+        // user spec, 2026-10-30) -- registered BEFORE GuardPatrolAreaGoal below despite sharing the
+        // same priority number (3): confirmed against the decompiled GoalSelector/WrappedGoal source
+        // that same-priority goals never preempt each other (canBeReplacedBy requires a STRICTLY
+        // lower priority number) and are evaluated in plain insertion order each tick, so whichever
+        // is added first gets first claim on the shared Flag.MOVE slot at an idle moment -- the
+        // previous registration order (Patrol added first) meant Patrol always re-picked a new stake
+        // immediately and this goal never got a real chance to run at all.
+        this.goalSelector.addGoal(3, new GuardPickUpItemsGoal(this));
         this.goalSelector.addGoal(3, new GuardPatrolAreaGoal(this, 0.8));
         // Real wooden doors (explicit live report, 2026-10-16: "not opening/closing doors/gates when
         // they get stuck") -- same priority/shape vanilla's own Vindicator uses for the identical
@@ -234,13 +263,6 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         // Fence gates have no vanilla equivalent at all -- see GuardGateOpenGoal's own doc for why
         // this is a separate, custom goal rather than reusing OpenDoorGoal.
         this.goalSelector.addGoal(3, new GuardGateOpenGoal(this));
-        // "Guards should be able to pick up loose items off the ground and immediately store them in
-        // the storage boxes on the plot they are assigned to" (explicit user spec, 2026-10-16).
-        this.goalSelector.addGoal(3, new GuardPickUpItemsGoal(this));
-        // "Put out fires they can see within a certain distance when they reach a destination"
-        // (explicit user spec, 2026-10-30) -- see GuardExtinguishFireGoal's own doc for why this
-        // priority tier alone already gives it "when they reach a destination" timing for free.
-        this.goalSelector.addGoal(3, new GuardExtinguishFireGoal(this));
         this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
 
