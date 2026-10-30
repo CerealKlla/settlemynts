@@ -476,13 +476,36 @@ public final class PlannedInventoryClearing {
             }
         }
 
-        for (int bi = 0; bi < buyers.size(); bi++) {
-            Buyer buyer = buyers.get(bi);
-            int remainingDeficit = buyer.remainingDeficit();
-            if (remainingDeficit <= 0) {
-                continue;
-            }
-            for (int si = 0; si < sellers.size() && remainingDeficit > 0; si++) {
+        queue.enqueue(() -> matchOneBuyer(level, key, resource, buyers, sellers, queue, 0));
+    }
+
+    /**
+     * One buyer's worth of {@link #settleResource}'s own buyer-vs-seller matching, re-enqueued one
+     * buyer at a time instead of looping every buyer against every seller synchronously in a single
+     * job -- real production lag, 2026-10-30: a resource with several participating plots could
+     * still blow a single {@link MidnightWorkQueue} job's own 10ms-per-job budget by itself (up to
+     * ~250ms seen live), even with the existing "one job per resource" chunking above, since this
+     * nested buyer x seller loop -- each match doing several real box scans (
+     * {@link ContainerWithdraw#countAvailable}/{@link ContainerWithdraw#drain}/
+     * {@link ContainerDeposit#depositIntoAny}) -- was still one big synchronous unit underneath that.
+     * Mirrors {@link #attemptOneCraftableUnit}/{@link #attemptOneOwnStockCraft}'s own "index + re-
+     * enqueue the next one" shape exactly. {@code sellers}' remaining surplus is still shared mutable
+     * state read/written across every buyer (so an earlier buyer's purchase correctly reduces what a
+     * later buyer can still get) -- unchanged from before, it just now crosses tick boundaries
+     * between buyers instead of staying in one call stack.
+     */
+    private static void matchOneBuyer(ServerLevel level, ResourceKey key, ShopResource resource,
+                                       List<Buyer> buyers, List<Seller> sellers, MidnightWorkQueue queue, int buyerIndex) {
+        if (buyerIndex >= buyers.size()) {
+            return;
+        }
+        Buyer buyer = buyers.get(buyerIndex);
+        int remainingDeficit = buyer.remainingDeficit();
+        if (remainingDeficit <= 0) {
+            queue.enqueue(() -> matchOneBuyer(level, key, resource, buyers, sellers, queue, buyerIndex + 1));
+            return;
+        }
+        for (int si = 0; si < sellers.size() && remainingDeficit > 0; si++) {
                 Seller seller = sellers.get(si);
                 if (seller.remainingSurplus() <= 0 || seller.participant() == buyer.participant()) {
                     continue;
@@ -538,8 +561,8 @@ public final class PlannedInventoryClearing {
                 ShopWishlistCache.invalidate(buyer.participant().plot().plotId());
                 ShopWishlistCache.invalidate(seller.participant().plot().plotId());
             }
-            buyers.set(bi, new Buyer(buyer.participant(), remainingDeficit));
-        }
+        buyers.set(buyerIndex, new Buyer(buyer.participant(), remainingDeficit));
+        queue.enqueue(() -> matchOneBuyer(level, key, resource, buyers, sellers, queue, buyerIndex + 1));
     }
 
     private record PriceSplit(List<ItemStack> toDeliver, List<ItemStack> unaffordableOrUnpriced, int totalUnits, long totalCost) {
