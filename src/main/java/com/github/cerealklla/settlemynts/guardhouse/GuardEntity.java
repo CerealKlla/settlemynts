@@ -147,6 +147,11 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         this.assignedStandId = assignedStandId;
     }
 
+    /** This guard's own Guard Kit Stand -- used by {@link GuardReturnToDimensionGoal} to resolve a pre-existing guard's real home dimension via {@link GuardKitStandIndex}, independent of wherever the guard itself currently is. */
+    public UUID assignedStandId() {
+        return assignedStandId;
+    }
+
     /** Called once by {@link GuardSpawnTicker} right after construction -- this guard's own spawn point (its assigned stand's position), the rescue destination {@link #stuckWatchdog} teleports back to if this guard ever gets stuck. */
     public void setHomePos(net.minecraft.core.BlockPos homePos) {
         this.homePos = homePos;

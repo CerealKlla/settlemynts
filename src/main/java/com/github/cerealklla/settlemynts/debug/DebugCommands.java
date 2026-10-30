@@ -18,6 +18,7 @@ import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.YconomicsBillBridge;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
+import com.github.cerealklla.settlemynts.guardhouse.GuardEntity;
 import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity;
 import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandIndex;
 import com.github.cerealklla.settlemynts.guardhouse.GuardPendingDeathIndex;
@@ -103,6 +104,8 @@ public final class DebugCommands {
                         .executes(ctx -> resyncNpcShopPrices(ctx.getSource())))
                 .then(Commands.literal("fixstuckguards")
                         .executes(ctx -> fixStuckGuards(ctx.getSource())))
+                .then(Commands.literal("fixguardhomes")
+                        .executes(ctx -> fixGuardHomes(ctx.getSource())))
                 .then(Commands.literal("resetplot")
                         // ADMIN ONLY -- mutates live block positions directly (see #resetPlotStructures's
                         // own doc), same gating reasoning as setplotowner below.
@@ -823,6 +826,60 @@ public final class DebugCommands {
         int finalFixed = fixed;
         source.sendSuccess(() -> Component.literal("Checked " + finalChecked + " Guard Kit Stand(s) presumed to have a live guard -- "
                 + finalFixed + " were actually dead in every dimension with no pending respawn record, now cleared and ready to respawn."), true);
+        return fixed;
+    }
+
+    /**
+     * One-time data fix, 2026-10-29 -- real report: a Nether settlement's guard that had legitimately
+     * crossed into the Overworld (chasing/healing) just stood there instead of pathing back. Root
+     * cause: {@code GuardReturnToDimensionGoal}'s own real bug fix shipped earlier the same day --
+     * see that class's own doc -- added a one-time migration for a guard with no persisted {@code
+     * homeDimension} yet, but its first version lazily adopted *whichever dimension the guard was
+     * already in* as home. That's wrong for a guard that happened to already be astray at the exact
+     * moment the migration ran (this one, specifically), permanently mislearning "home" as the
+     * Overworld it merely happened to be standing in when the fix first shipped. The goal's own
+     * migration logic was corrected the same day to resolve the real home from {@link
+     * GuardKitStandIndex} instead of guessing -- but that correction only helps a guard whose {@code
+     * homeDimension} is still {@code null}; this guard's was already (wrongly) set by the time that
+     * correction shipped, so it needs this one-time manual repair rather than a second round of
+     * self-healing migration logic.
+     *
+     * <p>Deliberately re-checks every server dimension (not just the stand's own level) to find the
+     * live guard itself, same reasoning {@link #fixStuckGuards} already established -- a guard that
+     * successfully crossed dimensions is, by definition, not in its stand's own level right now.
+     */
+    private static int fixGuardHomes(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        int checked = 0;
+        int fixed = 0;
+        for (Map.Entry<UUID, GlobalPos> entry : GuardKitStandIndex.get(server).all().entrySet()) {
+            GlobalPos standPos = entry.getValue();
+            ServerLevel standLevel = server.getLevel(standPos.dimension());
+            if (standLevel == null || !(standLevel.getEntity(entry.getKey()) instanceof GuardKitStandEntity stand)
+                    || stand.assignedGuardId().isEmpty()) {
+                continue;
+            }
+            GuardEntity guard = null;
+            for (ServerLevel candidate : server.getAllLevels()) {
+                if (candidate.getEntity(stand.assignedGuardId().get()) instanceof GuardEntity found) {
+                    guard = found;
+                    break;
+                }
+            }
+            if (guard == null) {
+                continue;
+            }
+            checked++;
+            if (standPos.dimension().equals(guard.homeDimension())) {
+                continue;
+            }
+            guard.setHomeDimension(standPos.dimension());
+            fixed++;
+        }
+        int finalChecked = checked;
+        int finalFixed = fixed;
+        source.sendSuccess(() -> Component.literal("Checked " + finalChecked + " live guard(s) -- "
+                + finalFixed + " had the wrong home dimension recorded, now corrected to match their own Guard Kit Stand."), true);
         return fixed;
     }
 
