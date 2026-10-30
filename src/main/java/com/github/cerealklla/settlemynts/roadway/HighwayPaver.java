@@ -31,7 +31,6 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Half;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * A copy of {@link RoadwayPaver}, tweaked for inter-settlement Highway Stakes (added 2026-10-11):
@@ -81,8 +80,11 @@ public final class HighwayPaver {
         }
     }
 
-    private static int naturalSurfaceY(ServerLevel level, int x, int z) {
-        return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
+    private static int naturalSurfaceY(ServerLevel level, int x, int z, int referenceY) {
+        // GroundHeightFinder, not a raw Heightmap lookup -- see RoadwayPaver#naturalSurfaceY's own
+        // doc for the full write-up (2026-10-29 Nether-ceiling fix), duplicated here per this class's
+        // own "copy and tweak" precedent.
+        return com.github.cerealklla.settlemynts.util.GroundHeightFinder.findNear(level, x, z, referenceY) - 1;
     }
 
     // See RoadwayPaver#naturalSurfaceYNear's own doc for the full real-live-report writeup -- this is
@@ -105,7 +107,7 @@ public final class HighwayPaver {
                 }
             }
         }
-        return naturalSurfaceY(level, x, z);
+        return naturalSurfaceY(level, x, z, referenceY);
     }
 
     private static boolean isWalkableSurface(ServerLevel level, int x, int y, int z) {

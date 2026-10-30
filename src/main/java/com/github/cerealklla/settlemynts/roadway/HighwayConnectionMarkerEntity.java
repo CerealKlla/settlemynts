@@ -107,9 +107,12 @@ public class HighwayConnectionMarkerEntity extends Display.BlockDisplay {
                 int z2 = Mth.floor(other.getZ());
                 List<Geometry.Polygon.Vertex> centerline = Geometry.Polygon.supercoverLine(
                         new Geometry.Polygon.Vertex(x1, z1), new Geometry.Polygon.Vertex(x2, z2));
+                // GroundHeightFinder, not a raw Heightmap lookup -- see that class's own doc
+                // (2026-10-29 Nether-ceiling fix), same fix as RoadwayConnectionMarkerEntity's own.
+                int referenceY = Mth.floor((stake.getY() + other.getY()) / 2.0D);
                 for (int i = 0; i < centerline.size(); i += MARKER_SPACING_BLOCKS) {
                     Geometry.Polygon.Vertex cell = centerline.get(i);
-                    int markerY = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, cell.x(), cell.z());
+                    int markerY = com.github.cerealklla.settlemynts.util.GroundHeightFinder.findNear(level, cell.x(), cell.z(), referenceY);
                     create(level, cell.x(), markerY, cell.z(), ownerPlayerId, instanceId);
                 }
             }

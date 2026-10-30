@@ -28,7 +28,6 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Half;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 import java.util.HashSet;
 import java.util.Set;
@@ -135,8 +134,12 @@ public final class RoadwayPaver {
      * its captured {@link SnapshotEntry} list, see {@link RoadwayStakeEntity#remove}) and place it
      * again, not to rely on a repave to clean up after itself.
      */
-    private static int naturalSurfaceY(ServerLevel level, int x, int z) {
-        return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
+    private static int naturalSurfaceY(ServerLevel level, int x, int z, int referenceY) {
+        // GroundHeightFinder, not a raw Heightmap lookup -- see that class's own doc (2026-10-29
+        // Nether-ceiling fix). This is only ever reached as #naturalSurfaceYNear's own last-resort
+        // fallback, which already has a real referenceY in hand -- no more reason for even that
+        // fallback to blindly scan from the level's absolute top.
+        return com.github.cerealklla.settlemynts.util.GroundHeightFinder.findNear(level, x, z, referenceY) - 1;
     }
 
     // How far up/down to search for the real walkable surface nearest a reference height -- generous
@@ -176,7 +179,7 @@ public final class RoadwayPaver {
                 }
             }
         }
-        return naturalSurfaceY(level, x, z);
+        return naturalSurfaceY(level, x, z, referenceY);
     }
 
     private static boolean isWalkableSurface(ServerLevel level, int x, int y, int z) {

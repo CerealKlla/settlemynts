@@ -15,7 +15,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Patrols the settlement's own road network (added 2026-10-06, explicit user request: "I'd like
@@ -333,10 +332,10 @@ public class GuardPatrolAreaGoal extends Goal {
                 int x = centerX + guard.getRandom().nextInt(5) - 2;
                 int z = centerZ + guard.getRandom().nextInt(5) - 2;
                 if (area.contains(x, z)) {
-                    return surfacePos(level, x, z);
+                    return surfacePos(level, x, z, guard.getY());
                 }
             }
-            return surfacePos(level, centerX, centerZ); // best-effort even if the box center itself isn't contained (concave plot)
+            return surfacePos(level, centerX, centerZ, guard.getY()); // best-effort even if the box center itself isn't contained (concave plot)
         }
 
         int rangeX = Math.max(1, maxX - minX + 1);
@@ -345,14 +344,15 @@ public class GuardPatrolAreaGoal extends Goal {
             int x = minX + guard.getRandom().nextInt(rangeX);
             int z = minZ + guard.getRandom().nextInt(rangeZ);
             if (area.contains(x, z)) {
-                return surfacePos(level, x, z);
+                return surfacePos(level, x, z, guard.getY());
             }
         }
         return null; // No contained sample found this cycle -- canUse() just tries again later.
     }
 
-    private static BlockPos surfacePos(ServerLevel level, int x, int z) {
-        int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+    /** GroundHeightFinder, not a raw Heightmap lookup -- see that class's own doc (2026-10-29 Nether-ceiling fix). Anchored to the guard's own current Y, a real position it's already standing at. */
+    private static BlockPos surfacePos(ServerLevel level, int x, int z, double referenceY) {
+        int y = com.github.cerealklla.settlemynts.util.GroundHeightFinder.findNear(level, x, z, Mth.floor(referenceY));
         return new BlockPos(x, y, z);
     }
 }

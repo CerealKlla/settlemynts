@@ -7,11 +7,11 @@ import com.github.cerealklla.cartographyr.geo.Classification;
 import com.github.cerealklla.cartographyr.geo.EntityType;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Layer;
+import com.github.cerealklla.settlemynts.util.GroundHeightFinder;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Settlement founding (design doc Section 5): the minimum-distance check against existing
@@ -133,10 +133,11 @@ public final class SettlementFounding {
             for (int dz = -CONSTRUCTION_SITE_RADIUS; dz <= CONSTRUCTION_SITE_RADIUS; dz++) {
                 int columnX = center.getX() + dx;
                 int columnZ = center.getZ() + dz;
-                // MOTION_BLOCKING_NO_LEAVES, not WORLD_SURFACE -- WORLD_SURFACE lands on leaves/plants,
-                // which would start the clear too high and leave real ground-level vegetation standing
-                // (2026-09-30 fix, same root cause as PlotSitePlacement's own comment).
-                int surfaceY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, columnX, columnZ);
+                // GroundHeightFinder, not a raw Heightmap lookup -- a raw lookup scans from the
+                // level's absolute top, which is the Nether's solid bedrock roof, not real ground
+                // (2026-10-29 fix; see that class's own doc for the full incident). Anchored to
+                // center's own real Y, since that's exactly where the claim flag was placed.
+                int surfaceY = GroundHeightFinder.findNear(level, columnX, columnZ, center.getY());
                 for (int y = surfaceY; y < surfaceY + CLEAR_HEIGHT; y++) {
                     BlockPos pos = new BlockPos(columnX, y, columnZ);
                     if (!level.getBlockState(pos).isAir()) {

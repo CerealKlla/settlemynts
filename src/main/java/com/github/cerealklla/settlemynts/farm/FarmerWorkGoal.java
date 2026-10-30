@@ -22,7 +22,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * A Farm worker's actual job (added 2026-10-05, explicit user request: till/plant in rows, harvest
@@ -240,7 +239,9 @@ public class FarmerWorkGoal extends Goal {
                 if (scanned++ > MAX_COLUMNS_SCANNED) {
                     return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false);
                 }
-                int topY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                // GroundHeightFinder, not a raw Heightmap lookup -- see that class's own doc
+                // (2026-10-29 Nether-ceiling fix). Anchored to the worker's own current Y.
+                int topY = com.github.cerealklla.settlemynts.util.GroundHeightFinder.findNear(level, x, z, (int) Math.floor(worker.getY()));
                 BlockPos topSolid = new BlockPos(x, topY - 1, z);
                 BlockState topState = level.getBlockState(topSolid);
 

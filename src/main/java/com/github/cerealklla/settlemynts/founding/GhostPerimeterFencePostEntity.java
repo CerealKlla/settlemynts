@@ -88,12 +88,19 @@ public class GhostPerimeterFencePostEntity extends Display.BlockDisplay {
             return;
         }
         List<Geometry.Polygon.Vertex> blockPath = new ArrayList<>();
+        double stakeYTotal = 0.0D;
         for (int i = 0; i < stakes.size() - 1; i++) {
             Geometry.Polygon.Vertex a = new Geometry.Polygon.Vertex((int) Math.floor(stakes.get(i).getX()), (int) Math.floor(stakes.get(i).getZ()));
             Geometry.Polygon.Vertex b = new Geometry.Polygon.Vertex((int) Math.floor(stakes.get(i + 1).getX()), (int) Math.floor(stakes.get(i + 1).getZ()));
             blockPath.addAll(Geometry.Polygon.supercoverLine(a, b));
+            stakeYTotal += stakes.get(i).getY();
         }
-        FencePostConnections.spawnConnected(level, blockPath,
+        stakeYTotal += stakes.get(stakes.size() - 1).getY();
+        // Real user fix, 2026-10-29: anchor the whole fence line near the average of the real
+        // stakes' own Y, not each path column's own independent (and Nether-unsafe) scan -- see
+        // FencePostConnections#spawnConnected's own doc.
+        int referenceY = (int) Math.round(stakeYTotal / stakes.size());
+        FencePostConnections.spawnConnected(level, blockPath, referenceY,
                 (lvl, x, y, z, state) -> create(lvl, x, y, z, core.getUUID(), state));
     }
 

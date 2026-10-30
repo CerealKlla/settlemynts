@@ -65,6 +65,7 @@ import com.github.cerealklla.settlemynts.zone.RequestRoadAccessFlagPayload;
 import com.github.cerealklla.settlemynts.zone.SetShowPlotPerimetersPayload;
 import com.github.cerealklla.settlemynts.zone.ZoneType;
 import com.github.cerealklla.settlemynts.zone.ZoneTypeRegistry;
+import com.github.cerealklla.settlemynts.util.GroundHeightFinder;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -75,7 +76,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -3598,11 +3598,9 @@ public class SettlemyntsMod {
             }
 
             for (Geometry.Polygon.Vertex block : Geometry.Polygon.outerRing(polygon)) {
-                // MOTION_BLOCKING_NO_LEAVES, not WORLD_SURFACE -- see PlotSitePlacement's own comment;
-                // a wall point under a tree canopy used to start floating up in the leaves instead of
-                // on the real ground (2026-09-30 playtest report: "they should build from the ground
-                // up... they can be inside other blocks").
-                int groundY = serverLevel.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, block.x(), block.z());
+                // GroundHeightFinder, not a raw Heightmap lookup -- see that class's own doc
+                // (2026-10-29 Nether-ceiling fix). Anchored to the real Town Hall Core's own Y.
+                int groundY = GroundHeightFinder.findNear(serverLevel, block.x(), block.z(), (int) Math.floor(core.getY()));
                 for (int level = 0; level < GhostPlotWallEntity.WALL_HEIGHT_BLOCKS; level++) {
                     // No +0.5 centering here (fixed 2026-09-27, playtest feedback: the glass wasn't
                     // stacked on the block below it, offset by half a block) -- a Display.BlockDisplay
@@ -3716,8 +3714,8 @@ public class SettlemyntsMod {
             // 2026-09-26, playtest feedback -- varying terrain along the perimeter made single
             // fixed-height blocks read as scattered floating icons, not a wall). A short vertical
             // stack per point gives a real "wall" silhouette even where the ground itself slopes.
-            // MOTION_BLOCKING_NO_LEAVES, not WORLD_SURFACE -- same fix as setShowPlotPerimeters above.
-            int groundY = serverLevel.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, block.x(), block.z());
+            // GroundHeightFinder, not a raw Heightmap lookup -- same fix as setShowPlotPerimeters above.
+            int groundY = GroundHeightFinder.findNear(serverLevel, block.x(), block.z(), (int) Math.floor(core.getY()));
             for (int level = 0; level < GhostBoundaryWallEntity.WALL_HEIGHT_BLOCKS; level++) {
                 // No +0.5 centering -- see the identical fix/comment in setShowPlotPerimeters, same date.
                 GhostBoundaryWallEntity.create(serverLevel, block.x(), groundY + level, block.z(), core.getUUID());

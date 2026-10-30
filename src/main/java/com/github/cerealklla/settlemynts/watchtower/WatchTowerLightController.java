@@ -10,7 +10,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LightBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
+
+import com.github.cerealklla.settlemynts.util.GroundHeightFinder;
 
 /**
  * Places/removes the real {@link Blocks#LIGHT} grid a Beacon's current radius calls for -- see
@@ -59,7 +60,7 @@ public final class WatchTowerLightController {
                     if (!level.hasChunkAt(new BlockPos(x, 0, z))) {
                         continue; // Retried for free on the next minute's recompute -- see class doc.
                     }
-                    int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                    int y = GroundHeightFinder.findNear(level, x, z, center.getY());
                     BlockPos pos = new BlockPos(x, y, z);
                     if (!level.isInWorldBounds(pos)) {
                         continue;

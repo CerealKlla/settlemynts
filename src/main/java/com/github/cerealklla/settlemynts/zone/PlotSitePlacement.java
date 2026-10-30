@@ -2,11 +2,11 @@ package com.github.cerealklla.settlemynts.zone;
 
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.cartographyr.geo.PlotValidity;
+import com.github.cerealklla.settlemynts.util.GroundHeightFinder;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Finds the buildable site a plot's Building Supply Box (and, alongside it, its Plot Config Sign)
@@ -81,12 +81,10 @@ public final class PlotSitePlacement {
         if (bestTowardBlue == null) {
             return null;
         }
-        // MOTION_BLOCKING_NO_LEAVES, not WORLD_SURFACE -- WORLD_SURFACE lands on *any* non-air block
-        // in the column, including leaves and non-solid plants (tall grass, flowers), so a site under
-        // a tree canopy (or sitting on a patch of grass) put the box/sign floating up in the leaves
-        // instead of on the real ground (2026-09-30 playtest report, screenshot showing the box/sign
-        // spawned inside a tree's canopy). MOTION_BLOCKING_NO_LEAVES skips both.
-        int groundY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, bestX, bestZ);
+        // GroundHeightFinder, not a raw Heightmap lookup -- see that class's own doc (2026-10-29
+        // Nether-ceiling fix). Anchored to the Road Access Flag's own real Y, since that's a real
+        // player-placed position (raycast-placed, not heightmap-derived) right next to this site.
+        int groundY = GroundHeightFinder.findNear(level, bestX, bestZ, roadFlagPos.getY());
         return new Site(new BlockPos(bestX, groundY, bestZ), bestTowardBlue, grid, minX, minZ, maxX, maxZ);
     }
 

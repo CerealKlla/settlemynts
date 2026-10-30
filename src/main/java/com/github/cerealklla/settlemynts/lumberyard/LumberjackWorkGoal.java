@@ -20,7 +20,6 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * A Lumberyard worker's actual job (added 2026-10-05, explicit user request) -- one self-contained
@@ -386,7 +385,9 @@ public class LumberjackWorkGoal extends Goal {
             if (scanned++ > MAX_COLUMNS_SCANNED) {
                 return firstPlantCandidate == null ? null : new WorkTarget(firstPlantCandidate, false, null, null);
             }
-            int topY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+            // GroundHeightFinder, not a raw Heightmap lookup -- see that class's own doc (2026-10-29
+            // Nether-ceiling fix). Anchored to the worker's own current Y.
+            int topY = com.github.cerealklla.settlemynts.util.GroundHeightFinder.findNear(level, x, z, workerPos.getY());
             BlockPos topSolid = new BlockPos(x, topY - 1, z);
             BlockState topState = level.getBlockState(topSolid);
             if (topState.is(BlockTags.LOGS)) {

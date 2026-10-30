@@ -5,12 +5,12 @@ import java.util.List;
 import java.util.Set;
 
 import com.github.cerealklla.cartographyr.geo.Geometry;
+import com.github.cerealklla.settlemynts.util.GroundHeightFinder;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CrossCollisionBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Shared logic for turning a block path (a sequence of positions from Cartographyr's
@@ -33,12 +33,20 @@ public final class FencePostConnections {
     /**
      * For each position in {@code blockPath}, computes a fence {@link BlockState} whose connection
      * properties reflect whether each cardinal neighbor is *also* in the path, then hands it to
-     * {@code spawner} at that position's own local ground height. Consecutive positions in a
+     * {@code spawner} at a ground height near {@code referenceY}. Consecutive positions in a
      * Cartographyr supercover-line walk are always exactly orthogonally adjacent (never a pure
      * diagonal jump), so a diagonal run connects correctly as a proper zig-zagging staircase of
      * fence segments, not a row of disconnected posts.
+     *
+     * @param referenceY real bug fix, 2026-10-29 -- used to be each vertex's own independent
+     *                    {@code Heightmap} lookup, which breaks in the Nether (see {@link
+     *                    GroundHeightFinder}'s own doc). The caller passes the average Y of the real
+     *                    stakes this path connects, per the user's own fix: searching near that
+     *                    shared average keeps the whole fence line anchored to one sane height even
+     *                    if one path column's own blind top-down scan would've landed somewhere
+     *                    wrong, rather than letting each vertex drift independently.
      */
-    public static void spawnConnected(ServerLevel level, List<Geometry.Polygon.Vertex> blockPath, Spawner spawner) {
+    public static void spawnConnected(ServerLevel level, List<Geometry.Polygon.Vertex> blockPath, int referenceY, Spawner spawner) {
         Set<Long> present = new HashSet<>();
         for (Geometry.Polygon.Vertex v : blockPath) {
             present.add(pack(v.x(), v.z()));
@@ -49,10 +57,7 @@ public final class FencePostConnections {
                     .setValue(CrossCollisionBlock.SOUTH, present.contains(pack(v.x(), v.z() + 1)))
                     .setValue(CrossCollisionBlock.WEST, present.contains(pack(v.x() - 1, v.z())))
                     .setValue(CrossCollisionBlock.EAST, present.contains(pack(v.x() + 1, v.z())));
-            // MOTION_BLOCKING_NO_LEAVES, not WORLD_SURFACE -- WORLD_SURFACE lands on leaves/non-solid
-            // plants, floating this preview post above the real ground under a tree (2026-09-30 fix,
-            // same root cause as PlotSitePlacement's own comment).
-            int groundY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, v.x(), v.z());
+            int groundY = GroundHeightFinder.findNear(level, v.x(), v.z(), referenceY);
             spawner.spawn(level, v.x(), groundY, v.z(), state);
         }
     }

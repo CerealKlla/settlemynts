@@ -78,9 +78,13 @@ public class GhostRoadAccessPreviewEntity extends Display.BlockDisplay {
         for (GhostRoadAccessPreviewEntity existing : findByViewer(level, viewerId)) {
             existing.discard();
         }
+        // GroundHeightFinder, not a raw Heightmap lookup -- see that class's own doc (2026-10-29
+        // Nether-ceiling fix). Anchored to the real viewing player's own Y, since they're the one
+        // standing right next to where these markers belong.
+        ServerPlayer viewer = level.getServer().getPlayerList().getPlayer(viewerId);
+        int referenceY = viewer != null ? (int) Math.floor(viewer.getY()) : level.getSeaLevel();
         for (Geometry.Polygon.Vertex cell : cells) {
-            // MOTION_BLOCKING_NO_LEAVES, not WORLD_SURFACE -- same fix as PlotSitePlacement's own comment.
-            int groundY = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, cell.x(), cell.z());
+            int groundY = com.github.cerealklla.settlemynts.util.GroundHeightFinder.findNear(level, cell.x(), cell.z(), referenceY);
             create(level, cell.x(), groundY, cell.z(), viewerId);
         }
     }

@@ -8,7 +8,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Confines a {@link ResidentVillagerEntity}'s wandering to its own plot's "Town Proper" buffer
@@ -84,10 +83,10 @@ public class ResidentPatrolGoal extends Goal {
                 int x = centerX + resident.getRandom().nextInt(5) - 2;
                 int z = centerZ + resident.getRandom().nextInt(5) - 2;
                 if (area.contains(x, z)) {
-                    return surfacePos(level, x, z);
+                    return surfacePos(level, x, z, resident.getY());
                 }
             }
-            return surfacePos(level, centerX, centerZ);
+            return surfacePos(level, centerX, centerZ, resident.getY());
         }
 
         int rangeX = Math.max(1, maxX - minX + 1);
@@ -96,14 +95,15 @@ public class ResidentPatrolGoal extends Goal {
             int x = minX + resident.getRandom().nextInt(rangeX);
             int z = minZ + resident.getRandom().nextInt(rangeZ);
             if (area.contains(x, z)) {
-                return surfacePos(level, x, z);
+                return surfacePos(level, x, z, resident.getY());
             }
         }
         return null;
     }
 
-    private static BlockPos surfacePos(ServerLevel level, int x, int z) {
-        int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+    /** GroundHeightFinder, not a raw Heightmap lookup -- see that class's own doc (2026-10-29 Nether-ceiling fix). Anchored to the resident's own current Y, a real position it's already standing at. */
+    private static BlockPos surfacePos(ServerLevel level, int x, int z, double referenceY) {
+        int y = com.github.cerealklla.settlemynts.util.GroundHeightFinder.findNear(level, x, z, Mth.floor(referenceY));
         return new BlockPos(x, y, z);
     }
 }
