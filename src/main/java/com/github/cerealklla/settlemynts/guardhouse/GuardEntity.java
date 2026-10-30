@@ -237,6 +237,10 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         // "Guards should be able to pick up loose items off the ground and immediately store them in
         // the storage boxes on the plot they are assigned to" (explicit user spec, 2026-10-16).
         this.goalSelector.addGoal(3, new GuardPickUpItemsGoal(this));
+        // "Put out fires they can see within a certain distance when they reach a destination"
+        // (explicit user spec, 2026-10-30) -- see GuardExtinguishFireGoal's own doc for why this
+        // priority tier alone already gives it "when they reach a destination" timing for free.
+        this.goalSelector.addGoal(3, new GuardExtinguishFireGoal(this));
         this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
 
