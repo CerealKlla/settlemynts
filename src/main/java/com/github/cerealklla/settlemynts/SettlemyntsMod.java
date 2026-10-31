@@ -188,6 +188,10 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardEquipBoxChangeListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardKitStandRemovalListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardKillGoldPayment());
+        // Real report, 2026-10-30: a guard crossing a portal back home could land stuck inside the
+        // portal block itself, same root cause as Caryvan's own Wagon-follows-portal fix -- see
+        // that class's own doc.
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.guardhouse.GuardPortalClearanceListener());
         // PlotShopProximityTicker is no longer a tick-event subscriber as of 2026-10-12 -- it's
         // purely static now, driven by ProximityScanPayload instead of PlayerTickEvent (see its own
         // doc). No registration needed here any more.
