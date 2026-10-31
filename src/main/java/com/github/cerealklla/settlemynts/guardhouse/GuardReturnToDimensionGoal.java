@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Real user spec, 2026-10-29: a Guard that ends up outside its home dimension (e.g. chasing a
@@ -52,8 +53,23 @@ import net.minecraft.world.level.Level;
  * target at all; the weapon/spell goals only want to run when there genuinely is one), same
  * established pattern this class already uses between {@link GuardPatrolAreaGoal} and the weapon
  * goals.
+ *
+ * <p><b>Real bug fix, 2026-10-30</b> -- "a bunch of guards are just standing here" (screenshot of
+ * several Guards clustered around, but not inside, a Nether portal). Root cause: every stranded
+ * guard pathed to the exact same single portal interior block and relied entirely on vanilla's own
+ * entity-overlaps-the-portal-block detection to actually cross -- fine for one guard, but several
+ * arriving at once jostle/push each other off that one block via ordinary entity collision before
+ * any of them can sit still long enough to register as "inside" it, so they end up loitering next
+ * to the portal instead of crossing. Fixed by snapping a guard directly onto the portal block
+ * ({@link #SNAP_TRIGGER_DISTANCE_BLOCKS}, 2 blocks out, well short of melee/spell engagement range)
+ * once navigation has closed most of the distance, rather than requiring it to physically walk the
+ * last stretch in — vanilla's own in-portal/dimension-crossing logic (unchanged, see this class's
+ * own "deliberately not portal-blocking/immune" note above) still does the actual crossing from
+ * there, this just removes the crowding that was preventing it from ever starting.
  */
 public final class GuardReturnToDimensionGoal extends Goal {
+
+    private static final double SNAP_TRIGGER_DISTANCE_BLOCKS = 2.0D;
 
     private final GuardEntity guard;
     private final double speedModifier;
@@ -123,6 +139,17 @@ public final class GuardReturnToDimensionGoal extends Goal {
     @Override
     public void stop() {
         portalTarget = null;
+    }
+
+    @Override
+    public void tick() {
+        if (portalTarget == null) {
+            return;
+        }
+        Vec3 portalCenter = Vec3.atCenterOf(portalTarget);
+        if (guard.position().closerThan(portalCenter, SNAP_TRIGGER_DISTANCE_BLOCKS)) {
+            guard.teleportTo(portalCenter.x, portalTarget.getY(), portalCenter.z);
+        }
     }
 
     private BlockPos findNearestPortal(ServerLevel level) {
