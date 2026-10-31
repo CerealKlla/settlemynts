@@ -49,10 +49,25 @@ public final class GuardSpellCastGoal extends Goal {
     private static final float TOP_OFF_HEAL_THRESHOLD = 1.0F;
 
     private final GuardEntity guard;
+    // Real report, 2026-10-30: "everything is stuttering like the server is crashing" while several
+    // guards simultaneously tried to heal a low-health player. Root cause: engage() unconditionally
+    // called getNavigation().moveTo(target, ...) every single tick while out of range/line of sight,
+    // with no check for whether a path was already actively being followed -- a full repath toward a
+    // CONSTANTLY MOVING target (the player walking around), every tick, for every engaged guard at
+    // once. Same `repathCooldown` pattern FarmerWorkGoal/MinerWorkGoal/LumberjackWorkGoal already use
+    // for this exact reason, reused here rather than invented fresh -- only the multi-guard
+    // concurrent-healing behavior itself is explicitly NOT touched (that's intentional, "the whole
+    // point of giving multiple guards the ability to heal... so they can focus heal someone fast").
+    private int repathCooldown;
 
     public GuardSpellCastGoal(GuardEntity guard) {
         this.guard = guard;
         setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
+    }
+
+    @Override
+    public void start() {
+        repathCooldown = 0;
     }
 
     // Temporary instrumentation (2026-10-21) -- see diagnostics.TickProfiler's own doc. This goal is
@@ -139,7 +154,13 @@ public final class GuardSpellCastGoal extends Goal {
         // target whenever the shot isn't both in range AND clear -- lets the pathfinder route around
         // whatever's blocking line of sight instead of standing still.
         if (distanceSqr > CAST_RANGE_SQR || !lineOfSight) {
-            guard.getNavigation().moveTo(target, 1.0);
+            // Throttled -- see this class's own field doc for #repathCooldown. Only issues a fresh
+            // repath once the current one has actually finished (isDone()) AND the cooldown has
+            // elapsed, instead of recomputing a path toward a moving target every single tick.
+            if (guard.getNavigation().isDone() && repathCooldown-- <= 0) {
+                guard.getNavigation().moveTo(target, 1.0);
+                repathCooldown = 20;
+            }
         } else {
             guard.getNavigation().stop();
         }
