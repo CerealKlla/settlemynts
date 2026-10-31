@@ -253,6 +253,19 @@ public class RoadwayStakeEntity extends Display.BlockDisplay implements StakeNod
         claimedByGuardId = null;
     }
 
+    /**
+     * Debug visibility only, 2026-10-31 -- real user hypothesis while chasing a stuck-guard report:
+     * "since there are only 3 stakes on the roads they are all accounted for" (i.e. every stake
+     * permanently claimed by some other guard's in-progress route, starving a settlement with more
+     * active patrollers than stakes). {@link #claimedByGuardId}/{@link #claimedAtGameTime} are
+     * deliberately not persisted (see that field's own doc), so nothing could previously confirm or
+     * rule this out from outside -- used by {@code debug.DebugCommands}' new {@code /settlemynts
+     * stakeinfo}.
+     */
+    public UUID claimedByGuardId() {
+        return claimedByGuardId;
+    }
+
     public static List<RoadwayStakeEntity> findByOwnerCore(ServerLevel level, UUID coreId) {
         Entity core = level.getEntity(coreId);
         if (core == null) {

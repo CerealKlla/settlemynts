@@ -26,6 +26,7 @@ import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.roadway.HighwayConnectionMarkerEntity;
 import com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity;
 import com.github.cerealklla.settlemynts.roadway.HighwayStakeGraph;
+import com.github.cerealklla.settlemynts.roadway.RoadwayStakeEntity;
 import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
 import com.github.cerealklla.settlemynts.zone.GhostPlotStakeEntity;
 import com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore;
@@ -91,6 +92,8 @@ public final class DebugCommands {
                         .executes(ctx -> plotInfo(ctx.getSource())))
                 .then(Commands.literal("guardinfo")
                         .executes(ctx -> guardInfo(ctx.getSource())))
+                .then(Commands.literal("stakeinfo")
+                        .executes(ctx -> stakeInfo(ctx.getSource())))
                 .then(Commands.literal("checkavailable")
                         .then(Commands.argument("itemId", StringArgumentType.string())
                                 .executes(ctx -> checkAvailable(ctx.getSource(), StringArgumentType.getString(ctx, "itemId")))))
@@ -1105,6 +1108,41 @@ public final class DebugCommands {
                 + " | Navigation done: " + guard.getNavigation().isDone()), false);
         List<String> activeGoals = guard.describeActiveGoals();
         source.sendSuccess(() -> Component.literal("  Active goals: " + (activeGoals.isEmpty() ? "(none)" : String.join(", ", activeGoals))), false);
+        return 1;
+    }
+
+    /**
+     * {@code /settlemynts stakeinfo} -- added 2026-10-31, real user hypothesis while chasing the
+     * same stuck-guard report {@link #guardInfo} was built for: "since there are only 3 stakes on
+     * the roads they are all accounted for" -- i.e. every stake permanently claimed by some other
+     * guard's in-progress route, starving a settlement with more active patrollers than stakes.
+     * {@link RoadwayStakeEntity#claimedByGuardId()} is deliberately never persisted to NBT, so no
+     * existing tool could confirm or rule this out. Lists every loaded stake near the executing
+     * player: position, owning settlement core, last-visited game time, and current claim state.
+     */
+    private static int stakeInfo(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof LivingEntity executor) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world."));
+            return 0;
+        }
+        AABB searchBounds = new AABB(executor.getX() - NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), executor.getZ() - NEAREST_CORE_SEARCH_RADIUS,
+                executor.getX() + NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), executor.getZ() + NEAREST_CORE_SEARCH_RADIUS);
+        List<RoadwayStakeEntity> stakes = level.getEntities(ModEntities.ROADWAY_STAKE.get(), searchBounds, s -> true);
+        if (stakes.isEmpty()) {
+            source.sendFailure(Component.literal("No loaded Roadway Stake found nearby."));
+            return 0;
+        }
+        long now = level.getGameTime();
+        source.sendSuccess(() -> Component.literal(stakes.size() + " loaded stake(s) within " + (int) NEAREST_CORE_SEARCH_RADIUS + " blocks:"), false);
+        for (RoadwayStakeEntity stake : stakes) {
+            UUID claimedBy = stake.claimedByGuardId();
+            String claimText = claimedBy == null ? "unclaimed"
+                    : (stake.isClaimed(now) ? "CLAIMED by " + claimedBy : "claim expired (" + claimedBy + ")");
+            String line = "  - " + stake.blockPosition().toShortString() + " owner=" + stake.getOwnerCoreId()
+                    + " lastVisited=" + stake.lastVisitedGameTime() + " (" + (now - stake.lastVisitedGameTime()) + " ticks ago) "
+                    + claimText;
+            source.sendSuccess(() -> Component.literal(line), false);
+        }
         return 1;
     }
 
