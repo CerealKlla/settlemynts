@@ -109,9 +109,33 @@ public class GuardPatrolAreaGoal extends Goal {
         setFlags(EnumSet.of(Flag.MOVE));
     }
 
+    /**
+     * Real report, 2026-10-30, root-caused via live RCON inspection rather than guessed: a guard
+     * astray outside its home dimension (e.g. "Starterville"'s own guard currently standing in
+     * "Hellmouth," a different settlement in a different dimension -- confirmed directly off its
+     * real NBT, {@code HomeDimension: "minecraft:overworld"} while physically in the Nether) kept
+     * this goal thrashing every tick -- {@link #buildRoadRoute} tries {@code
+     * level.getEntity(settlementCoreId)} against whatever level the guard is CURRENTLY standing in,
+     * which can never find a settlement core that genuinely lives in a different dimension, no
+     * matter how long it's loaded there. Not a chunk-loading bug (confirmed live: both cores
+     * involved were loaded, correctly resolvable by UUID, right when this was failing) -- the goal
+     * simply never checked whether the guard was home before trying.
+     *
+     * <p>{@link GuardEntity#homeDimension()} already tracks exactly this (set once at spawn,
+     * already consumed by {@link GuardReturnToDimensionGoal#isStrandedWithNoTarget}) -- reused here
+     * rather than adding a second, redundant dimension-tracking mechanism. An astray guard now
+     * correctly yields this goal entirely; {@link GuardReturnToDimensionGoal} (priority 2, above
+     * this goal's own priority 3) is the one actually responsible for getting it home.
+     */
     @Override
     public boolean canUse() {
-        return guard.getNavigation().isDone() && guard.level() instanceof ServerLevel;
+        if (!(guard.level() instanceof ServerLevel level)) {
+            return false;
+        }
+        if (guard.homeDimension() != null && level.dimension() != guard.homeDimension()) {
+            return false;
+        }
+        return guard.getNavigation().isDone();
     }
 
     // "Reached" a waypoint -- checked explicitly rather than relying solely on vanilla's own
