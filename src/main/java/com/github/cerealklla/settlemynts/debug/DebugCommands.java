@@ -89,6 +89,8 @@ public final class DebugCommands {
                 .requires(source -> true) // deliberately no permission gate -- see class doc
                 .then(Commands.literal("plotinfo")
                         .executes(ctx -> plotInfo(ctx.getSource())))
+                .then(Commands.literal("guardinfo")
+                        .executes(ctx -> guardInfo(ctx.getSource())))
                 .then(Commands.literal("checkavailable")
                         .then(Commands.argument("itemId", StringArgumentType.string())
                                 .executes(ctx -> checkAvailable(ctx.getSource(), StringArgumentType.getString(ctx, "itemId")))))
@@ -1059,6 +1061,50 @@ public final class DebugCommands {
             String line = "  - \"" + plot.name() + "\": " + vertexInfo;
             source.sendSuccess(() -> Component.literal(line), false);
         }
+        return 1;
+    }
+
+    /**
+     * {@code /settlemynts guardinfo} -- added 2026-10-30, explicit user request while chasing a real
+     * live bug: a guard standing frozen for several real minutes, with no logged failure and nothing
+     * obviously wrong in its own saved fields -- the only remaining way to see WHY was to see which
+     * {@code Goal} currently actually holds it, which no existing tool exposed. Reports the nearest
+     * loaded {@link GuardEntity} to the executing player: its home dimension, settlement/plot
+     * identity, current attack target, navigation state, and every currently-running AI goal (see
+     * {@link GuardEntity#describeActiveGoals()}).
+     */
+    private static int guardInfo(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof LivingEntity executor) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world."));
+            return 0;
+        }
+        AABB searchBounds = new AABB(executor.getX() - NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), executor.getZ() - NEAREST_CORE_SEARCH_RADIUS,
+                executor.getX() + NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), executor.getZ() + NEAREST_CORE_SEARCH_RADIUS);
+        List<GuardEntity> guards = level.getEntities(ModEntities.GUARD.get(), searchBounds, g -> true);
+        GuardEntity nearest = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (GuardEntity candidate : guards) {
+            double distSq = candidate.distanceToSqr(executor);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                nearest = candidate;
+            }
+        }
+        if (nearest == null) {
+            source.sendFailure(Component.literal("No loaded Guard found nearby."));
+            return 0;
+        }
+
+        GuardEntity guard = nearest;
+        source.sendSuccess(() -> Component.literal("Guard " + guard.getUUID() + " at " + guard.blockPosition().toShortString()
+                + " (" + Math.sqrt(guard.distanceToSqr(executor)) + " blocks away)"), false);
+        source.sendSuccess(() -> Component.literal("  HomeDimension: " + guard.homeDimension()
+                + " | Current: " + level.dimension().identifier()), false);
+        source.sendSuccess(() -> Component.literal("  SettlementCoreId: " + guard.getSettlementCoreId() + " | PlotId: " + guard.plotId()), false);
+        source.sendSuccess(() -> Component.literal("  Target: " + guard.getTarget()
+                + " | Navigation done: " + guard.getNavigation().isDone()), false);
+        List<String> activeGoals = guard.describeActiveGoals();
+        source.sendSuccess(() -> Component.literal("  Active goals: " + (activeGoals.isEmpty() ? "(none)" : String.join(", ", activeGoals))), false);
         return 1;
     }
 

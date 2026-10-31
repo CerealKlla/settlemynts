@@ -190,6 +190,25 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         return settlementCoreId;
     }
 
+    /**
+     * Real debug need, 2026-10-30: "I have seen the same 2 guards not move for several minutes
+     * now" -- several real stuck-guard bugs this same session were each only findable by reading
+     * live diagnostic log output or raw NBT, and this particular case produced neither (no logged
+     * failure, no obviously-wrong field) -- the only remaining way to see WHY a guard isn't moving
+     * is to see which {@code Goal} currently actually holds it. {@code goalSelector} is inherited
+     * {@code protected} from {@code Mob}, so this is the one place that can read it. Used by {@code
+     * debug.DebugCommands}' new {@code /settlemynts guardinfo}.
+     */
+    public List<String> describeActiveGoals() {
+        List<String> active = new java.util.ArrayList<>();
+        for (net.minecraft.world.entity.ai.goal.WrappedGoal wrapped : this.goalSelector.getAvailableGoals()) {
+            if (wrapped.isRunning()) {
+                active.add(wrapped.getGoal().getClass().getSimpleName() + " (priority " + wrapped.getPriority() + ")");
+            }
+        }
+        return active;
+    }
+
     /** This guard's own assigned plot -- used by {@code GuardPickUpItemsGoal}/{@code GuardLootDeposit} to find where to store picked-up loot. */
     public UUID plotId() {
         return plotId;
