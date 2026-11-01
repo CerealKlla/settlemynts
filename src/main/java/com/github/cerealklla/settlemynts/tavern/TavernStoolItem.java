@@ -78,8 +78,19 @@ public class TavernStoolItem extends Item {
         }
 
         LyfeTavernBridge.placeStool(serverLevel, placePos);
-        TavernStoolIndex.get(serverLevel.getServer()).put(
-                GlobalPos.of(serverLevel.dimension(), placePos), data.settlementCoreId(), data.plotId());
+        GlobalPos globalPos = GlobalPos.of(serverLevel.dimension(), placePos);
+        TavernStoolIndex.get(serverLevel.getServer()).put(globalPos, data.settlementCoreId(), data.plotId());
+
+        // Spawn immediately rather than waiting for the next daily refresh -- see
+        // TavernDailySpawnTicker#spawnNpc's own doc for why this matters.
+        int boxTier = net.neoforged.fml.ModList.get().isLoaded("blueprynts")
+                ? com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveTier(serverLevel, containing)
+                : 0;
+        if (TavernConstants.stoolCountForTier(boxTier) > 0) {
+            TavernDailySpawnTicker.spawnNpc(serverLevel, globalPos,
+                    new TavernStoolIndex.StoolInfo(data.settlementCoreId(), data.plotId(), java.util.Optional.empty()),
+                    boxTier);
+        }
 
         held.shrink(1);
         return InteractionResult.SUCCESS_SERVER;

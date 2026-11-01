@@ -33,7 +33,14 @@ public final class TavernDailySpawnTicker {
 
     private static final long TICKS_PER_DAY = 24000L;
 
+    // A few seconds' grace after boot before the one-time startup catch-up pass runs, so nearby
+    // chunks/entities actually have time to load first -- an otherwise-eligible stool whose chunk
+    // still isn't loaded even then is silently skipped, same accepted limitation as every other scan
+    // here (see this class's own doc).
+    private static final int STARTUP_DELAY_TICKS = 100;
+
     private long lastKnownDay = -1;
+    private boolean startupPassRun = false;
 
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
@@ -41,12 +48,20 @@ public final class TavernDailySpawnTicker {
         long currentDay = Math.floorDiv(server.overworld().getOverworldClockTime(), TICKS_PER_DAY);
         if (lastKnownDay < 0) {
             lastKnownDay = currentDay;
-            return;
         }
-        if (currentDay <= lastKnownDay) {
+        boolean dayBoundaryCrossed = currentDay > lastKnownDay;
+        // Runs once, shortly after each server (re)start, so a stool left empty by the restart (or
+        // placed before this ticker's first real day boundary) gets filled right away instead of
+        // waiting out a full in-game day -- a real bug, caught 2026-10-31 ("I don't see any NPCs
+        // spawning"): this ticker previously only ever baselined on its first tick, never spawned.
+        boolean startupCatchUp = !startupPassRun && server.getTickCount() >= STARTUP_DELAY_TICKS;
+        if (!dayBoundaryCrossed && !startupCatchUp) {
             return;
         }
         lastKnownDay = currentDay;
+        if (startupCatchUp) {
+            startupPassRun = true;
+        }
 
         if (!LyfeTavernBridge.isLoaded()) {
             return;
@@ -87,7 +102,15 @@ public final class TavernDailySpawnTicker {
         spawnNpc(level, pos, info, boxTier);
     }
 
-    private void spawnNpc(ServerLevel level, GlobalPos pos, TavernStoolIndex.StoolInfo info, int tier) {
+    /**
+     * Rolls and seats a fresh NPC on a currently-empty stool -- shared by the daily refresh above and
+     * {@link TavernStoolItem#useOn}, which calls this directly the moment a stool is placed so a
+     * freshly-placed stool doesn't sit empty until the next in-game day boundary (a real bug, caught
+     * 2026-10-31: {@link #onServerTick}'s very first tick after each server start only ever baselines
+     * {@link #lastKnownDay} without spawning, so newly placed stools showed nothing for up to a full
+     * day).
+     */
+    static void spawnNpc(ServerLevel level, GlobalPos pos, TavernStoolIndex.StoolInfo info, int tier) {
         TavernNpcEntity npc = new TavernNpcEntity(
                 com.github.cerealklla.settlemynts.registration.ModEntities.TAVERN_NPC.get(), level);
         var blockPos = pos.pos();
