@@ -39,19 +39,58 @@ import net.minecraft.resources.Identifier;
  * Guardhouse-typed plot, {@code 0} otherwise. Gates/labels the new "Get Guard Kit Stands" button --
  * only shown when {@code > 0} (alongside the existing {@code canManage}/{@code hasGarrison} gate).
  *
- * <p>{@code isMineshaft} (added 2026-10-23, Mineshaft Specialization + tabbed Plot Config Sign
- * rework) -- {@code true} only for a Mineshaft-typed plot ({@code
- * zone.PlotWorkerKind#MINESHAFT_ZONE_TYPE_ID}). Gates the new "Specialization" (Ore/Stone) control
- * inside {@code client.ConfigureTab}.
+ * <p>{@code zoneTypeFlags} (added 2026-10-31, replacing four separate top-level booleans --
+ * {@code isMineshaft}/{@code isFarm}/{@code isLumberyard} plus the new {@code isTavern}) -- {@link
+ * StreamCodec#composite} has a real fixed 12-argument-group ceiling (confirmed directly: a 13th
+ * field fails to compile, "cannot infer type-variable(s)... actual and formal argument lists differ
+ * in length" -- the exact same arity-limit shape {@code zone.PlotRecord}'s own 16-field {@code
+ * RecordCodecBuilder} ceiling already hit once), and this payload was already sitting at that limit
+ * with 12 fields before this change. A single bitmask int frees three slots at once (down to one),
+ * leaving headroom for {@code isTavern} plus any future single-purpose zone-type flag without
+ * needing yet another workaround. {@link #zoneFlags} packs the booleans at construction time;
+ * {@link #isMineshaft()}/{@link #isFarm()}/{@link #isLumberyard()}/{@link #isTavern()} unpack them
+ * with the exact same accessor names every existing call site (every {@code client.*Tab}) already
+ * used before this change, so none of them needed editing.
  *
- * <p>{@code isFarm}/{@code isLumberyard} (added 2026-10-28, Plant Selection, "similar way to the
- * Mine") -- gate the new per-slot Seed/Sapling Plant Selection control inside {@code
- * client.ConfigureTab}, same shape as {@code isMineshaft}'s own gate.
+ * <p>{@code tavernStoolsAvailable} (added 2026-10-31, Tavern Plot Type, design doc Section 17) --
+ * same shape as {@code guardKitStandsAvailable} above, for the new "Get Tavern Stools" button on
+ * {@code client.TavernTab}.
  */
 public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage, boolean hasGarrison, boolean isTownHall,
                                              boolean hasConstructionBox, int tier, int maxPlotTier, boolean canHireNpc,
-                                             int guardKitStandsAvailable, boolean isMineshaft, boolean isFarm,
-                                             boolean isLumberyard) implements CustomPacketPayload {
+                                             int guardKitStandsAvailable, int zoneTypeFlags,
+                                             int tavernStoolsAvailable) implements CustomPacketPayload {
+
+    private static final int FLAG_MINESHAFT = 1;
+    private static final int FLAG_FARM = 2;
+    private static final int FLAG_LUMBERYARD = 4;
+    private static final int FLAG_TAVERN = 8;
+
+    /** Packs the four single-purpose zone-type booleans into {@link #zoneTypeFlags} -- see this record's own class doc. */
+    public static int zoneFlags(boolean isMineshaft, boolean isFarm, boolean isLumberyard, boolean isTavern) {
+        int bits = 0;
+        if (isMineshaft) bits |= FLAG_MINESHAFT;
+        if (isFarm) bits |= FLAG_FARM;
+        if (isLumberyard) bits |= FLAG_LUMBERYARD;
+        if (isTavern) bits |= FLAG_TAVERN;
+        return bits;
+    }
+
+    public boolean isMineshaft() {
+        return (zoneTypeFlags & FLAG_MINESHAFT) != 0;
+    }
+
+    public boolean isFarm() {
+        return (zoneTypeFlags & FLAG_FARM) != 0;
+    }
+
+    public boolean isLumberyard() {
+        return (zoneTypeFlags & FLAG_LUMBERYARD) != 0;
+    }
+
+    public boolean isTavern() {
+        return (zoneTypeFlags & FLAG_TAVERN) != 0;
+    }
 
     public static final Type<OpenPlotConfigSignMenuPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "open_plot_config_sign_menu"));
@@ -66,9 +105,8 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
             ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::maxPlotTier,
             ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::canHireNpc,
             ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::guardKitStandsAvailable,
-            ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::isMineshaft,
-            ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::isFarm,
-            ByteBufCodecs.BOOL, OpenPlotConfigSignMenuPayload::isLumberyard,
+            ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::zoneTypeFlags,
+            ByteBufCodecs.VAR_INT, OpenPlotConfigSignMenuPayload::tavernStoolsAvailable,
             OpenPlotConfigSignMenuPayload::new);
 
     @Override

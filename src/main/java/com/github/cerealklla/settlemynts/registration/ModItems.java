@@ -100,6 +100,14 @@ public final class ModItems {
                     .stacksTo(1)
                     .setId(ResourceKey.create(Registries.ITEM, id))));
 
+    // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- the held form of a picked-up
+    // tavern.TavernStoolEntity; stacksTo(1), same reasoning as GUARD_KIT_STAND above.
+    public static final DeferredItem<com.github.cerealklla.settlemynts.tavern.TavernStoolItem> TAVERN_STOOL = ITEMS.register(
+            "tavern_stool",
+            id -> new com.github.cerealklla.settlemynts.tavern.TavernStoolItem(new Item.Properties()
+                    .stacksTo(1)
+                    .setId(ResourceKey.create(Registries.ITEM, id))));
+
     public static final DeferredRegister.DataComponents DATA_COMPONENTS =
             DeferredRegister.createDataComponents(Registries.DATA_COMPONENT_TYPE, SettlemyntsMod.MODID);
 
@@ -182,4 +190,10 @@ public final class ModItems {
             DATA_COMPONENTS.registerComponentType("guard_kit_stand_data", builder -> builder
                     .persistent(com.github.cerealklla.settlemynts.guardhouse.GuardKitStandData.CODEC)
                     .networkSynchronized(com.github.cerealklla.settlemynts.guardhouse.GuardKitStandData.STREAM_CODEC));
+
+    // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- see tavern.TavernStoolData's own doc.
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<com.github.cerealklla.settlemynts.tavern.TavernStoolData>> TAVERN_STOOL_DATA =
+            DATA_COMPONENTS.registerComponentType("tavern_stool_data", builder -> builder
+                    .persistent(com.github.cerealklla.settlemynts.tavern.TavernStoolData.CODEC)
+                    .networkSynchronized(com.github.cerealklla.settlemynts.tavern.TavernStoolData.STREAM_CODEC));
 }

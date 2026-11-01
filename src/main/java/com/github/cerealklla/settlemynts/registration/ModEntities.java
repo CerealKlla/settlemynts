@@ -200,4 +200,22 @@ public final class ModEntities {
             com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity::new,
             MobCategory.MISC,
             builder -> builder.sized(0.5f, 1.975f).clientTrackingRange(10));
+
+    // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- a real Display.BlockDisplay
+    // marker (see TavernStoolEntity's own doc for why, not an ArmorStand like GUARD_KIT_STAND above),
+    // same hitbox shape as every other block-display marker in this mod.
+    public static final DeferredHolder<EntityType<?>, EntityType<com.github.cerealklla.settlemynts.tavern.TavernStoolEntity>> TAVERN_STOOL = ENTITIES.registerEntityType(
+            "tavern_stool",
+            com.github.cerealklla.settlemynts.tavern.TavernStoolEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(1.0f, 1.0f));
+
+    // The seated NPC itself -- a plain profession-less Villager, same shape as RESIDENT_VILLAGER/
+    // LUMBERJACK_WORKER/FARMER_WORKER/MINER_WORKER above (real vanilla hitbox/rendering, Brain never
+    // ticked). Never naturally spawned -- only ever created by TavernDailySpawnTicker.
+    public static final DeferredHolder<EntityType<?>, EntityType<com.github.cerealklla.settlemynts.tavern.TavernNpcEntity>> TAVERN_NPC = ENTITIES.registerEntityType(
+            "tavern_npc",
+            com.github.cerealklla.settlemynts.tavern.TavernNpcEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(0.6f, 1.95f).clientTrackingRange(10));
 }

@@ -80,6 +80,8 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
         boolean isMineshaft = false;
         boolean isFarm = false;
         boolean isLumberyard = false;
+        boolean isTavern = false;
+        int tavernStoolsAvailable = 0;
         if (sign.settlementCoreId() != null && serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core) {
             PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
             if (plot != null) {
@@ -89,6 +91,7 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
                 isMineshaft = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.MINESHAFT_ZONE_TYPE_ID);
                 isFarm = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.FARM_ZONE_TYPE_ID);
                 isLumberyard = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.LUMBERYARD_ZONE_TYPE_ID);
+                isTavern = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.tavern.TavernConstants.TAVERN_ZONE_TYPE_ID);
                 hasConstructionBox = plot.constructionBoxId().isPresent();
                 tier = plot.tier();
                 maxPlotTier = isTownHall ? 5 : core.townHallPlot().map(PlotRecord::tier).orElse(5);
@@ -101,13 +104,22 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
                     guardKitStandsAvailable = Math.max(0,
                             com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.capacityForTier(boxTier) - plot.guardKitStandsIssued());
                 }
+                if (isTavern) {
+                    int boxTier = net.neoforged.fml.ModList.get().isLoaded("blueprynts")
+                            ? com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveTier(serverLevel, plot)
+                            : 0;
+                    tavernStoolsAvailable = Math.max(0,
+                            com.github.cerealklla.settlemynts.tavern.TavernConstants.stoolCountForTier(boxTier) - plot.tavernStoolsIssued());
+                }
             }
         }
         // Opens the whole unified Plot Config Sign screen via a real container-menu handshake now
         // (2026-10-24, see PlotConfigMenu's own doc) -- used to just send this payload standalone
         // and let the client build a plain, non-container NuclyusMenuScreen from it.
         com.github.cerealklla.settlemynts.SettlemyntsMod.openPlotConfigMenu(serverPlayer,
-                new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc, guardKitStandsAvailable, isMineshaft, isFarm, isLumberyard));
+                new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc,
+                        guardKitStandsAvailable, OpenPlotConfigSignMenuPayload.zoneFlags(isMineshaft, isFarm, isLumberyard, isTavern),
+                        tavernStoolsAvailable));
         return InteractionResult.SUCCESS_SERVER;
     }
 

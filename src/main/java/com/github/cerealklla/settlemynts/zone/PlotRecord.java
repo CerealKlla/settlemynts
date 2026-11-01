@@ -146,29 +146,41 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
      * misc} for why. {@code tieredDefaultsAppliedTier} moved here verbatim from its old top-level
      * slot (see {@code zone.ShopSeeding}/{@code debug.DebugCommands} for its own meaning);
      * {@code mineSpecialization} is this plot's Ore/Stone Mineshaft loot focus (ignored for any
-     * non-Mineshaft plot) -- see {@link MineSpecialization}'s own doc.
+     * non-Mineshaft plot) -- see {@link MineSpecialization}'s own doc. {@code tavernStoolsIssued}
+     * (added 2026-10-31, Tavern Plot Type) is the live denominator against {@code
+     * tavern.TavernConstants#stoolCountForTier} the Plot Config Sign's "Get Tavern Stools" button
+     * grants against -- same "issued, not currently-placed" counting convention as {@code
+     * guardKitStandsIssued} on the parent record, just living here instead since that field's own
+     * top-level slot is long gone.
      */
-    public record PlotMiscState(int tieredDefaultsAppliedTier, MineSpecialization mineSpecialization, List<String> plantSelections) {
-        public static final PlotMiscState NONE = new PlotMiscState(0, MineSpecialization.ORE, List.of());
+    public record PlotMiscState(int tieredDefaultsAppliedTier, MineSpecialization mineSpecialization,
+                                 List<String> plantSelections, int tavernStoolsIssued) {
+        public static final PlotMiscState NONE = new PlotMiscState(0, MineSpecialization.ORE, List.of(), 0);
 
         public static final Codec<PlotMiscState> CODEC = RecordCodecBuilder.create(i -> i.group(
                 Codec.INT.optionalFieldOf("tiered_defaults_applied_tier", 0).forGetter(PlotMiscState::tieredDefaultsAppliedTier),
                 Codec.STRING.xmap(MineSpecialization::valueOf, MineSpecialization::name)
                         .optionalFieldOf("mine_specialization", MineSpecialization.ORE).forGetter(PlotMiscState::mineSpecialization),
-                Codec.STRING.listOf().optionalFieldOf("plant_selections", List.of()).forGetter(PlotMiscState::plantSelections)
+                Codec.STRING.listOf().optionalFieldOf("plant_selections", List.of()).forGetter(PlotMiscState::plantSelections),
+                Codec.INT.optionalFieldOf("tavern_stools_issued", 0).forGetter(PlotMiscState::tavernStoolsIssued)
         ).apply(i, PlotMiscState::new));
 
         public PlotMiscState withTieredDefaultsAppliedTier(int tieredDefaultsAppliedTier) {
-            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization, plantSelections);
+            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization, plantSelections, tavernStoolsIssued);
         }
 
         public PlotMiscState withMineSpecialization(MineSpecialization mineSpecialization) {
-            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization, plantSelections);
+            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization, plantSelections, tavernStoolsIssued);
         }
 
         /** {@link WorkerPlantSelection}'s own storage -- see that class's own doc for the slot shape/semantics. */
         public PlotMiscState withPlantSelections(List<String> plantSelections) {
-            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization, plantSelections);
+            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization, plantSelections, tavernStoolsIssued);
+        }
+
+        /** Adjusts how many Tavern Stools this plot has ever been issued -- see this record's own class doc. */
+        public PlotMiscState withTavernStoolsIssued(int tavernStoolsIssued) {
+            return new PlotMiscState(tieredDefaultsAppliedTier, mineSpecialization, plantSelections, tavernStoolsIssued);
         }
     }
 
@@ -242,6 +254,11 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
 
     public List<String> plantSelections() {
         return misc.plantSelections();
+    }
+
+    /** Pass-through onto {@link #misc}'s own {@link PlotMiscState#tavernStoolsIssued()} -- see this record's own class doc on why. */
+    public int tavernStoolsIssued() {
+        return misc.tavernStoolsIssued();
     }
 
     /**
@@ -331,5 +348,12 @@ public record PlotRecord(UUID plotId, String name, Identifier zoneTypeId, long c
     public PlotRecord withGuardKitStandsIssued(int guardKitStandsIssued) {
         return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
                 boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory, misc, hiredNpc, guardKitStandsIssued);
+    }
+
+    /** Adjusts how many Tavern Stools this plot has ever been issued -- see {@link PlotMiscState}'s own class doc. */
+    public PlotRecord withTavernStoolsIssued(int tavernStoolsIssued) {
+        return new PlotRecord(plotId, name, zoneTypeId, cartographyrPlotEntityId, cartographyrBufferEntityId,
+                boxPos, constructionBoxId, owner, billId, shopId, suppressedShopResources, tier, plannedInventory,
+                misc.withTavernStoolsIssued(tavernStoolsIssued), hiredNpc, guardKitStandsIssued);
     }
 }

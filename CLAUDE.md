@@ -578,3 +578,29 @@ name. `npc.NpcHealthBar` and `bridge.LyfeManaBridge` deleted outright; Guard/Res
 Lumberjack/Miner each just `implements nuclyus.statbar.StatBarOwner` now. `./gradlew build` green,
 whole-suite (13 mods) rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested** -- the
 new client rendering code has only been confirmed to compile.
+
+**Tavern Plot Type built as a full vertical slice, 2026-10-31** (see
+[context/decisions.md](context/decisions.md),
+[context/classes/TavernPlotType.md](context/classes/TavernPlotType.md), design doc Section 17) --
+new "stools" that seat randomly-rolled NPCs daily, each wanting an item/gold/a timed Trial to hire,
+handing over a new Lyfe-side Companion Token on success. New `tavern` package:
+`TavernStoolEntity`/`TavernStoolItem`/`TavernStoolIndex` (a `Display.BlockDisplay` marker, not an
+`ArmorStand` like `guardhouse.GuardKitStandEntity` -- no "empty" visual needed here, the seated NPC
+is the real visual); `TavernNpcEntity` (a plain profession-less `Villager`, Brain never ticked, zero
+movement goals at all -- "never get up" is structural); `TavernGearRoller`/`TavernStatRoller` (both
+flagged placeholder/tunable); `HireRequirement` (sealed: item/gold/a self-contained "defeat N
+hostiles within T minutes" Trial -- **deliberately not routed through Myssions**, which has no
+primitive yet for an NPC to originate an ad-hoc quest tied to one interaction);
+`TavernHireHandler`/`TavernHireInteractListener`/`TavernTrialTracker`; `TavernDailySpawnTicker`
+(same real-day-boundary shape as `zone.ShopMidnightRestockTicker`, deliberately lighter-weight --
+no `MidnightChunkWaker`/`MidnightWorkQueue`, same accepted scaling simplification
+`guardhouse.GuardSpawnTicker` already carries). New "Get Tavern Stools" button
+(`plotsign.client.TavernTab`) needed a real `StreamCodec.composite` 12-argument ceiling fix --
+`OpenPlotConfigSignMenuPayload` was already at the limit, so the new flag joined
+`isMineshaft`/`isFarm`/`isLumberyard` in one packed `zoneTypeFlags` bitmask instead of a 14th
+top-level field (same "nest and add pass-throughs" workaround `zone.PlotRecord`'s own 16-field
+ceiling already established). New `bridge.LyfeTavernBridge` wraps the one new facade call,
+`api.Lyfe#mintCompanionToken`. `./gradlew build`/`test` green in both repos, whole-suite (14 mods)
+rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested** -- the stool/NPC visuals, all
+three hire-requirement types, the daily respawn cycle, and the Companion Token itself all still need
+a real playtest pass.

@@ -220,6 +220,10 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerShopInteractListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.diagnostics.LagDiagnostics());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.watchtower.WatchTowerChunkLoadListener());
+        // Tavern Plot Type (design doc Section 17, added 2026-10-31).
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernDailySpawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernHireInteractListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernTrialTracker.TrialKillListener());
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.RegisterCommandsEvent event) ->
                 com.github.cerealklla.settlemynts.debug.DebugCommands.register(event.getDispatcher()));
 
@@ -257,6 +261,10 @@ public class SettlemyntsMod {
         // AttributeSupplier for its own EntityType, confirmed against the decompiled source; ghost
         // marker entities never needed this because none of them are LivingEntity.
         event.put(ModEntities.GUARD_KIT_STAND.get(), net.minecraft.world.entity.decoration.ArmorStand.createAttributes().build());
+        // Tavern Plot Type (design doc Section 17) -- TavernStoolEntity is a Display.BlockDisplay
+        // (not a LivingEntity), so it needs no attribute registration at all, same as every other
+        // ghost/display marker in this mod.
+        event.put(ModEntities.TAVERN_NPC.get(), com.github.cerealklla.settlemynts.tavern.TavernNpcEntity.createAttributes().build());
     }
 
     /** Payload registrations for the staking mechanic (design doc Section 6) -- see founding.* payload classes' own docs. */
@@ -727,6 +735,58 @@ public class SettlemyntsMod {
         registrar.playToServer(com.github.cerealklla.settlemynts.watchtower.SetWatchTowerEnabledPayload.TYPE,
                 com.github.cerealklla.settlemynts.watchtower.SetWatchTowerEnabledPayload.STREAM_CODEC,
                 (payload, context) -> setWatchTowerEnabled(payload, context));
+
+        // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- "Get Tavern Stools" on the
+        // Plot Config Sign.
+        registrar.playToServer(com.github.cerealklla.settlemynts.tavern.RequestTavernStoolsPayload.TYPE,
+                com.github.cerealklla.settlemynts.tavern.RequestTavernStoolsPayload.STREAM_CODEC,
+                (payload, context) -> requestTavernStools(payload, context));
+    }
+
+    /**
+     * "Get Tavern Stools" button -- direct mirror of {@link #requestGuardKitStands}: re-checks
+     * {@code zone.PlotPermissions#canManage} and re-reads the plot's own live {@code
+     * zone.PlotRecord#tavernStoolsIssued} count before granting every currently-available stool item
+     * in one go and incrementing that count by the same amount.
+     */
+    private static void requestTavernStools(com.github.cerealklla.settlemynts.tavern.RequestTavernStoolsPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null || !PlotPermissions.canManage(plot, core, player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You can't manage this plot."));
+            return;
+        }
+        if (!plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.tavern.TavernConstants.TAVERN_ZONE_TYPE_ID)) {
+            player.sendSystemMessage(Component.literal("This plot has no tavern."));
+            return;
+        }
+        int boxTier = ModList.get().isLoaded("blueprynts")
+                ? com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveTier(serverLevel, plot)
+                : 0;
+        int available = com.github.cerealklla.settlemynts.tavern.TavernConstants.stoolCountForTier(boxTier) - plot.tavernStoolsIssued();
+        if (available <= 0) {
+            player.sendSystemMessage(Component.literal("No more Tavern Stools are available for this plot's current Tier."));
+            return;
+        }
+        core.updatePlot(plot.withTavernStoolsIssued(plot.tavernStoolsIssued() + available));
+        for (int i = 0; i < available; i++) {
+            net.minecraft.world.item.ItemStack item = new net.minecraft.world.item.ItemStack(
+                    com.github.cerealklla.settlemynts.registration.ModItems.TAVERN_STOOL.get());
+            item.set(com.github.cerealklla.settlemynts.registration.ModItems.TAVERN_STOOL_DATA.get(),
+                    new com.github.cerealklla.settlemynts.tavern.TavernStoolData(
+                            UUID.randomUUID(), sign.settlementCoreId(), plot.plotId(), Optional.empty()));
+            if (!player.getInventory().add(item)) {
+                player.drop(item, false);
+            }
+        }
     }
 
     private static void requestAutoDrop(com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload payload, IPayloadContext context) {
