@@ -133,6 +133,10 @@ public final class DebugCommands {
                                 .executes(ctx -> entityInfo(ctx.getSource(), com.mojang.brigadier.arguments.LongArgumentType.getLong(ctx, "placeId")))))
                 .then(Commands.literal("plot")
                         .then(Commands.literal("bill").then(billPlotId)))
+                .then(Commands.literal("resettavernstools")
+                        // ADMIN ONLY -- one-time data fix, see #resetTavernStoolsIssued's own doc.
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .executes(ctx -> resetTavernStoolsIssued(ctx.getSource())))
                 .then(Commands.literal("setplotowner")
                         // ADMIN ONLY -- unlike every other command in this class (see class doc,
                         // deliberately ungated), this one mutates live plot ownership + re-syncs
@@ -886,6 +890,51 @@ public final class DebugCommands {
         source.sendSuccess(() -> Component.literal("Checked " + finalChecked + " live guard(s) -- "
                 + finalFixed + " had the wrong home dimension recorded, now corrected to match their own Guard Kit Stand."), true);
         return fixed;
+    }
+
+    /**
+     * ADMIN ONLY (LEVEL_GAMEMASTERS, or RCON) -- one-time data fix, 2026-10-31. The Tavern Plot
+     * Type's first-pass placeholder stool (a {@code Display.BlockDisplay} entity) was replaced the
+     * same day by a real placed block (see {@code tavern.TavernStoolIndex}'s own doc) -- but any
+     * stool placed under the old build was an entity of a now-deleted {@code EntityType}, which
+     * vanilla silently drops on world load ({@code "Skipping Entity with id settlemynts:tavern_stool"},
+     * confirmed in the real server log from that restart). That destroyed the player's already-placed
+     * stools, while {@code zone.PlotRecord#tavernStoolsIssued} -- a separate, persistent "how many has
+     * this plot ever been granted" counter on the plot itself, untouched by the stool entities being
+     * lost -- still reported the plot's full tier allotment as already issued, so "Get Tavern Stools"
+     * on the Plot Config Sign then refused to grant any more. Same "prefer a one-time fix over
+     * permanent self-healing code" reasoning as {@link #fixStuckGuards}/{@link #resetPlotStructures}:
+     * resolves the plot the executing player is standing in (same pattern as those) and resets just
+     * its {@code tavernStoolsIssued} back to 0, so the sign will grant a fresh full set again.
+     */
+    private static int resetTavernStoolsIssued(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof net.minecraft.world.entity.player.Player player) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world (stand inside the target plot)."));
+            return 0;
+        }
+        AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+        BlockPos playerPos = player.blockPosition();
+        GhostTownHallCoreEntity foundCore = null;
+        PlotRecord foundPlot = null;
+        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+            Optional<PlotRecord> plot = com.github.cerealklla.settlemynts.zone.PlotGeometry.findContainingPlot(level, core, playerPos.getX(), playerPos.getZ());
+            if (plot.isPresent()) {
+                foundCore = core;
+                foundPlot = plot.get();
+                break;
+            }
+        }
+        if (foundPlot == null) {
+            source.sendFailure(Component.literal("You're not standing inside any finalized plot."));
+            return 0;
+        }
+        int previous = foundPlot.tavernStoolsIssued();
+        String plotName = foundPlot.name();
+        foundCore.updatePlot(foundPlot.withTavernStoolsIssued(0));
+        source.sendSuccess(() -> Component.literal("Reset \"" + plotName + "\"'s tavernStoolsIssued from "
+                + previous + " to 0 -- the Plot Config Sign will grant a fresh set of Tavern Stools again."), true);
+        return 1;
     }
 
     /**
