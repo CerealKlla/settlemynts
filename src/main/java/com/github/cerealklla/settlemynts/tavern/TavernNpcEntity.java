@@ -2,17 +2,32 @@ package com.github.cerealklla.settlemynts.tavern;
 
 import java.util.UUID;
 
+import com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge;
+
 import net.minecraft.core.GlobalPos;
 import net.minecraft.core.UUIDUtil;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
+import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.ai.goal.RangedBowAttackGoal;
+import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
+import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
+import net.minecraft.world.item.BowItem;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
@@ -44,8 +59,26 @@ import net.minecraft.world.level.storage.ValueOutput;
  * -- {@code TavernDailySpawnTicker} mounts a freshly spawned NPC onto the same {@code
  * com.github.cerealklla.lyfe.rest.SeatEntity} mount point a player sitting on that same stool would
  * use, via {@code bridge.LyfeTavernBridge#seatOnStool}.
+ *
+ * <p><b>Real combat/follow AI for the summoned Companion, 2026-11-01</b> (explicit user spec: "Use
+ * the same steps as town guards, e.g. heal allies, look for enemies, etc., just replace 'move to
+ * road stake' with 'move to a place on the ground near player'"). {@link #stoolPos} doubles as the
+ * seated-vs-companion switch: {@link #setIdentity} (only ever called by {@code
+ * TavernDailySpawnTicker} for a fresh stool spawn) sets it non-null, and a token-summoned companion
+ * (via Lyfe's {@code CompanionTokenItem#use}, which never calls {@link #setIdentity} at all) leaves
+ * it permanently {@code null} -- every new goal added below checks this and defers entirely while
+ * {@code stoolPos != null}, so a seated patron's "never get up" guarantee is completely unaffected.
+ * {@link #bowGoal}/{@link #meleeGoal}/{@link #spellCastGoal}/{@link #reassessWeaponGoal} are a direct
+ * copy of {@code guardhouse.GuardEntity}'s own weapon-swap mechanism; {@link CompanionSightGoal}/
+ * {@link CompanionSpellCastGoal}/{@link CompanionFollowPlayerGoal} are direct copies of that class's
+ * own {@code GuardSightGoal}/{@code GuardSpellCastGoal}/{@code GuardPatrolAreaGoal} -- see each of
+ * those classes' own doc for what changed.
  */
-public class TavernNpcEntity extends PathfinderMob {
+public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob {
+
+    private final RangedBowAttackGoal<TavernNpcEntity> bowGoal = new RangedBowAttackGoal<>(this, 1.0, 20, 15.0F);
+    private final MeleeAttackGoal meleeGoal = new MeleeAttackGoal(this, 1.0, false);
+    private final CompanionSpellCastGoal spellCastGoal = new CompanionSpellCastGoal(this);
 
     private GlobalPos stoolPos;
     private UUID settlementCoreId;
@@ -56,6 +89,7 @@ public class TavernNpcEntity extends PathfinderMob {
     public TavernNpcEntity(EntityType<? extends TavernNpcEntity> type, Level level) {
         super(type, level);
         skipDropExperience();
+        this.reassessWeaponGoal();
     }
 
     public void setIdentity(GlobalPos stoolPos, UUID settlementCoreId, UUID plotId, int tier, HireRequirement hireRequirement) {
@@ -97,9 +131,66 @@ public class TavernNpcEntity extends PathfinderMob {
     @Override
     protected void registerGoals() {
         this.goalSelector.addGoal(1, new FloatGoal(this));
-        this.goalSelector.addGoal(2, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        this.goalSelector.addGoal(3, new RandomLookAroundGoal(this));
-        // Deliberately no movement/work goal of any kind -- "never get up."
+        // Priority 2 (melee/bow/spell) is deliberately NOT added here -- see reassessWeaponGoal().
+        this.goalSelector.addGoal(3, new CompanionFollowPlayerGoal(this, 0.8));
+        this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
+        this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
+        // A seated patron ("never get up") never actually moves even though these goals are always
+        // registered -- CompanionFollowPlayerGoal/CompanionSightGoal/CompanionSpellCastGoal each
+        // defer entirely while stoolPos is non-null, see this class's own doc.
+        this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
+        this.targetSelector.addGoal(2, new CompanionSightGoal(this));
+    }
+
+    /** Direct copy of {@code guardhouse.GuardEntity#reassessWeaponGoal} -- see that method's own doc. Also defers entirely while seated (no weapon goal of any kind for a stool patron, matching "never get up"). */
+    private void reassessWeaponGoal() {
+        if (this.level() == null || this.level().isClientSide()) {
+            return;
+        }
+        if (LyfeMagicianBridge.isLoaded()) {
+            LyfeMagicianBridge.invalidateSpellTargetCache(this);
+        }
+        this.goalSelector.removeGoal(this.meleeGoal);
+        this.goalSelector.removeGoal(this.bowGoal);
+        this.goalSelector.removeGoal(this.spellCastGoal);
+        if (stoolPos != null) {
+            return; // seated patron -- never armed, regardless of mainhand contents
+        }
+        if (getMainHandItem().getItem() instanceof BowItem) {
+            this.goalSelector.addGoal(2, this.bowGoal);
+        } else if (LyfeMagicianBridge.isLoaded() && (LyfeMagicianBridge.isNatureStaff(getMainHandItem())
+                || LyfeMagicianBridge.hasOffhandSpell(getOffhandItem()))) {
+            this.goalSelector.addGoal(2, this.spellCastGoal);
+            this.goalSelector.addGoal(3, this.meleeGoal);
+        } else {
+            this.goalSelector.addGoal(2, this.meleeGoal);
+        }
+    }
+
+    @Override
+    public void onEquipItem(EquipmentSlot slot, ItemStack oldStack, ItemStack stack) {
+        super.onEquipItem(slot, oldStack, stack);
+        if (slot == EquipmentSlot.MAINHAND || slot == EquipmentSlot.OFFHAND) {
+            reassessWeaponGoal();
+        }
+    }
+
+    /** Mirrors {@code guardhouse.GuardEntity#performRangedAttack} (itself mirroring {@code AbstractSkeleton}, confirmed against the real decompiled source). */
+    @Override
+    public void performRangedAttack(LivingEntity target, float power) {
+        ItemStack bowItem = getMainHandItem();
+        ItemStack projectileStack = getProjectile(bowItem);
+        AbstractArrow arrow = ProjectileUtil.getMobArrow(this, projectileStack, power, bowItem);
+        double xd = target.getX() - getX();
+        double yd = target.getY(0.3333333333333333) - arrow.getY();
+        double zd = target.getZ() - getZ();
+        double distanceToTarget = Math.sqrt(xd * xd + zd * zd);
+        if (level() instanceof ServerLevel serverLevel) {
+            Projectile.spawnProjectileUsingShoot(
+                    arrow, serverLevel, projectileStack, xd, yd + distanceToTarget * 0.2F, zd, 1.6F,
+                    14 - serverLevel.getDifficulty().getId() * 4);
+        }
+        playSound(SoundEvents.SKELETON_SHOOT, 1.0F, 1.0F / (getRandom().nextFloat() * 0.4F + 0.8F));
     }
 
     @Override
@@ -120,5 +211,11 @@ public class TavernNpcEntity extends PathfinderMob {
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
         tier = input.getIntOr("Tier", 1);
         hireRequirement = HireRequirementCodec.load(input);
+        // Same real bug GuardEntity#readAdditionalSaveData already fixed once (2026-10-08): super's
+        // call above restores equipment via a raw EntityEquipment#setAll that bypasses onEquipItem
+        // entirely, so a reloaded companion (every server restart) would otherwise stay stuck on
+        // whatever goal the constructor picked. Called again now that stoolPos/equipment are both
+        // genuinely populated from NBT.
+        reassessWeaponGoal();
     }
 }

@@ -1,8 +1,10 @@
 package com.github.cerealklla.settlemynts.bridge;
 
+import java.util.Optional;
 import java.util.UUID;
 
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.fml.ModList;
 
@@ -28,5 +30,10 @@ public final class LyfeSummoningBridge {
     /** Call periodically while {@code stack} is held by {@code ownerId} at the given position -- summons/re-summons/tracks cooldown, mutating {@code stack}'s own data component in place. */
     public static void tickCompanion(ServerLevel level, ItemStack stack, UUID ownerId, double x, double y, double z, float yRot) {
         com.github.cerealklla.lyfe.api.Lyfe.tickGuardCompanion(level, stack, ownerId, x, y, z, yRot);
+    }
+
+    /** {@code companion}'s owning player, if a real Lyfe {@code SummonedCompanionOwner} is set on it -- used by {@code tavern.CompanionFollowPlayerGoal} to resolve who to follow. */
+    public static Optional<UUID> resolveCompanionOwner(LivingEntity companion) {
+        return com.github.cerealklla.lyfe.api.Lyfe.resolveCompanionOwner(companion);
     }
 }
