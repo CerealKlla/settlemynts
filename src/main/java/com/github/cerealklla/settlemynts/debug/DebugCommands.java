@@ -137,6 +137,10 @@ public final class DebugCommands {
                         // ADMIN ONLY -- one-time data fix, see #resetTavernStoolsIssued's own doc.
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .executes(ctx -> resetTavernStoolsIssued(ctx.getSource())))
+                .then(Commands.literal("tavernnpcdedup")
+                        // ADMIN ONLY -- one-time data fix, see #tavernNpcDedup's own doc.
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .executes(ctx -> tavernNpcDedup(ctx.getSource())))
                 .then(Commands.literal("setplotowner")
                         // ADMIN ONLY -- unlike every other command in this class (see class doc,
                         // deliberately ungated), this one mutates live plot ownership + re-syncs
@@ -890,6 +894,55 @@ public final class DebugCommands {
         source.sendSuccess(() -> Component.literal("Checked " + finalChecked + " live guard(s) -- "
                 + finalFixed + " had the wrong home dimension recorded, now corrected to match their own Guard Kit Stand."), true);
         return fixed;
+    }
+
+    /**
+     * ADMIN ONLY (LEVEL_GAMEMASTERS, or RCON) -- one-time data fix, 2026-10-31. {@code
+     * tavern.TavernDailySpawnTicker}'s startup catch-up pass (added earlier the same day, see that
+     * class's own doc) only ever looked up a stool's previously-seated NPC by its stored UUID, which
+     * silently fails to resolve an entity whose chunk hasn't actually loaded yet -- the scan still
+     * went on to spawn a brand-new NPC regardless, leaving the old one (still physically there, its
+     * chunk just not loaded *yet* at that exact moment) never removed. Across this session's several
+     * back-to-back redeploys (each one a restart, each one running its own catch-up pass), this
+     * stacked up multiple duplicate NPCs on the same stool -- real report: "several of the same npcs
+     * on a single stool." The ticker itself is already fixed (see its own doc) to scan the stool's
+     * real position directly instead of trusting the stored id, which self-heals this going forward
+     * the next time it runs -- this command is the one-time cleanup for duplicates that already exist
+     * right now, callable immediately rather than waiting for the next day boundary or restart to
+     * land while the right chunk happens to be loaded. Scans every loaded level for every loaded
+     * {@code TavernNpcEntity}, groups by its own {@code stoolPos} field, and discards every one past
+     * the first found per stool -- also re-points that stool's {@code TavernStoolIndex} entry at the
+     * one kept, in case it had drifted.
+     */
+    private static int tavernNpcDedup(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        Map<net.minecraft.core.GlobalPos, List<com.github.cerealklla.settlemynts.tavern.TavernNpcEntity>> byStool = new java.util.HashMap<>();
+        for (ServerLevel level : server.getAllLevels()) {
+            for (com.github.cerealklla.settlemynts.tavern.TavernNpcEntity npc : level.getEntities(
+                    ModEntities.TAVERN_NPC.get(),
+                    new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                            NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS),
+                    n -> n.stoolPos() != null)) {
+                byStool.computeIfAbsent(npc.stoolPos(), k -> new ArrayList<>()).add(npc);
+            }
+        }
+        int removed = 0;
+        var index = com.github.cerealklla.settlemynts.tavern.TavernStoolIndex.get(server);
+        for (var entry : byStool.entrySet()) {
+            List<com.github.cerealklla.settlemynts.tavern.TavernNpcEntity> npcs = entry.getValue();
+            if (npcs.size() <= 1) {
+                continue;
+            }
+            com.github.cerealklla.settlemynts.tavern.TavernNpcEntity keep = npcs.get(0);
+            index.setSeatedNpc(entry.getKey(), keep.getUUID());
+            for (int i = 1; i < npcs.size(); i++) {
+                npcs.get(i).discard();
+                removed++;
+            }
+        }
+        int finalRemoved = removed;
+        source.sendSuccess(() -> Component.literal("Removed " + finalRemoved + " duplicate Tavern NPC(s)."), true);
+        return removed;
     }
 
     /**

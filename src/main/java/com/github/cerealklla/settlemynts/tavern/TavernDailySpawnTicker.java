@@ -1,14 +1,17 @@
 package com.github.cerealklla.settlemynts.tavern;
 
+import java.util.List;
 import java.util.Map;
 
 import com.github.cerealklla.settlemynts.bridge.LyfeTavernBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -86,10 +89,22 @@ public final class TavernDailySpawnTicker {
         }
 
         TavernStoolIndex index = TavernStoolIndex.get(level.getServer());
+        // Real duplication bug, caught 2026-10-31 ("several of the same NPCs on a single stool"):
+        // looking up only the single stored seatedNpcId by UUID silently finds nothing if that
+        // entity's chunk hadn't actually loaded yet at the moment this scan ran (its own UUID isn't
+        // resolvable until the chunk is), but this method still went on to spawn a brand new NPC
+        // regardless -- the old one, still physically there, was never removed. Every repeated
+        // startup catch-up pass (one per server restart) could stack another one on top. Scanning the
+        // stool's own position directly for any live TavernNpcEntity (not trusting the stored id at
+        // all) and discarding everything found is robust regardless of index staleness, and also
+        // cleans up any duplicates already created by the bug above the next time this runs.
+        BlockPos stoolPos = pos.pos();
+        AABB scanBox = new AABB(stoolPos).inflate(1.5);
+        List<TavernNpcEntity> stale = level.getEntitiesOfClass(TavernNpcEntity.class, scanBox);
+        for (TavernNpcEntity npc : stale) {
+            npc.discard(); // Never hired -- despawns, stool reopens this same scan.
+        }
         if (info.seatedNpcId().isPresent()) {
-            if (level.getEntity(info.seatedNpcId().get()) instanceof TavernNpcEntity npc) {
-                npc.discard(); // Never hired -- despawns, stool reopens this same scan.
-            }
             index.clearSeatedNpc(pos);
         }
 
