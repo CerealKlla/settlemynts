@@ -83,6 +83,12 @@ public final class TavernHireHandler {
     }
 
     static void completeHire(ServerPlayer player, ServerLevel level, TavernNpcEntity npc) {
+        // Real bug, caught 2026-10-31 ("something went wrong" summoning a just-hired companion):
+        // vanilla's own Entity#save is a hard no-op (returns false, writes nothing at all -- not even
+        // the "id" key) for any entity that isPassenger(). The NPC is still mounted on its stool's
+        // SeatEntity at this point, so EntityCapture#capture (called inside mintCompanionToken) would
+        // otherwise capture an empty tag. Dismounting first makes the capture a normal top-level save.
+        npc.stopRiding();
         if (LyfeTavernBridge.isLoaded()) {
             LyfeTavernBridge.mintCompanionToken(player, npc, npc.getName().getString());
             player.sendSystemMessage(Component.literal("Hired " + npc.getName().getString() + "! Check your inventory for their Companion Token."));
