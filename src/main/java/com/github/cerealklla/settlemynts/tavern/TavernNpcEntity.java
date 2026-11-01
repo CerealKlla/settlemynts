@@ -21,9 +21,11 @@ import net.minecraft.world.level.storage.ValueOutput;
  * A seated Tavern NPC -- design doc Section 17: "targeted spawn locations for new NPCs, when they
  * spawn they will be seated on the stools and never get up." "Never get up" means registering NO
  * movement goal at all, not even a work goal. {@link #hireRequirement} and {@link #tier} are rolled
- * once at spawn ({@code TavernDailySpawnTicker}); the NPC's own current equipment/stats (set by
- * {@code TavernGearRoller}/{@code TavernStatRoller} at that same moment) are what actually get
- * captured into the eventual Companion Token -- nothing extra needs saving here for that part.
+ * once at spawn ({@code TavernDailySpawnTicker}); the NPC's own current stats (set by {@code
+ * TavernStatRoller} at that same moment) are what actually get captured into the eventual Companion
+ * Token -- nothing extra needs saving here for that part. Starts with empty equipment slots (no gear
+ * roller exists any more, removed 2026-11-01 -- see {@code TavernDailySpawnTicker#spawnNpc}'s own
+ * doc for the exploit that caused this).
  *
  * <p><b>A plain humanoid, not a Villager, 2026-10-31 correction</b> (real user feedback: "they're
  * all Villagers. I'd like them to be any humanoid, though most of the time human like Steve" -- and

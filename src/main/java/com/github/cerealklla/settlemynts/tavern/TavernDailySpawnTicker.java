@@ -136,6 +136,14 @@ public final class TavernDailySpawnTicker {
      * 2026-10-31: {@link #onServerTick}'s very first tick after each server start only ever baselines
      * {@link #lastKnownDay} without spawning, so newly placed stools showed nothing for up to a full
      * day).
+     *
+     * <p><b>No longer rolls starting gear, 2026-11-01</b> -- real report: a hired NPC's free rolled
+     * loadout (up to a full Netherite set + shield at Tier 5) was extractable whole via the
+     * Companion Token's own Equip GUI, letting a Gold hire requirement (as little as 100 Nuggets) buy
+     * gear worth far more than the hire cost. {@code TavernGearRoller} is gone outright -- a hired
+     * companion now starts with empty equipment slots, same as its stats stay real (health/attack
+     * still rolled by {@link TavernStatRoller}, which isn't a tradeable item and carries no comparable
+     * exploit).
      */
     static void spawnNpc(ServerLevel level, GlobalPos pos, TavernStoolIndex.StoolInfo info, int tier) {
         TavernNpcEntity npc = new TavernNpcEntity(
@@ -144,7 +152,6 @@ public final class TavernDailySpawnTicker {
         npc.setPos(blockPos.getX() + 0.5, blockPos.getY(), blockPos.getZ() + 0.5);
         HireRequirement requirement = TavernHireRoller.rollRequirement(tier, level.getRandom());
         npc.setIdentity(pos, info.settlementCoreId(), info.plotId(), tier, requirement);
-        TavernGearRoller.equip(npc, tier);
         TavernStatRoller.roll(npc, tier, level.getRandom());
         level.addFreshEntity(npc);
         LyfeTavernBridge.seatOnStool(level, blockPos, npc);
