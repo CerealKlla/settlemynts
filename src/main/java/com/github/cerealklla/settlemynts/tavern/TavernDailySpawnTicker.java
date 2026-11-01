@@ -80,6 +80,18 @@ public final class TavernDailySpawnTicker {
     }
 
     private void processStool(ServerLevel level, GlobalPos pos, TavernStoolIndex.StoolInfo info) {
+        // Real duplication bug, caught 2026-11-01: this method's own discard-then-spawn logic is
+        // only trustworthy if the stool's own chunk is actually loaded right now -- level.getEntitiesOfClass
+        // below can only ever see already-loaded entities, so an unloaded stool's existing NPC (sitting
+        // in that chunk's saved data, not in memory) would be silently missed by the discard scan while
+        // spawnNpc still went ahead regardless, stacking a fresh duplicate on top every single day
+        // boundary for as long as nobody stood nearby. Skipping entirely whenever the stool's chunk
+        // isn't loaded is exactly this class's own documented behavior ("silently skipped for that
+        // day's scan") -- the bug was that only the core/plot resolution was ever actually gated on
+        // load state, not the stool position itself.
+        if (!level.isLoaded(pos.pos())) {
+            return;
+        }
         if (!(level.getEntity(info.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
             return; // Chunk not loaded, or the core couldn't be resolved -- skip this scan.
         }
