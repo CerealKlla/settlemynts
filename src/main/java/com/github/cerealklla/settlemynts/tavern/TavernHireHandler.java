@@ -1,11 +1,15 @@
 package com.github.cerealklla.settlemynts.tavern;
 
+import java.util.UUID;
+
 import com.github.cerealklla.settlemynts.bridge.LyfeTavernBridge;
+import com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.registration.ModItems;
 
 import net.minecraft.core.GlobalPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -18,15 +22,32 @@ import net.minecraft.world.item.ItemStack;
  * (via {@link LyfeTavernBridge#mintCompanionToken}) and discards the NPC/clears its stool, exactly
  * mirroring how {@code guardhouse.GuardKitStandInteraction#pickUp} hands a stand's state back as an
  * item then discards the live entity.
+ *
+ * <p><b>Trial routed through a real Myssions quest, 2026-10-31 correction</b> -- the first pass built
+ * a bespoke, Settlemynts-local kill-counter/timer ({@code TavernTrialTracker}, deleted), reasoning at
+ * the time that Myssions had "no primitive for an NPC to originate an ad-hoc quest tied to one
+ * specific interaction." That was wrong: Myssions already had exactly this --
+ * {@code quest.QuestCompletionHooks}/{@code api.Myssions#assignQuest} let any mod register a real
+ * quest definition and run its own code the instant it's won, and {@code quest.BuyItemTargets}
+ * already established the "side table for per-instance data a capped {@code QuestInstance} can't
+ * hold" pattern this now reuses too (here: {@link TavernTrialInstances}, instanceId -> which NPC).
+ * {@code bridge.MyssionsQuestBridge} registers 5 real "Tavern Hiring Trial" definitions (one per
+ * tier, since a kill milestone's required count is fixed per-definition) using the new {@code
+ * QuestMilestone#killAnyHostile} (added the same day -- no existing kind matched "any hostile mob,"
+ * only one specific entity type). This NPC is the Trial's subject, not a reusable quest-giver --
+ * {@link #attemptHire} starts it directly via {@code assignQuest}, no board/NPC-offer step at all --
+ * and the player gets Myssions' own real Quest Log/Active-Quest-HUD tracking for free, something the
+ * old bespoke tracker never had.
  */
 public final class TavernHireHandler {
 
     private TavernHireHandler() {
     }
 
-    /** Right-clicking the seated NPC -- see {@code TavernHireInteractListener}. */
-    public static void attemptHire(ServerPlayer player, TavernNpcEntity npc) {
-        if (!(npc.level() instanceof ServerLevel level)) {
+    /** The action button on {@code client.TavernHireScreen} -- see {@link TavernHireAcceptPayload}'s own doc. Re-resolves the NPC fresh by entity id rather than trusting anything the client sent about it. */
+    public static void attemptHire(ServerPlayer player, int npcEntityId) {
+        if (!(player.level() instanceof ServerLevel level) || !(level.getEntity(npcEntityId) instanceof TavernNpcEntity npc)) {
+            player.sendSystemMessage(Component.literal("That NPC is no longer available."));
             return;
         }
         HireRequirement requirement = npc.hireRequirement();
@@ -38,7 +59,7 @@ public final class TavernHireHandler {
         } else if (requirement instanceof HireRequirement.GoldRequirement gold) {
             attemptGoldHire(player, level, npc, gold);
         } else if (requirement instanceof HireRequirement.TrialRequirement trial) {
-            TavernTrialTracker.onInteract(player, level, npc, trial);
+            attemptStartTrial(player, npc, trial);
         }
     }
 
@@ -82,13 +103,45 @@ public final class TavernHireHandler {
         completeHire(player, level, npc);
     }
 
+    private static void attemptStartTrial(ServerPlayer player, TavernNpcEntity npc, HireRequirement.TrialRequirement trial) {
+        if (!MyssionsQuestBridge.isLoaded()) {
+            player.sendSystemMessage(Component.literal("No quest system is available to run this Trial."));
+            return;
+        }
+        if (MyssionsQuestBridge.hasActiveTavernTrial(player, npc.tier())) {
+            player.sendSystemMessage(Component.literal("You already have a matching Trial in progress."));
+            return;
+        }
+        var instanceId = MyssionsQuestBridge.startTavernTrial(player, npc.tier());
+        if (instanceId.isEmpty()) {
+            player.sendSystemMessage(Component.literal("You can't start another Trial right now."));
+            return;
+        }
+        TavernTrialInstances.get(player.level().getServer()).put(instanceId.get(), npc.getUUID());
+        player.sendSystemMessage(Component.literal("Trial started: " + trial.describe().getString()
+                + " -- see your Quest Log to track it."));
+    }
+
+    /** {@code bridge.MyssionsQuestBridge}'s completion hook -- fired the instant any Tavern Trial is won. */
+    public static void onTrialWon(ServerPlayer player, UUID instanceId) {
+        MinecraftServer server = player.level().getServer();
+        UUID npcId = TavernTrialInstances.get(server).remove(instanceId).orElse(null);
+        if (npcId == null) {
+            return;
+        }
+        for (ServerLevel candidate : server.getAllLevels()) {
+            if (candidate.getEntity(npcId) instanceof TavernNpcEntity npc) {
+                completeHire(player, candidate, npc);
+                return;
+            }
+        }
+        // The NPC was hired by someone else, or despawned, before this Trial finished -- expected,
+        // not an error (user's own explicit spec: "if someone else buys the NPC before you, you
+        // were too slow").
+        player.sendSystemMessage(Component.literal("That NPC is no longer available -- someone else must have hired them first."));
+    }
+
     static void completeHire(ServerPlayer player, ServerLevel level, TavernNpcEntity npc) {
-        // Real bug, caught 2026-10-31 ("something went wrong" summoning a just-hired companion):
-        // vanilla's own Entity#save is a hard no-op (returns false, writes nothing at all -- not even
-        // the "id" key) for any entity that isPassenger(). The NPC is still mounted on its stool's
-        // SeatEntity at this point, so EntityCapture#capture (called inside mintCompanionToken) would
-        // otherwise capture an empty tag. Dismounting first makes the capture a normal top-level save.
-        npc.stopRiding();
         if (LyfeTavernBridge.isLoaded()) {
             LyfeTavernBridge.mintCompanionToken(player, npc, npc.getName().getString());
             player.sendSystemMessage(Component.literal("Hired " + npc.getName().getString() + "! Check your inventory for their Companion Token."));

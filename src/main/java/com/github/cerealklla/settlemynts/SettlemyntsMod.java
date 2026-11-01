@@ -223,8 +223,15 @@ public class SettlemyntsMod {
         // Tavern Plot Type (design doc Section 17, added 2026-10-31).
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernDailySpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernHireInteractListener());
-        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernTrialTracker.TrialKillListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernStoolPickupListener());
+        // The Trial requirement is a real Myssions quest now, not a bespoke local tracker -- see
+        // tavern.TavernHireHandler's own doc. Registration (and the completion hook) only touches
+        // Myssions types inside bridge.MyssionsQuestBridge, so this stays gated.
+        if (com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.isLoaded()) {
+            com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.registerTavernTrialQuests();
+            com.github.cerealklla.settlemynts.bridge.MyssionsQuestBridge.registerTavernTrialCompletionHook(
+                    com.github.cerealklla.settlemynts.tavern.TavernHireHandler::onTrialWon);
+        }
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.RegisterCommandsEvent event) ->
                 com.github.cerealklla.settlemynts.debug.DebugCommands.register(event.getDispatcher()));
 
@@ -741,6 +748,18 @@ public class SettlemyntsMod {
         registrar.playToServer(com.github.cerealklla.settlemynts.tavern.RequestTavernStoolsPayload.TYPE,
                 com.github.cerealklla.settlemynts.tavern.RequestTavernStoolsPayload.STREAM_CODEC,
                 (payload, context) -> requestTavernStools(payload, context));
+
+        // "Talk" hire prompt (2026-10-31 correction) -- see tavern.OpenTavernHireMenuPayload's own doc.
+        registrar.playToClient(com.github.cerealklla.settlemynts.tavern.OpenTavernHireMenuPayload.TYPE,
+                com.github.cerealklla.settlemynts.tavern.OpenTavernHireMenuPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.tavern.ClientTavernRequests.requestHireMenu(payload));
+        registrar.playToServer(com.github.cerealklla.settlemynts.tavern.TavernHireAcceptPayload.TYPE,
+                com.github.cerealklla.settlemynts.tavern.TavernHireAcceptPayload.STREAM_CODEC,
+                (payload, context) -> {
+                    if (context.player() instanceof ServerPlayer player) {
+                        com.github.cerealklla.settlemynts.tavern.TavernHireHandler.attemptHire(player, payload.npcEntityId());
+                    }
+                });
     }
 
     /**

@@ -128,9 +128,9 @@ public class SettlemyntsModClient {
         // subclasses above.
         event.registerEntityRenderer(ModEntities.GUARD_KIT_STAND.get(), net.minecraft.client.renderer.entity.ArmorStandRenderer::new);
         // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- the stool itself is a real
-        // Lyfe StoolBlock (no Settlemynts entity/renderer needed). TavernNpcEntity is a plain
-        // Villager subclass, same reasoning as RESIDENT_VILLAGER/LUMBERJACK_WORKER/etc. above.
-        event.registerEntityRenderer(ModEntities.TAVERN_NPC.get(), net.minecraft.client.renderer.entity.VillagerRenderer::new);
+        // Lyfe StoolBlock (no Settlemynts entity/renderer needed). TavernNpcEntity renders as a
+        // humanoid (see tavern.client.TavernNpcRenderer's own doc), not a Villager.
+        event.registerEntityRenderer(ModEntities.TAVERN_NPC.get(), com.github.cerealklla.settlemynts.tavern.client.TavernNpcRenderer::new);
     }
 
     @SubscribeEvent
@@ -184,6 +184,11 @@ public class SettlemyntsModClient {
         ClientGuardhouseRequests.takePendingMenu().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
                 Minecraft.getInstance().setScreen(new GuardKitStandScreen(request));
+            }
+        });
+        com.github.cerealklla.settlemynts.tavern.ClientTavernRequests.takePendingHireMenu().ifPresent(request -> {
+            if (Minecraft.getInstance().screen == null) {
+                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.tavern.client.TavernHireScreen(request));
             }
         });
         // "Select Kyt" button clicked on GuardKitStandScreen -- that same screen is still open

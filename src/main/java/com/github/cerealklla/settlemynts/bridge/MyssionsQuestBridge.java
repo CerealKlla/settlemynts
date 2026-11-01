@@ -1,10 +1,17 @@
 package com.github.cerealklla.settlemynts.bridge;
 
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import com.github.cerealklla.myssions.api.Myssions;
+import com.github.cerealklla.myssions.quest.QuestCompletionHooks;
+import com.github.cerealklla.myssions.quest.QuestDefinition;
 import com.github.cerealklla.myssions.quest.QuestGiverMenu;
+import com.github.cerealklla.myssions.quest.QuestMilestone;
+import com.github.cerealklla.myssions.quest.QuestTimeLimit;
 import com.github.cerealklla.settlemynts.plotsign.QuestMenuInfo;
 
 import net.minecraft.resources.Identifier;
@@ -124,5 +131,61 @@ public final class MyssionsQuestBridge {
     /** Accepts a posted road-quest offer -- see {@code api.Myssions#acceptRoadQuestOffer}'s own doc. */
     public static boolean acceptRoadQuestOffer(ServerPlayer player, long postingPlaceId, long destinationPlaceId) {
         return Myssions.acceptRoadQuestOffer(player, postingPlaceId, destinationPlaceId);
+    }
+
+    // --- Tavern Hiring Trial (design doc Section 17, 2026-10-31 correction) ---------------------
+    //
+    // A real Myssions quest, not a bespoke Settlemynts-local timer/counter (see
+    // tavern.TavernHireHandler's own doc for the full story of why this replaced the original
+    // TavernTrialTracker). Five static QuestDefinitions, one per Tavern tier (1-5) since a kill
+    // milestone's requiredCount is fixed per-definition, not overridable per-instance, and
+    // TavernHireRoller only ever produces 5 distinct (tier-scaled) kill counts anyway -- no side
+    // table or dynamic-definition machinery needed. Each uses QuestMilestone#killAnyHostile (added
+    // the same day specifically for this) so any hostile mob counts, not one specific entity type;
+    // an empty rewards() list, since the real "reward" (a Companion Token) is delivered entirely by
+    // the completion hook calling straight back into TavernHireHandler, not through Myssions' own
+    // Gold/Item/XP reward kinds; and isSpecialAssignment = true so a Trial never competes with or
+    // gets blocked by the player's unrelated 5-quest cap.
+
+    private static final int MIN_TIER = 1;
+    private static final int MAX_TIER = 5;
+    private static final long TRIAL_TIME_LIMIT_TICKS = 3600L;
+
+    public static void registerTavernTrialQuests() {
+        for (int tier = MIN_TIER; tier <= MAX_TIER; tier++) {
+            int requiredKills = 2 + tier;
+            QuestMilestone milestone = QuestMilestone.killAnyHostile(
+                    "defeat_hostiles", "Defeat " + requiredKills + " hostile mobs", requiredKills);
+            QuestDefinition definition = new QuestDefinition(
+                    tavernTrialId(tier), "Tavern Hiring Trial",
+                    "Prove yourself before this companion will join you.", "tavern",
+                    List.of(milestone), List.of(), QuestTimeLimit.withinTicksOfAssignment(TRIAL_TIME_LIMIT_TICKS),
+                    List.of(), true);
+            Myssions.registerQuestDefinition(definition);
+        }
+    }
+
+    /** Starts a Tavern Hiring Trial for {@code tier} (clamped 1-5) -- empty if the player's already mid-Trial for this exact tier. */
+    public static Optional<UUID> startTavernTrial(ServerPlayer player, int tier) {
+        return Myssions.assignQuest(player, tavernTrialId(tier));
+    }
+
+    /** True if the player already has an in-progress Trial of this tier -- the Hire menu uses this to show "already in progress" instead of a Start button. */
+    public static boolean hasActiveTavernTrial(ServerPlayer player, int tier) {
+        Identifier questId = tavernTrialId(tier);
+        return player.getData(com.github.cerealklla.myssions.registration.ModAttachments.QUEST_DATA).quests().values().stream()
+                .anyMatch(i -> i.definitionId().equals(questId) && i.status() == com.github.cerealklla.myssions.quest.QuestStatus.IN_PROGRESS);
+    }
+
+    /** Registers the real completion callback -- fired the instant any tier's Trial is won, with the winning player and that instance's id. */
+    public static void registerTavernTrialCompletionHook(BiConsumer<ServerPlayer, UUID> onCompleted) {
+        for (int tier = MIN_TIER; tier <= MAX_TIER; tier++) {
+            QuestCompletionHooks.register(tavernTrialId(tier), (player, instanceId, questId) -> onCompleted.accept(player, instanceId));
+        }
+    }
+
+    private static Identifier tavernTrialId(int tier) {
+        int clamped = Math.max(MIN_TIER, Math.min(MAX_TIER, tier));
+        return Identifier.fromNamespaceAndPath("settlemynts", "tavern_trial_tier_" + clamped);
     }
 }
