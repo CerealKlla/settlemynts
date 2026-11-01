@@ -1,6 +1,6 @@
 {
   "model": {
     "type": "minecraft:model",
-    "model": "minecraft:item/oak_slab"
+    "model": "lyfe:item/stool"
   }
 }

@@ -224,6 +224,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernDailySpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernHireInteractListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernTrialTracker.TrialKillListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.tavern.TavernStoolPickupListener());
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.RegisterCommandsEvent event) ->
                 com.github.cerealklla.settlemynts.debug.DebugCommands.register(event.getDispatcher()));
 
@@ -261,9 +262,8 @@ public class SettlemyntsMod {
         // AttributeSupplier for its own EntityType, confirmed against the decompiled source; ghost
         // marker entities never needed this because none of them are LivingEntity.
         event.put(ModEntities.GUARD_KIT_STAND.get(), net.minecraft.world.entity.decoration.ArmorStand.createAttributes().build());
-        // Tavern Plot Type (design doc Section 17) -- TavernStoolEntity is a Display.BlockDisplay
-        // (not a LivingEntity), so it needs no attribute registration at all, same as every other
-        // ghost/display marker in this mod.
+        // Tavern Plot Type (design doc Section 17) -- the stool itself is a real Lyfe StoolBlock, not
+        // a Settlemynts entity, so only the seated NPC needs attribute registration here.
         event.put(ModEntities.TAVERN_NPC.get(), com.github.cerealklla.settlemynts.tavern.TavernNpcEntity.createAttributes().build());
     }
 
@@ -782,7 +782,7 @@ public class SettlemyntsMod {
                     com.github.cerealklla.settlemynts.registration.ModItems.TAVERN_STOOL.get());
             item.set(com.github.cerealklla.settlemynts.registration.ModItems.TAVERN_STOOL_DATA.get(),
                     new com.github.cerealklla.settlemynts.tavern.TavernStoolData(
-                            UUID.randomUUID(), sign.settlementCoreId(), plot.plotId(), Optional.empty()));
+                            sign.settlementCoreId(), plot.plotId()));
             if (!player.getInventory().add(item)) {
                 player.drop(item, false);
             }

@@ -20,9 +20,12 @@ import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
 /**
- * Save-wide index from a placed {@link TavernStoolEntity}'s own UUID to its current {@link
- * GlobalPos} -- direct mirror of {@code guardhouse.GuardKitStandIndex}, same reasoning (lets {@code
- * TavernDailySpawnTicker} resolve every known stool without a world-wide entity query).
+ * Save-wide index from a placed Tavern Stool's own {@link GlobalPos} (a real {@code
+ * com.github.cerealklla.lyfe.rest.StoolBlock}, placed by {@link TavernStoolItem}) to which
+ * settlement/plot it belongs to and which {@link TavernNpcEntity} (if any) currently sits on it.
+ * Direct mirror of {@code guardhouse.GuardKitStandIndex}'s own role (lets {@code
+ * TavernDailySpawnTicker} resolve every known stool without a world-wide block scan), keyed by
+ * position instead of entity UUID since a Tavern Stool is a plain block, not an entity.
  */
 public final class TavernStoolIndex extends SavedData {
 
@@ -31,35 +34,44 @@ public final class TavernStoolIndex extends SavedData {
             TavernStoolIndex::new,
             codec());
 
-    private final Map<UUID, GlobalPos> stools;
+    private final Map<GlobalPos, StoolInfo> stools;
 
     TavernStoolIndex() {
         this(new HashMap<>());
     }
 
-    private TavernStoolIndex(Map<UUID, GlobalPos> stools) {
+    private TavernStoolIndex(Map<GlobalPos, StoolInfo> stools) {
         this.stools = stools;
     }
 
-    private record Entry(UUID stoolId, GlobalPos pos) {
+    public record StoolInfo(UUID settlementCoreId, UUID plotId, Optional<UUID> seatedNpcId) {
+        StoolInfo withSeatedNpcId(UUID npcId) {
+            return new StoolInfo(settlementCoreId, plotId, Optional.ofNullable(npcId));
+        }
+    }
+
+    private record Entry(GlobalPos pos, UUID settlementCoreId, UUID plotId, Optional<UUID> seatedNpcId) {
         static final Codec<Entry> CODEC = RecordCodecBuilder.create(i -> i.group(
-                UUIDUtil.CODEC.fieldOf("stool_id").forGetter(Entry::stoolId),
-                GlobalPos.CODEC.fieldOf("pos").forGetter(Entry::pos)
+                GlobalPos.CODEC.fieldOf("pos").forGetter(Entry::pos),
+                UUIDUtil.CODEC.fieldOf("settlement_core_id").forGetter(Entry::settlementCoreId),
+                UUIDUtil.CODEC.fieldOf("plot_id").forGetter(Entry::plotId),
+                UUIDUtil.CODEC.optionalFieldOf("seated_npc_id").forGetter(Entry::seatedNpcId)
         ).apply(i, Entry::new));
     }
 
     private static Codec<TavernStoolIndex> codec() {
         return Codec.list(Entry.CODEC).xmap(
                 entries -> {
-                    Map<UUID, GlobalPos> map = new HashMap<>();
+                    Map<GlobalPos, StoolInfo> map = new HashMap<>();
                     for (Entry entry : entries) {
-                        map.put(entry.stoolId(), entry.pos());
+                        map.put(entry.pos(), new StoolInfo(entry.settlementCoreId(), entry.plotId(), entry.seatedNpcId()));
                     }
                     return new TavernStoolIndex(map);
                 },
                 data -> {
                     List<Entry> entries = new ArrayList<>(data.stools.size());
-                    data.stools.forEach((stoolId, pos) -> entries.add(new Entry(stoolId, pos)));
+                    data.stools.forEach((pos, info) ->
+                            entries.add(new Entry(pos, info.settlementCoreId(), info.plotId(), info.seatedNpcId())));
                     return entries;
                 });
     }
@@ -68,23 +80,39 @@ public final class TavernStoolIndex extends SavedData {
         return server.getDataStorage().computeIfAbsent(TYPE);
     }
 
-    public void put(UUID stoolId, GlobalPos pos) {
-        stools.put(stoolId, pos);
+    public void put(GlobalPos pos, UUID settlementCoreId, UUID plotId) {
+        stools.put(pos, new StoolInfo(settlementCoreId, plotId, Optional.empty()));
         setDirty();
     }
 
-    public void remove(UUID stoolId) {
-        if (stools.remove(stoolId) != null) {
+    public void remove(GlobalPos pos) {
+        if (stools.remove(pos) != null) {
             setDirty();
         }
     }
 
-    public Optional<GlobalPos> get(UUID stoolId) {
-        return Optional.ofNullable(stools.get(stoolId));
+    public Optional<StoolInfo> get(GlobalPos pos) {
+        return Optional.ofNullable(stools.get(pos));
+    }
+
+    public void setSeatedNpc(GlobalPos pos, UUID npcId) {
+        StoolInfo info = stools.get(pos);
+        if (info != null) {
+            stools.put(pos, info.withSeatedNpcId(npcId));
+            setDirty();
+        }
+    }
+
+    public void clearSeatedNpc(GlobalPos pos) {
+        StoolInfo info = stools.get(pos);
+        if (info != null && info.seatedNpcId().isPresent()) {
+            stools.put(pos, new StoolInfo(info.settlementCoreId(), info.plotId(), Optional.empty()));
+            setDirty();
+        }
     }
 
     /** Read-only snapshot of every known Tavern Stool -- used by {@code TavernDailySpawnTicker}. */
-    public Map<UUID, GlobalPos> all() {
+    public Map<GlobalPos, StoolInfo> all() {
         return Map.copyOf(stools);
     }
 }

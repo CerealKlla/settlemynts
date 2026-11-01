@@ -201,14 +201,8 @@ public final class ModEntities {
             MobCategory.MISC,
             builder -> builder.sized(0.5f, 1.975f).clientTrackingRange(10));
 
-    // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- a real Display.BlockDisplay
-    // marker (see TavernStoolEntity's own doc for why, not an ArmorStand like GUARD_KIT_STAND above),
-    // same hitbox shape as every other block-display marker in this mod.
-    public static final DeferredHolder<EntityType<?>, EntityType<com.github.cerealklla.settlemynts.tavern.TavernStoolEntity>> TAVERN_STOOL = ENTITIES.registerEntityType(
-            "tavern_stool",
-            com.github.cerealklla.settlemynts.tavern.TavernStoolEntity::new,
-            MobCategory.MISC,
-            builder -> builder.sized(1.0f, 1.0f));
+    // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- the stool itself is a real Lyfe
+    // StoolBlock placed in the world (see tavern.TavernStoolItem), not a Settlemynts entity.
 
     // The seated NPC itself -- a plain profession-less Villager, same shape as RESIDENT_VILLAGER/
     // LUMBERJACK_WORKER/FARMER_WORKER/MINER_WORKER above (real vanilla hitbox/rendering, Brain never

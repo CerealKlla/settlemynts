@@ -1,0 +1,50 @@
+package com.github.cerealklla.settlemynts.tavern;
+
+import java.util.Optional;
+
+import com.github.cerealklla.settlemynts.bridge.LyfeTavernBridge;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+
+/**
+ * Sneak + right-click an empty, indexed Tavern Stool to pick it back up -- a normal (non-sneaking)
+ * right-click is left alone entirely, so {@code com.github.cerealklla.lyfe.rest.StoolBlock}'s own
+ * vanilla sit behavior still works unchanged (a player can sit at the bar, same as any other
+ * stool -- "reuse the stool with some added features," 2026-10-31). A still-occupied stool (a seated
+ * {@link TavernNpcEntity} waiting to be hired) can't be picked up at all -- right-click the NPC
+ * itself to hire them instead (see {@link TavernHireInteractListener}).
+ */
+public final class TavernStoolPickupListener {
+
+    @SubscribeEvent
+    public void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (!event.getEntity().isShiftKeyDown()
+                || !(event.getEntity() instanceof ServerPlayer player)
+                || !(event.getLevel() instanceof ServerLevel level)) {
+            return;
+        }
+        BlockPos pos = event.getPos();
+        if (!LyfeTavernBridge.isStool(level, pos)) {
+            return;
+        }
+        GlobalPos globalPos = GlobalPos.of(level.dimension(), pos);
+        Optional<TavernStoolIndex.StoolInfo> info = TavernStoolIndex.get(level.getServer()).get(globalPos);
+        if (info.isEmpty()) {
+            return; // Not a Tavern Stool -- a plain Lyfe Stool Block placed by someone directly.
+        }
+        event.setCanceled(true);
+        event.setCancellationResult(InteractionResult.SUCCESS_SERVER);
+        if (info.get().seatedNpcId().isPresent()) {
+            player.sendSystemMessage(Component.literal("Right-click the seated NPC to hire them."));
+            return;
+        }
+        TavernHireHandler.pickUpStool(player, level, globalPos);
+    }
+}

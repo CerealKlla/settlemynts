@@ -100,8 +100,8 @@ public final class ModItems {
                     .stacksTo(1)
                     .setId(ResourceKey.create(Registries.ITEM, id))));
 
-    // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- the held form of a picked-up
-    // tavern.TavernStoolEntity; stacksTo(1), same reasoning as GUARD_KIT_STAND above.
+    // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- places a real Lyfe StoolBlock
+    // when used; stacksTo(1), same reasoning as GUARD_KIT_STAND above.
     public static final DeferredItem<com.github.cerealklla.settlemynts.tavern.TavernStoolItem> TAVERN_STOOL = ITEMS.register(
             "tavern_stool",
             id -> new com.github.cerealklla.settlemynts.tavern.TavernStoolItem(new Item.Properties()

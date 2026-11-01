@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.tavern;
 
 import java.util.UUID;
 
+import net.minecraft.core.GlobalPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
@@ -27,13 +28,19 @@ import net.minecraft.world.level.storage.ValueOutput;
  * that same moment) are what actually get captured into the eventual Companion Token -- nothing
  * extra needs saving here for that part.
  *
- * <p><b>Known v1 simplification</b>: no real sit-pose/riding animation -- the NPC simply stands,
- * motionless, at its stool's position. Same flagged-placeholder footing as every other "functional
- * first" visual cut in this mod (e.g. {@code guardhouse.GuardRenderer}'s reskinned-Zombie model).
+ * <p><b>Reuses Lyfe's real stool furniture</b> (2026-10-31 correction, after a first pass that
+ * floated a placeholder {@code Blocks.OAK_SLAB} display instead of this suite's already-existing
+ * sit-able stool block) -- {@code TavernDailySpawnTicker} mounts a freshly spawned NPC onto the same
+ * {@code com.github.cerealklla.lyfe.rest.SeatEntity} mount point a player sitting on that same stool
+ * would use (via {@code bridge.LyfeTavernBridge#seatOnStool}), rather than just standing at the
+ * stool's position. <b>Known v1 simplification</b>: {@code VillagerRenderer} has no dedicated
+ * sit-pose, so the mounted NPC still renders upright (just offset to seat height) -- same
+ * flagged-placeholder footing as every other "functional first" visual cut in this mod (e.g. {@code
+ * guardhouse.GuardRenderer}'s reskinned-Zombie model).
  */
 public class TavernNpcEntity extends Villager {
 
-    private UUID stoolId;
+    private GlobalPos stoolPos;
     private UUID settlementCoreId;
     private UUID plotId;
     private int tier = 1;
@@ -44,16 +51,16 @@ public class TavernNpcEntity extends Villager {
         skipDropExperience();
     }
 
-    public void setIdentity(UUID stoolId, UUID settlementCoreId, UUID plotId, int tier, HireRequirement hireRequirement) {
-        this.stoolId = stoolId;
+    public void setIdentity(GlobalPos stoolPos, UUID settlementCoreId, UUID plotId, int tier, HireRequirement hireRequirement) {
+        this.stoolPos = stoolPos;
         this.settlementCoreId = settlementCoreId;
         this.plotId = plotId;
         this.tier = tier;
         this.hireRequirement = hireRequirement;
     }
 
-    public UUID stoolId() {
-        return stoolId;
+    public GlobalPos stoolPos() {
+        return stoolPos;
     }
 
     public UUID settlementCoreId() {
@@ -93,7 +100,7 @@ public class TavernNpcEntity extends Villager {
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
         super.addAdditionalSaveData(output);
-        output.storeNullable("StoolId", UUIDUtil.CODEC, stoolId);
+        output.storeNullable("StoolPos", GlobalPos.CODEC, stoolPos);
         output.storeNullable("SettlementCoreId", UUIDUtil.CODEC, settlementCoreId);
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
         output.putInt("Tier", tier);
@@ -103,7 +110,7 @@ public class TavernNpcEntity extends Villager {
     @Override
     protected void readAdditionalSaveData(ValueInput input) {
         super.readAdditionalSaveData(input);
-        stoolId = input.read("StoolId", UUIDUtil.CODEC).orElse(null);
+        stoolPos = input.read("StoolPos", GlobalPos.CODEC).orElse(null);
         settlementCoreId = input.read("SettlementCoreId", UUIDUtil.CODEC).orElse(null);
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
         tier = input.getIntOr("Tier", 1);

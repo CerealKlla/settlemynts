@@ -127,11 +127,9 @@ public class SettlemyntsModClient {
         // genuinely identical visuals with zero new render code, same reasoning as the Villager
         // subclasses above.
         event.registerEntityRenderer(ModEntities.GUARD_KIT_STAND.get(), net.minecraft.client.renderer.entity.ArmorStandRenderer::new);
-        // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- TavernStoolEntity is a plain
-        // Display.BlockDisplay (see its own doc), same generic renderer every other block-display
-        // marker in this mod already uses. TavernNpcEntity is a plain Villager subclass, same
-        // reasoning as RESIDENT_VILLAGER/LUMBERJACK_WORKER/etc. above.
-        event.registerEntityRenderer(ModEntities.TAVERN_STOOL.get(), GhostBlockDisplayRenderer::new);
+        // Tavern Plot Type (design doc Section 17, added 2026-10-31) -- the stool itself is a real
+        // Lyfe StoolBlock (no Settlemynts entity/renderer needed). TavernNpcEntity is a plain
+        // Villager subclass, same reasoning as RESIDENT_VILLAGER/LUMBERJACK_WORKER/etc. above.
         event.registerEntityRenderer(ModEntities.TAVERN_NPC.get(), net.minecraft.client.renderer.entity.VillagerRenderer::new);
     }
 

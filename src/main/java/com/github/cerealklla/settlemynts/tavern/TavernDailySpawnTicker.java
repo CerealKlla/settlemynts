@@ -1,8 +1,8 @@
 package com.github.cerealklla.settlemynts.tavern;
 
 import java.util.Map;
-import java.util.UUID;
 
+import com.github.cerealklla.settlemynts.bridge.LyfeTavernBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
@@ -15,7 +15,7 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
  * "New NPCs will show up every day" -- same real-day-boundary detection shape as {@code
- * zone.ShopMidnightRestockTicker}, but iterates every known {@link TavernStoolEntity} directly (via
+ * zone.ShopMidnightRestockTicker}, but iterates every known Tavern Stool directly (via
  * {@link TavernStoolIndex}) rather than force-loading whole settlements -- same "known scaling
  * simplification" {@code guardhouse.GuardSpawnTicker} already explicitly accepts for Guard Kit
  * Stands: a stool whose chunk isn't currently loaded is silently skipped for that day's scan. This
@@ -26,7 +26,8 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  *
  * <p>On each boundary: any still-unhired {@link TavernNpcEntity} is discarded first (user's explicit
  * choice -- "despawns next daily cycle, stool reopens"), then every now-empty stool (up to its
- * plot's own {@link TavernConstants#stoolCountForTier}) gets a freshly rolled NPC.
+ * plot's own {@link TavernConstants#stoolCountForTier}) gets a freshly rolled NPC, mounted onto the
+ * stool's real Lyfe seat via {@link LyfeTavernBridge#seatOnStool}.
  */
 public final class TavernDailySpawnTicker {
 
@@ -47,32 +48,34 @@ public final class TavernDailySpawnTicker {
         }
         lastKnownDay = currentDay;
 
-        for (Map.Entry<UUID, GlobalPos> entry : TavernStoolIndex.get(server).all().entrySet()) {
-            GlobalPos pos = entry.getValue();
+        if (!LyfeTavernBridge.isLoaded()) {
+            return;
+        }
+        for (Map.Entry<GlobalPos, TavernStoolIndex.StoolInfo> entry : TavernStoolIndex.get(server).all().entrySet()) {
+            GlobalPos pos = entry.getKey();
             ServerLevel level = server.getLevel(pos.dimension());
             if (level == null) {
                 continue;
             }
-            processStool(level, entry.getKey());
+            processStool(level, pos, entry.getValue());
         }
     }
 
-    private void processStool(ServerLevel level, UUID stoolId) {
-        if (!(level.getEntity(stoolId) instanceof TavernStoolEntity stool)
-                || stool.settlementCoreId() == null
-                || !(level.getEntity(stool.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
-            return; // Chunk not loaded, or the stool/core couldn't be resolved -- skip this scan.
+    private void processStool(ServerLevel level, GlobalPos pos, TavernStoolIndex.StoolInfo info) {
+        if (!(level.getEntity(info.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
+            return; // Chunk not loaded, or the core couldn't be resolved -- skip this scan.
         }
-        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(stool.plotId())).findFirst().orElse(null);
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(info.plotId())).findFirst().orElse(null);
         if (plot == null) {
             return;
         }
 
-        if (stool.seatedNpcId().isPresent()) {
-            if (level.getEntity(stool.seatedNpcId().get()) instanceof TavernNpcEntity npc) {
+        TavernStoolIndex index = TavernStoolIndex.get(level.getServer());
+        if (info.seatedNpcId().isPresent()) {
+            if (level.getEntity(info.seatedNpcId().get()) instanceof TavernNpcEntity npc) {
                 npc.discard(); // Never hired -- despawns, stool reopens this same scan.
             }
-            stool.clearSeatedNpcId();
+            index.clearSeatedNpc(pos);
         }
 
         int boxTier = ModList.get().isLoaded("blueprynts")
@@ -81,19 +84,20 @@ public final class TavernDailySpawnTicker {
         if (TavernConstants.stoolCountForTier(boxTier) <= 0) {
             return;
         }
-        spawnNpc(level, stool, boxTier);
+        spawnNpc(level, pos, info, boxTier);
     }
 
-    private void spawnNpc(ServerLevel level, TavernStoolEntity stool, int tier) {
+    private void spawnNpc(ServerLevel level, GlobalPos pos, TavernStoolIndex.StoolInfo info, int tier) {
         TavernNpcEntity npc = new TavernNpcEntity(
                 com.github.cerealklla.settlemynts.registration.ModEntities.TAVERN_NPC.get(), level);
-        var pos = stool.position();
-        npc.setPos(pos.x, pos.y, pos.z);
+        var blockPos = pos.pos();
+        npc.setPos(blockPos.getX() + 0.5, blockPos.getY(), blockPos.getZ() + 0.5);
         HireRequirement requirement = TavernHireRoller.rollRequirement(tier, level.getRandom());
-        npc.setIdentity(stool.getUUID(), stool.settlementCoreId(), stool.plotId(), tier, requirement);
+        npc.setIdentity(pos, info.settlementCoreId(), info.plotId(), tier, requirement);
         TavernGearRoller.equip(npc, tier);
         TavernStatRoller.roll(npc, tier, level.getRandom());
         level.addFreshEntity(npc);
-        stool.setSeatedNpcId(npc.getUUID());
+        LyfeTavernBridge.seatOnStool(level, blockPos, npc);
+        TavernStoolIndex.get(level.getServer()).setSeatedNpc(pos, npc.getUUID());
     }
 }

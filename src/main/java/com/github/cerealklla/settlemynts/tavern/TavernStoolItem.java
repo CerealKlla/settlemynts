@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.tavern;
 
+import com.github.cerealklla.settlemynts.bridge.LyfeTavernBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModItems;
 import com.github.cerealklla.settlemynts.zone.PlotGeometry;
@@ -7,6 +8,7 @@ import com.github.cerealklla.settlemynts.zone.PlotPermissions;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.GlobalPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -18,10 +20,14 @@ import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 
 /**
- * The held form of a picked-up {@link TavernStoolEntity} -- direct mirror of {@code
- * guardhouse.GuardKitStandItem}'s own {@code useOn} (re-validates {@code
- * zone.PlotPermissions#canManage} and that the clicked position is still inside the exact plot this
- * stool belongs to).
+ * The held form of a granted Tavern Stool. Places a real {@code
+ * com.github.cerealklla.lyfe.rest.StoolBlock} (2026-10-31 correction -- the original first pass
+ * floated a placeholder {@code Blocks.OAK_SLAB} display entity instead of reusing this suite's
+ * already-existing, real sit-able stool furniture; see {@link TavernStoolIndex}'s own doc) and
+ * records its position via {@link TavernStoolIndex}, keyed by {@link GlobalPos} since the stool is
+ * now a plain block, not a picked-up entity. Re-validates {@code zone.PlotPermissions#canManage} and
+ * that the clicked position is still inside the exact plot this stool was issued for, same as
+ * {@code guardhouse.GuardKitStandItem}.
  */
 public class TavernStoolItem extends Item {
 
@@ -37,6 +43,10 @@ public class TavernStoolItem extends Item {
         }
         Player player = context.getPlayer();
         if (!(player instanceof ServerPlayer serverPlayer)) {
+            return InteractionResult.FAIL;
+        }
+        if (!LyfeTavernBridge.isLoaded()) {
+            player.sendSystemMessage(Component.literal("Tavern Stools require Lyfe to be installed."));
             return InteractionResult.FAIL;
         }
 
@@ -56,20 +66,20 @@ public class TavernStoolItem extends Item {
             return InteractionResult.FAIL;
         }
 
-        BlockPos placePos = context.getClickedPos().above();
+        BlockPos placePos = context.getClickedPos().relative(context.getClickedFace());
+        if (!serverLevel.getBlockState(placePos).canBeReplaced()) {
+            player.sendSystemMessage(Component.literal("Can't place a Tavern Stool there."));
+            return InteractionResult.FAIL;
+        }
         PlotRecord containing = PlotGeometry.findContainingPlot(serverLevel, core, placePos.getX(), placePos.getZ()).orElse(null);
         if (containing == null || !containing.plotId().equals(data.plotId())) {
             player.sendSystemMessage(Component.literal("A Tavern Stool can only be placed inside its own plot."));
             return InteractionResult.FAIL;
         }
 
-        TavernStoolEntity stool = new TavernStoolEntity(com.github.cerealklla.settlemynts.registration.ModEntities.TAVERN_STOOL.get(), serverLevel);
-        stool.setUUID(data.stoolId());
-        float facingYaw = player.getYRot() + 180.0F;
-        stool.snapTo(placePos.getX() + 0.5, placePos.getY(), placePos.getZ() + 0.5, facingYaw, 0.0F);
-        stool.setPlotIdentity(data.settlementCoreId(), data.plotId());
-        data.seatedNpcId().ifPresent(stool::setSeatedNpcId);
-        serverLevel.addFreshEntity(stool);
+        LyfeTavernBridge.placeStool(serverLevel, placePos);
+        TavernStoolIndex.get(serverLevel.getServer()).put(
+                GlobalPos.of(serverLevel.dimension(), placePos), data.settlementCoreId(), data.plotId());
 
         held.shrink(1);
         return InteractionResult.SUCCESS_SERVER;

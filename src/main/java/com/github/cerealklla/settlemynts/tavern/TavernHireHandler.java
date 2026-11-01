@@ -1,11 +1,10 @@
 package com.github.cerealklla.settlemynts.tavern;
 
-import java.util.UUID;
-
 import com.github.cerealklla.settlemynts.bridge.LyfeTavernBridge;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.registration.ModItems;
 
+import net.minecraft.core.GlobalPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -90,20 +89,24 @@ public final class TavernHireHandler {
         } else {
             player.sendSystemMessage(Component.literal("Hired, but no companion-summoning mod is loaded to give you a token."));
         }
-        UUID stoolId = npc.stoolId();
+        GlobalPos stoolPos = npc.stoolPos();
         npc.discard();
-        if (stoolId != null && level.getEntity(stoolId) instanceof TavernStoolEntity stool) {
-            stool.clearSeatedNpcId();
+        if (stoolPos != null) {
+            TavernStoolIndex.get(level.getServer()).clearSeatedNpc(stoolPos);
         }
     }
 
-    /** Right-clicking an already-empty stool -- see {@link TavernStoolEntity#interact}. Direct mirror of {@code guardhouse.GuardKitStandInteraction#pickUp}. */
-    public static void pickUpStool(ServerPlayer player, ServerLevel level, TavernStoolEntity stool) {
-        TavernStoolData data = new TavernStoolData(stool.getUUID(), stool.settlementCoreId(), stool.plotId(), stool.seatedNpcId());
+    /** Sneak + right-clicking an already-empty stool -- see {@link TavernStoolPickupListener}. Direct mirror of {@code guardhouse.GuardKitStandInteraction#pickUp}. */
+    public static void pickUpStool(ServerPlayer player, ServerLevel level, GlobalPos stoolPos) {
+        TavernStoolIndex index = TavernStoolIndex.get(level.getServer());
+        TavernStoolIndex.StoolInfo info = index.get(stoolPos).orElse(null);
+        if (info == null) {
+            return;
+        }
         ItemStack item = new ItemStack(ModItems.TAVERN_STOOL.get());
-        item.set(ModItems.TAVERN_STOOL_DATA.get(), data);
-        stool.discard();
-        TavernStoolIndex.get(level.getServer()).remove(stool.getUUID());
+        item.set(ModItems.TAVERN_STOOL_DATA.get(), new TavernStoolData(info.settlementCoreId(), info.plotId()));
+        LyfeTavernBridge.removeStool(level, stoolPos.pos());
+        index.remove(stoolPos);
         if (!player.getInventory().add(item)) {
             player.drop(item, false);
         }
