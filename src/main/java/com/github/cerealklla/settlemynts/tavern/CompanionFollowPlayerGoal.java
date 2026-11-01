@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.goal.Goal;
 
 /**
@@ -24,6 +25,17 @@ import net.minecraft.world.entity.ai.goal.Goal;
  * why that's the right gate) and the owner (resolved via {@link LyfeSummoningBridge#resolveCompanionOwner})
  * is online in the same dimension -- otherwise this goal simply does nothing, same as a Guard with no
  * roads/plot to fall back on.
+ *
+ * <p><b>Mount-aware, 2026-11-01 (real live-test report: "doesn't seem to be moving any faster than
+ * just walking speed")</b> -- a mounted passenger's own {@code Navigation}/{@code MoveControl} never
+ * actually move it at all; vanilla only ever applies a mob's own pathing to its real position while
+ * it's NOT a passenger ({@code Entity#rideTick} drives position for a passenger instead), so the
+ * companion issuing moves to its own navigation while riding a Mount was a complete no-op -- any
+ * motion observed was purely the mount's own stock wander AI, not real travel toward the owner, which
+ * is exactly why it looked capped at a slow, undirected walking pace. {@link #mover()} now resolves
+ * to the companion's {@linkplain net.minecraft.world.entity.Entity#getVehicle() vehicle} instead of
+ * the companion itself whenever it's riding one, so the actual navigating/moving entity is always
+ * whichever one vanilla will really reposition.
  */
 public class CompanionFollowPlayerGoal extends Goal {
 
@@ -41,12 +53,17 @@ public class CompanionFollowPlayerGoal extends Goal {
         setFlags(EnumSet.of(Flag.MOVE));
     }
 
+    /** The entity that actually gets repositioned by pathing right now -- the companion's mount while riding one, otherwise the companion itself. */
+    private PathfinderMob mover() {
+        return npc.getVehicle() instanceof PathfinderMob mount ? mount : npc;
+    }
+
     @Override
     public boolean canUse() {
         if (npc.stoolPos() != null) {
             return false;
         }
-        if (!npc.getNavigation().isDone()) {
+        if (!mover().getNavigation().isDone()) {
             return false;
         }
         return resolveOwner().isPresent();
@@ -61,7 +78,7 @@ public class CompanionFollowPlayerGoal extends Goal {
         }
         target = pickTargetNear(level, owner);
         if (target != null) {
-            npc.getNavigation().moveTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5, speedModifier);
+            mover().getNavigation().moveTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5, speedModifier);
         }
     }
 
@@ -80,7 +97,7 @@ public class CompanionFollowPlayerGoal extends Goal {
         if ((dx * dx + dz * dz) <= ARRIVE_DIST_SQ) {
             return false; // arrived -- end this run, canUse() picks a fresh point next cycle
         }
-        return !npc.getNavigation().isDone(); // still actively en route; a stuck/failed path also ends here
+        return !mover().getNavigation().isDone(); // still actively en route; a stuck/failed path also ends here
     }
 
     private Optional<ServerPlayer> resolveOwner() {
