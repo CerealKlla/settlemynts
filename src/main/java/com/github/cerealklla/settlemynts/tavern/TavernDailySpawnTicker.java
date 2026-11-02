@@ -129,9 +129,20 @@ public final class TavernDailySpawnTicker {
         // stool's own position directly for any live TavernNpcEntity (not trusting the stored id at
         // all) and discarding everything found is robust regardless of index staleness, and also
         // cleans up any duplicates already created by the bug above the next time this runs.
+        //
+        // Real NPC-loss bug, caught 2026-11-01 ("I've ran it repeatedly, only the 1 seat ever gets an
+        // NPC, same one each time"): the plain AABB.inflate(1.5) scan box has no idea which stool an
+        // NPC actually belongs to -- with several stools in the same small tavern room (routinely
+        // under 3 blocks apart), processing stool B's scan box could also catch the NPC stool A had
+        // JUST spawned moments earlier in this same pass (now that forceRefreshPlot/the midnight
+        // pipeline process every stool of a plot back to back, not one at a time on unrelated chunk
+        // loads like before) and wrongly discard it, cascading stool-by-stool down to whichever one
+        // happens to process last. Filtering by each candidate's own {@link TavernNpcEntity#stoolPos}
+        // identity (not just spatial proximity) means a pass can only ever discard an NPC that
+        // genuinely belongs to THIS stool, regardless of how close another stool sits.
         BlockPos stoolPos = pos.pos();
         AABB scanBox = new AABB(stoolPos).inflate(1.5);
-        List<TavernNpcEntity> stale = level.getEntitiesOfClass(TavernNpcEntity.class, scanBox);
+        List<TavernNpcEntity> stale = level.getEntitiesOfClass(TavernNpcEntity.class, scanBox, npc -> pos.equals(npc.stoolPos()));
         for (TavernNpcEntity npc : stale) {
             npc.discard(); // Never hired -- despawns, stool reopens this same scan.
         }
