@@ -74,7 +74,7 @@ import net.minecraft.world.level.storage.ValueOutput;
  * own {@code GuardSightGoal}/{@code GuardSpellCastGoal}/{@code GuardPatrolAreaGoal} -- see each of
  * those classes' own doc for what changed.
  */
-public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob {
+public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
     private final RangedBowAttackGoal<TavernNpcEntity> bowGoal = new RangedBowAttackGoal<>(this, 1.0, 20, 15.0F);
     private final MeleeAttackGoal meleeGoal = new MeleeAttackGoal(this, 1.0, false);
