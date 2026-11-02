@@ -141,6 +141,11 @@ public final class DebugCommands {
                         // ADMIN ONLY -- one-time data fix, see #tavernNpcDedup's own doc.
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .executes(ctx -> tavernNpcDedup(ctx.getSource())))
+                .then(Commands.literal("tavernrefresh")
+                        // ADMIN ONLY -- forces the current plot's stools through the daily-refresh
+                        // logic right now, see #tavernRefresh's own doc.
+                        .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                        .executes(ctx -> tavernRefresh(ctx.getSource())))
                 .then(Commands.literal("setplotowner")
                         // ADMIN ONLY -- unlike every other command in this class (see class doc,
                         // deliberately ungated), this one mutates live plot ownership + re-syncs
@@ -988,6 +993,46 @@ public final class DebugCommands {
         source.sendSuccess(() -> Component.literal("Reset \"" + plotName + "\"'s tavernStoolsIssued from "
                 + previous + " to 0 -- the Plot Config Sign will grant a fresh set of Tavern Stools again."), true);
         return 1;
+    }
+
+    /**
+     * ADMIN ONLY (LEVEL_GAMEMASTERS, or RCON) -- added 2026-11-01, real follow-up to the
+     * discard-before-tier-resolve race {@code tavern.TavernDailySpawnTicker#processStool} was just
+     * fixed for: fixing the race stops it from recurring, but doesn't retroactively fill in a stool
+     * that already lost its NPC, and that can only happen again on a real day boundary (up to 20 real
+     * minutes) or a restart, both of which also need the plot's chunks loaded at that exact moment to
+     * actually catch it. This forces every stool belonging to the plot the executing player is
+     * standing in through that exact same logic ({@code TavernDailySpawnTicker#forceRefreshPlot}),
+     * right now, same resolve-the-plot-the-player-is-standing-in pattern as
+     * {@link #resetTavernStoolsIssued}.
+     */
+    private static int tavernRefresh(CommandSourceStack source) {
+        if (!(source.getEntity() instanceof net.minecraft.world.entity.player.Player player) || !(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run by a player in-world (stand inside the target plot)."));
+            return 0;
+        }
+        AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+        BlockPos playerPos = player.blockPosition();
+        GhostTownHallCoreEntity foundCore = null;
+        PlotRecord foundPlot = null;
+        for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, GhostTownHallCoreEntity::isFinalized)) {
+            Optional<PlotRecord> plot = com.github.cerealklla.settlemynts.zone.PlotGeometry.findContainingPlot(level, core, playerPos.getX(), playerPos.getZ());
+            if (plot.isPresent()) {
+                foundCore = core;
+                foundPlot = plot.get();
+                break;
+            }
+        }
+        if (foundPlot == null) {
+            source.sendFailure(Component.literal("You're not standing inside any finalized plot."));
+            return 0;
+        }
+        int processed = com.github.cerealklla.settlemynts.tavern.TavernDailySpawnTicker.forceRefreshPlot(
+                source.getServer(), foundCore.getUUID(), foundPlot.plotId());
+        String plotName = foundPlot.name();
+        source.sendSuccess(() -> Component.literal("Refreshed " + processed + " Tavern stool(s) for \"" + plotName + "\"."), true);
+        return processed;
     }
 
     /**

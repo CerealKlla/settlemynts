@@ -79,7 +79,38 @@ public final class TavernDailySpawnTicker {
         }
     }
 
-    private void processStool(ServerLevel level, GlobalPos pos, TavernStoolIndex.StoolInfo info) {
+    /**
+     * Forces every known stool belonging to one plot through the exact same {@link #processStool}
+     * logic the daily boundary/startup catch-up passes use, right now -- for {@code
+     * debug.DebugCommands}' admin-only command, added 2026-11-01 so a plot stuck with stale/missing
+     * NPCs (the race {@link #processStool} itself was just fixed for) doesn't have to wait on a real
+     * day boundary lining up with someone standing nearby. Returns how many stools were actually
+     * processed (chunk loaded, core/plot/tier all resolved) out of the plot's total known stools.
+     */
+    public static int forceRefreshPlot(MinecraftServer server, java.util.UUID settlementCoreId, java.util.UUID plotId) {
+        if (!LyfeTavernBridge.isLoaded()) {
+            return 0;
+        }
+        int processed = 0;
+        for (Map.Entry<GlobalPos, TavernStoolIndex.StoolInfo> entry : TavernStoolIndex.get(server).all().entrySet()) {
+            TavernStoolIndex.StoolInfo info = entry.getValue();
+            if (!info.settlementCoreId().equals(settlementCoreId) || !info.plotId().equals(plotId)) {
+                continue;
+            }
+            GlobalPos pos = entry.getKey();
+            ServerLevel level = server.getLevel(pos.dimension());
+            if (level == null) {
+                continue;
+            }
+            if (processStool(level, pos, info)) {
+                processed++;
+            }
+        }
+        return processed;
+    }
+
+    /** @return true if this stool was actually resolved and processed (chunk loaded, core/plot/tier all resolved), false if it was silently skipped. */
+    private static boolean processStool(ServerLevel level, GlobalPos pos, TavernStoolIndex.StoolInfo info) {
         // Real duplication bug, caught 2026-11-01: this method's own discard-then-spawn logic is
         // only trustworthy if the stool's own chunk is actually loaded right now -- level.getEntitiesOfClass
         // below can only ever see already-loaded entities, so an unloaded stool's existing NPC (sitting
@@ -90,14 +121,14 @@ public final class TavernDailySpawnTicker {
         // day's scan") -- the bug was that only the core/plot resolution was ever actually gated on
         // load state, not the stool position itself.
         if (!level.isLoaded(pos.pos())) {
-            return;
+            return false;
         }
         if (!(level.getEntity(info.settlementCoreId()) instanceof GhostTownHallCoreEntity core)) {
-            return; // Chunk not loaded, or the core couldn't be resolved -- skip this scan.
+            return false; // Chunk not loaded, or the core couldn't be resolved -- skip this scan.
         }
         PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(info.plotId())).findFirst().orElse(null);
         if (plot == null) {
-            return;
+            return false;
         }
 
         // Real NPC-loss bug, caught 2026-11-01 ("previously when there were dupes they all had NPCs,
@@ -115,7 +146,7 @@ public final class TavernDailySpawnTicker {
                 ? com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveTier(level, plot)
                 : 0;
         if (TavernConstants.stoolCountForTier(boxTier) <= 0) {
-            return;
+            return false;
         }
 
         TavernStoolIndex index = TavernStoolIndex.get(level.getServer());
@@ -139,6 +170,7 @@ public final class TavernDailySpawnTicker {
         }
 
         spawnNpc(level, pos, info, boxTier);
+        return true;
     }
 
     /**
