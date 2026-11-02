@@ -133,8 +133,30 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob {
         this.goalSelector.addGoal(1, new FloatGoal(this));
         // Priority 2 (melee/bow/spell) is deliberately NOT added here -- see reassessWeaponGoal().
         this.goalSelector.addGoal(3, new CompanionFollowPlayerGoal(this, 0.8));
-        this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
+        // Real report, 2026-11-01: "the companion is spinning left and right while just riding in a
+        // straight line." Not a vehicle/position-interpolation issue like Caryvan's wagon (that one's
+        // a custom, non-living Entity that genuinely needed its own InterpolationHandler -- a real
+        // vanilla Horse already has that built in, same as any mob). Root cause here is these two
+        // goals: neither is gated on riding state, so both kept independently steering this entity's
+        // own head/body rotation toward the owner (LookAtPlayerGoal) or a random idle direction
+        // (RandomLookAroundGoal) while the horse was carrying it in a completely different direction
+        // under its own travel AI -- two uncoordinated rotation sources fighting each other reads as
+        // spinning. Neither vanilla class defers to {@code isPassenger()} on its own, and both are
+        // plain, non-final {@code Goal}s, so each is subclassed here with exactly one line added
+        // (`!isPassenger()` gating `canUse()`) rather than disabled outright -- they still work
+        // normally for a companion standing on its own two feet, which was never the reported problem.
+        this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F) {
+            @Override
+            public boolean canUse() {
+                return !isPassenger() && super.canUse();
+            }
+        });
+        this.goalSelector.addGoal(5, new RandomLookAroundGoal(this) {
+            @Override
+            public boolean canUse() {
+                return !isPassenger() && super.canUse();
+            }
+        });
         // A seated patron ("never get up") never actually moves even though these goals are always
         // registered -- CompanionFollowPlayerGoal/CompanionSightGoal/CompanionSpellCastGoal each
         // defer entirely while stoolPos is non-null, see this class's own doc.

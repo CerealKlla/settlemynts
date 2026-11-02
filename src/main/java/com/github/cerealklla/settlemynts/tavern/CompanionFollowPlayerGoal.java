@@ -59,6 +59,13 @@ import net.minecraft.world.entity.ai.goal.Goal;
  * only picks the higher mounted modifier past {@link #RUN_DISTANCE_BLOCKS}, using the same
  * on-foot-pace modifier as the close-range mounted case too -- re-evaluated fresh each time a new
  * target is picked ({@link #start()}), not continuously mid-path.
+ *
+ * <p><b>Teleport-when-stuck safety net, same day (fourth spec)</b> -- explicit user request: if a
+ * fresh cycle starts ({@link #start()}, meaning the previous leg just ended, whether by real arrival
+ * or {@code canContinueToUse()} giving up on a stuck/failed path) and {@link #mover()} is still past
+ * {@link #TELEPORT_DISTANCE_BLOCKS} from the owner, it's assumed stuck -- rather than issue yet
+ * another {@code Navigation} leg that may fail the same way, {@link #mover()} is snapped directly to
+ * the freshly-picked target instead of pathing to it.
  */
 public class CompanionFollowPlayerGoal extends Goal {
 
@@ -71,6 +78,9 @@ public class CompanionFollowPlayerGoal extends Goal {
 
     /** Navigation speedModifier used while riding a mount and past {@link #RUN_DISTANCE_BLOCKS} from the owner -- see this class's own doc for why this can't just be the mount's real gallop speed. Flagged placeholder/tunable. */
     private static final double MOUNTED_SPEED_MODIFIER = 2.5;
+
+    /** Starting a fresh cycle still this far from the owner means the previous leg didn't actually close the gap -- assumed stuck, teleport instead of pathing again. Explicit user spec. */
+    private static final double TELEPORT_DISTANCE_BLOCKS = 30.0;
 
     private final TavernNpcEntity npc;
     private final double speedModifier;
@@ -114,9 +124,14 @@ public class CompanionFollowPlayerGoal extends Goal {
             return;
         }
         target = pickTargetNear(level, owner);
-        if (target != null) {
-            mover().getNavigation().moveTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5, currentSpeedModifier(owner));
+        if (target == null) {
+            return;
         }
+        if (npc.distanceTo(owner) > TELEPORT_DISTANCE_BLOCKS) {
+            mover().snapTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5);
+            return;
+        }
+        mover().getNavigation().moveTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5, currentSpeedModifier(owner));
     }
 
     @Override
