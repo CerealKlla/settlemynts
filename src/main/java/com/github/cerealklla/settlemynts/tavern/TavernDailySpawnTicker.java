@@ -100,6 +100,24 @@ public final class TavernDailySpawnTicker {
             return;
         }
 
+        // Real NPC-loss bug, caught 2026-11-01 ("previously when there were dupes they all had NPCs,
+        // now only 2 do"): resolveTier below was being called AFTER the discard scan further down,
+        // so a stool whose own chunk was loaded but whose Construction Box (routinely in a different
+        // chunk -- it's placed just outside the plot's buildable area) was NOT yet loaded at this
+        // exact tick would have resolveTier silently return 0, bailing out at the tier check with its
+        // real NPC already discarded and nothing spawned to replace it -- permanently, until the next
+        // full day boundary (20 real minutes) happens to land with the box resolvable too. This races
+        // on every server restart's startup catch-up pass (chunk-load order isn't guaranteed), which
+        // is exactly why two back-to-back redeploys today eroded this down to 2 of 5 stools instead of
+        // all 5 keeping their (possibly duplicated) NPC. Resolved now, before anything is touched, so
+        // an unresolvable tier leaves this stool's existing NPC(s) completely alone instead.
+        int boxTier = ModList.get().isLoaded("blueprynts")
+                ? com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveTier(level, plot)
+                : 0;
+        if (TavernConstants.stoolCountForTier(boxTier) <= 0) {
+            return;
+        }
+
         TavernStoolIndex index = TavernStoolIndex.get(level.getServer());
         // Real duplication bug, caught 2026-10-31 ("several of the same NPCs on a single stool"):
         // looking up only the single stored seatedNpcId by UUID silently finds nothing if that
@@ -120,12 +138,6 @@ public final class TavernDailySpawnTicker {
             index.clearSeatedNpc(pos);
         }
 
-        int boxTier = ModList.get().isLoaded("blueprynts")
-                ? com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveTier(level, plot)
-                : 0;
-        if (TavernConstants.stoolCountForTier(boxTier) <= 0) {
-            return;
-        }
         spawnNpc(level, pos, info, boxTier);
     }
 
