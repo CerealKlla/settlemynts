@@ -272,7 +272,19 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         // previous registration order (Patrol added first) meant Patrol always re-picked a new stake
         // immediately and this goal never got a real chance to run at all.
         this.goalSelector.addGoal(3, new GuardPickUpItemsGoal(this));
-        this.goalSelector.addGoal(3, new GuardPatrolAreaGoal(this, 0.8));
+        // Priority 4, NOT 3 -- real live-test bug, 2026-11-02 (found on the Tavern Companion's
+        // identical pattern first, see TavernNpcEntity's own doc): meleeGoal is added at priority 3
+        // by reassessWeaponGoal()'s spell+melee-fallback branch, expecting the GoalSelector to fall
+        // through to it "for free" once spellCastGoal's canUse() goes false -- but equal-priority
+        // goals can never preempt each other (confirmed against the real decompiled vanilla
+        // GoalSelector/WrappedGoal source: canBeReplacedBy requires a STRICTLY lower priority
+        // number), and this goal, registered here in the constructor before meleeGoal even exists,
+        // always won the shared Flag.MOVE claim first. Priority 4 lets meleeGoal (priority 3) always
+        // legitimately preempt this one -- also means GuardPickUpItemsGoal/OpenDoorGoal/
+        // GuardGateOpenGoal (still priority 3) now outrank this one by number, not just insertion
+        // order, which is strictly more robust than the previous tie-break this method's own doc
+        // used to describe.
+        this.goalSelector.addGoal(4, new GuardPatrolAreaGoal(this, 0.8));
         // Real wooden doors (explicit live report, 2026-10-16: "not opening/closing doors/gates when
         // they get stuck") -- same priority/shape vanilla's own Vindicator uses for the identical
         // goal. `setCanOpenDoors(true)` on the navigation is the other required half (see the
@@ -313,10 +325,12 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
             this.goalSelector.addGoal(2, this.bowGoal);
         } else if (LyfeMagicianBridge.isLoaded() && (LyfeMagicianBridge.isNatureStaff(getMainHandItem())
                 || LyfeMagicianBridge.hasOffhandSpell(getOffhandItem()))) {
-            // Spell-cast at priority 2 (tried first); melee at priority 3 as a pure fallback -- the
-            // GoalSelector itself handles "melee while on cooldown" for free, since spellCastGoal's
-            // own canUse() returning false (nothing to heal, spell unavailable) lets the
-            // lower-priority melee goal start instead. See GuardSpellCastGoal's own doc.
+            // Spell-cast at priority 2 (tried first); melee at priority 3 as a pure fallback --
+            // spellCastGoal's own canUse() returning false (nothing to heal, spell unavailable) lets
+            // the lower-priority melee goal start instead, PROVIDED nothing else at priority 3 is
+            // already sitting on the shared Flag.MOVE/LOOK claim (see GuardPatrolAreaGoal's own
+            // comment above, priority 4 now, for the real bug this used to hide). See
+            // GuardSpellCastGoal's own doc.
             this.goalSelector.addGoal(2, this.spellCastGoal);
             this.goalSelector.addGoal(3, this.meleeGoal);
         } else {

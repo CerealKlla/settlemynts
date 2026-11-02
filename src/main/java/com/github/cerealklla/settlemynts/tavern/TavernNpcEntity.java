@@ -132,7 +132,15 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, c
     protected void registerGoals() {
         this.goalSelector.addGoal(1, new FloatGoal(this));
         // Priority 2 (melee/bow/spell) is deliberately NOT added here -- see reassessWeaponGoal().
-        this.goalSelector.addGoal(3, new CompanionFollowPlayerGoal(this, 0.8));
+        // Priority 4, NOT 3 -- real live-test bug, 2026-11-02: "used the spell but didn't melee while
+        // the spell was on cooldown." reassessWeaponGoal()'s spell+melee-fallback branch adds
+        // meleeGoal at priority 3 expecting the GoalSelector to fall through to it "for free" once
+        // spellCastGoal's canUse() goes false -- but confirmed against the real decompiled vanilla
+        // GoalSelector/WrappedGoal source that equal-priority-number goals can NEVER preempt each
+        // other (canBeReplacedBy requires a STRICTLY lower number), and this goal, registered here in
+        // the constructor before meleeGoal even exists, always won the shared Flag.MOVE claim first.
+        // Priority 4 lets meleeGoal (priority 3) always legitimately preempt this one instead.
+        this.goalSelector.addGoal(4, new CompanionFollowPlayerGoal(this, 0.8));
         // Real report, 2026-11-01: "the companion is spinning left and right while just riding in a
         // straight line." Not a vehicle/position-interpolation issue like Caryvan's wagon (that one's
         // a custom, non-living Entity that genuinely needed its own InterpolationHandler -- a real
