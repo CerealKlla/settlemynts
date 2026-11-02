@@ -11,6 +11,8 @@ import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.kyt.api.Kyt;
 import com.github.cerealklla.kyt.generic.GenericFamily;
 import com.github.cerealklla.kyt.loadout.LoadoutRecord;
+import com.github.cerealklla.nuclyus.chunkload.ChunkClaimId;
+import com.github.cerealklla.nuclyus.chunkload.ChunkClaims;
 import com.github.cerealklla.settlemynts.bridge.LyfeEquipmentFamiliesBridge;
 import com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge;
 import com.github.cerealklla.settlemynts.bridge.LyfeSummoningBridge;
@@ -409,6 +411,13 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
                 && claimLevel.getEntity(claimedPatrolStakeId) instanceof com.github.cerealklla.settlemynts.roadway.RoadwayStakeEntity claimedStake) {
             claimedStake.clearClaim();
         }
+        // Dimension-stranded chunk claim (2026-11-02): a dead entity generally stops ticking before
+        // the goal selector/customServerAiStep would ever run again, same reasoning as the patrol
+        // stake release right above -- release explicitly here or it leaks forever.
+        if (strandedChunkClaimActive && level() instanceof ServerLevel claimLevel) {
+            strandedChunkClaimActive = false;
+            ChunkClaims.release(claimLevel.getServer(), strandedChunkClaimId());
+        }
         if (plotId == null || assignedStandId == null || !(level() instanceof ServerLevel serverLevel)) {
             return;
         }
@@ -456,6 +465,51 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     protected void customServerAiStep(ServerLevel level) {
         super.customServerAiStep(level);
         stuckWatchdog.tick(this, homePos);
+        maintainStrandedChunkClaim(level);
+    }
+
+    /**
+     * Real report, 2026-11-02: "every one of my town guards has gone through into the nether portal
+     * and I'm guessing because no one is in there they are just stuck in stasis." Confirmed root
+     * cause: nothing force-loads a guard's chunk once it crosses into a dimension with no player
+     * nearby, so the chunk unloads under ordinary vanilla rules and this guard (including {@link
+     * GuardReturnToDimensionGoal}, the very goal that would walk it back home) simply stops ticking,
+     * frozen wherever it stood, forever. Explicit user direction: "I don't care if they go into the
+     * portal so long as they come back out again" -- so this doesn't block/avoid portal crossings at
+     * all (that's deliberately left alone, see {@link GuardReturnToDimensionGoal}'s own doc), it just
+     * guarantees a stranded guard's chunk never goes to sleep until it's actually found its way home,
+     * via the user's own suggested mechanism: Nuclyus's shared {@link ChunkClaims} ticket primitive.
+     *
+     * <p>Since this runs every tick a guard is actively ticking (which a forced chunk always is),
+     * claiming just the guard's own current chunk here -- not a fixed radius, and with no separate
+     * re-claim timer -- is enough: {@link ChunkClaims#claim} is cheap to call redundantly (a no-op
+     * once a chunk's already claimed), and because it's additive rather than replacing the claim's
+     * chunk set each time, every chunk the guard ever stands in while stranded stays force-loaded for
+     * the rest of the trip, naturally force-loading a full trail from its arrival point to wherever
+     * the portal actually is -- no need to know that location in advance, or to force-load the
+     * portal's own chunk specifically (vanilla's POI-backed portal lookup doesn't need its target
+     * chunk to be currently loaded to find it, only the searching entity's own chunk needs to keep
+     * ticking). Released in one call the instant the guard's dimension matches {@link
+     * #homeDimension()} again -- correctly covers a guard that's fighting/healing mid-crossing too,
+     * since that only pauses {@link GuardReturnToDimensionGoal} itself, not this dimension check.
+     */
+    private boolean strandedChunkClaimActive;
+
+    private void maintainStrandedChunkClaim(ServerLevel level) {
+        if (homeDimension() == null) {
+            return;
+        }
+        if (level.dimension() != homeDimension()) {
+            strandedChunkClaimActive = true;
+            ChunkClaims.claim(level, strandedChunkClaimId(), List.of(blockPosition()));
+        } else if (strandedChunkClaimActive) {
+            strandedChunkClaimActive = false;
+            ChunkClaims.release(level.getServer(), strandedChunkClaimId());
+        }
+    }
+
+    private ChunkClaimId strandedChunkClaimId() {
+        return new ChunkClaimId("settlemynts", "guard_stranded", getUUID());
     }
 
     /**
