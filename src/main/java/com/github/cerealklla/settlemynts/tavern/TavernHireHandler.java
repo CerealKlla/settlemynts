@@ -155,12 +155,24 @@ public final class TavernHireHandler {
         }
     }
 
-    /** Sneak + right-clicking an already-empty stool -- see {@link TavernStoolPickupListener}. Direct mirror of {@code guardhouse.GuardKitStandInteraction#pickUp}. */
+    /**
+     * Sneak + right-clicking an indexed stool -- see {@link TavernStoolPickupListener}. Direct mirror
+     * of {@code guardhouse.GuardKitStandInteraction#pickUp}, except for one real gap caught before
+     * ever shipping: {@link TavernStoolPickupListener} was widened to allow picking up a still-occupied
+     * stool (see its own doc), but this method never actually discarded the seated NPC -- it would
+     * have just removed the stool block/index entry and handed the item back while leaving the NPC
+     * alive and orphaned in midair where the stool used to be. Now discards any seated
+     * {@link TavernNpcEntity} outright first (same no-token, no-payment "this is furniture" reasoning
+     * as the listener's own doc).
+     */
     public static void pickUpStool(ServerPlayer player, ServerLevel level, GlobalPos stoolPos) {
         TavernStoolIndex index = TavernStoolIndex.get(level.getServer());
         TavernStoolIndex.StoolInfo info = index.get(stoolPos).orElse(null);
         if (info == null) {
             return;
+        }
+        if (info.seatedNpcId().isPresent() && level.getEntity(info.seatedNpcId().get()) instanceof TavernNpcEntity seated) {
+            seated.discard();
         }
         ItemStack item = new ItemStack(ModItems.TAVERN_STOOL.get());
         item.set(ModItems.TAVERN_STOOL_DATA.get(), new TavernStoolData(info.settlementCoreId(), info.plotId()));
