@@ -80,7 +80,7 @@ public class CompanionFollowPlayerGoal extends Goal {
     private static final double MOUNTED_SPEED_MODIFIER = 2.5;
 
     /** Starting a fresh cycle still this far from the owner means the previous leg didn't actually close the gap -- assumed stuck, teleport instead of pathing again. Explicit user spec. */
-    private static final double TELEPORT_DISTANCE_BLOCKS = 30.0;
+    private static final double TELEPORT_DISTANCE_BLOCKS = 40.0;
 
     private final TavernNpcEntity npc;
     private final double speedModifier;
