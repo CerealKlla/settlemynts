@@ -38,29 +38,6 @@ public final class TavernNpcRenderer extends HumanoidMobRenderer<TavernNpcEntity
         return new HumanoidRenderState();
     }
 
-    /**
-     * Real complaint, 2026-11-01: a Companion riding a real horse looked disconnected/floating no
-     * matter what, even confirmed via RCON to have the exact same X/Z as the horse (a genuine, correct
-     * riding relationship, not a positioning bug) -- vanilla's own bent-leg "riding" pose
-     * ({@code HumanoidMobRenderer#extractRenderState}'s {@code state.isPassenger} branch) is what was
-     * actually being rendered. That pose can't be fixed for a real vanilla {@code AbstractHorse} the
-     * way it was for Lyfe's own {@code SeatEntity} (no mixin exists in this codebase to touch vanilla's
-     * own attachment math, and the user explicitly wants the bent-leg pose KEPT for the stool case --
-     * see Lyfe's own decisions.md). Narrower fix: suppress the pose only while riding a real
-     * {@link net.minecraft.world.entity.LivingEntity} (a horse or any other live mount) -- a stool's
-     * mount point is a non-living {@code Display} entity, so this leaves that case completely
-     * untouched. A companion on a mount now stands normally instead (straight legs reaching down to
-     * the mount's own back), the same tradeoff already made (then kept) for the standing-on-a-stool
-     * look, just applied only where the bent-leg pose can't be fixed any other way.
-     */
-    @Override
-    public void extractRenderState(TavernNpcEntity entity, HumanoidRenderState state, float partialTick) {
-        super.extractRenderState(entity, state, partialTick);
-        if (entity.getVehicle() instanceof net.minecraft.world.entity.LivingEntity) {
-            state.isPassenger = false;
-        }
-    }
-
     @Override
     public Identifier getTextureLocation(HumanoidRenderState state) {
         return TEXTURE;
