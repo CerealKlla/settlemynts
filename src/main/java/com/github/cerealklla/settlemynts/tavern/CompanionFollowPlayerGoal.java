@@ -185,7 +185,12 @@ public class CompanionFollowPlayerGoal extends Goal {
             if (offsetX * offsetX + offsetZ * offsetZ > FOLLOW_RADIUS_BLOCKS * FOLLOW_RADIUS_BLOCKS) {
                 continue;
             }
-            int y = GroundHeightFinder.findNear(level, x, z, Mth.floor(owner.getY()));
+            // Real clearance for whichever entity actually ends up placed here -- see
+            // GroundHeightFinder#findNear(ServerLevel, int, int, int, int)'s own doc for why this
+            // matters specifically for the teleport-when-stuck fallback (a horse is 1.6 blocks tall,
+            // not the single open block every other caller of this utility only ever needed).
+            int clearanceBlocks = Mth.ceil(mover().getBbHeight());
+            int y = GroundHeightFinder.findNear(level, x, z, Mth.floor(owner.getY()), clearanceBlocks);
             return new BlockPos(x, y, z);
         }
         return null;

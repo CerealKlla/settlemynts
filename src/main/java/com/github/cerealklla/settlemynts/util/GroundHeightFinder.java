@@ -50,19 +50,39 @@ public final class GroundHeightFinder {
      * Same return convention as {@code Heightmap.Types#getHeight} (the Y of the first open/non-solid
      * space directly above solid ground), but anchored near {@code referenceY} instead of the level's
      * absolute top -- see this class's own doc for the full root-cause writeup and the "search both
-     * directions" rework.
+     * directions" rework. Same as {@link #findNear(ServerLevel, int, int, int, int)} with a 1-block
+     * clearance requirement -- every existing caller only ever needed a single open block (a sign, a
+     * stake, a human-sized NPC that only ever reaches a spot via real pathfinding, which already
+     * avoids walking into a ceiling on its own).
      */
     public static int findNear(ServerLevel level, int x, int z, int referenceY) {
+        return findNear(level, x, z, referenceY, 1);
+    }
+
+    /**
+     * Real bug report, 2026-11-01: a mounted Companion's own teleport-when-stuck fallback (see
+     * {@code tavern.CompanionFollowPlayerGoal}) snapped its horse directly to a picked target with no
+     * pathfinding involved at all -- unlike every other caller of this class, which only ever reaches
+     * a found spot by walking there, so real collision-aware movement was already guaranteed to never
+     * walk INTO a wall even if the final resting point itself only had one open block above it. A
+     * teleport has no such guarantee: a 1.6-block-tall horse snapped to a spot with only ONE open
+     * block above solid ground (the original {@link #findNear}'s whole definition of "walkable") left
+     * its upper body embedded in whatever solid block sat directly above -- "the horse was suffocating
+     * in a wall." This overload requires {@code clearanceBlocks} consecutive open blocks starting at
+     * the candidate Y (not just the one at Y itself), so a caller that's about to bypass pathfinding
+     * entirely can ask for real headroom sized to whatever entity it's actually about to place there.
+     */
+    public static int findNear(ServerLevel level, int x, int z, int referenceY, int clearanceBlocks) {
         int minY = level.getMinY();
         int maxY = level.getMaxY();
         for (int d = 0; d <= SEARCH_RADIUS_BLOCKS; d++) {
             int up = referenceY + d;
-            if (up <= maxY && isWalkableSpace(level, x, up, z)) {
+            if (up <= maxY && isWalkableSpace(level, x, up, z, clearanceBlocks)) {
                 return up;
             }
             if (d > 0) {
                 int down = referenceY - d;
-                if (down >= minY && isWalkableSpace(level, x, down, z)) {
+                if (down >= minY && isWalkableSpace(level, x, down, z, clearanceBlocks)) {
                     return down;
                 }
             }
@@ -70,10 +90,17 @@ public final class GroundHeightFinder {
         return fallbackScanDown(level, x, z, referenceY);
     }
 
-    /** {@code y} itself is open (non-solid, non-leaf) and {@code y - 1} is real solid support -- i.e. {@code y} is somewhere you could actually stand. */
-    private static boolean isWalkableSpace(ServerLevel level, int x, int y, int z) {
-        BlockPos pos = new BlockPos(x, y, z);
-        return !isSolid(level, pos) && isSolid(level, pos.below());
+    /** {@code clearanceBlocks} consecutive blocks starting at {@code y} are all open (non-solid, non-leaf) and {@code y - 1} is real solid support -- i.e. {@code y} is somewhere an entity that tall could actually stand without clipping into a ceiling. */
+    private static boolean isWalkableSpace(ServerLevel level, int x, int y, int z, int clearanceBlocks) {
+        if (!isSolid(level, new BlockPos(x, y - 1, z))) {
+            return false;
+        }
+        for (int i = 0; i < clearanceBlocks; i++) {
+            if (isSolid(level, new BlockPos(x, y + i, z))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean isSolid(ServerLevel level, BlockPos pos) {
