@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.registration;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlockEntity;
+import com.github.cerealklla.settlemynts.murmur.MurmurTowerBlockEntity;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity;
 import com.github.cerealklla.settlemynts.rope.RopeFencePostBlockEntity;
 import com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconBlockEntity;
@@ -34,4 +35,8 @@ public final class ModBlockEntities {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<WatchTowerBeaconBlockEntity>> WATCH_TOWER_BEACON =
             BLOCK_ENTITIES.register("watch_tower_beacon",
                     () -> new BlockEntityType<>(WatchTowerBeaconBlockEntity::new, ModBlocks.WATCH_TOWER_BEACON.get()));
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<MurmurTowerBlockEntity>> MURMUR_TOWER =
+            BLOCK_ENTITIES.register("murmur_tower",
+                    () -> new BlockEntityType<>(MurmurTowerBlockEntity::new, ModBlocks.MURMUR_TOWER.get()));
 }

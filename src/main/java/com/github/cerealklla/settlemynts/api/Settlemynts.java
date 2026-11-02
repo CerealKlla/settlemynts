@@ -909,4 +909,60 @@ public final class Settlemynts {
     public static void despawnHighwayStakesForInstance(ServerLevel level, UUID instanceId, BlockPos nearHint) {
         com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity.despawnAllForInstance(level, instanceId, nearHint);
     }
+
+    /**
+     * One in-range Murmur Tower's real broadcast state -- {@code settlementPlaceId} is the real
+     * Cartographyr {@code EntityId}'s own underlying {@code long} (same value {@link
+     * #getSettlementTier}/Myssions' location-hint quests already key Lyfe knowledge grants on), not
+     * a newly-invented identifier.
+     */
+    public record MurmurSignal(BlockPos towerPos, int tier, int maxRangeBlocks, long settlementPlaceId) {
+    }
+
+    /**
+     * The strongest Murmur Tower signal currently in range of {@code pos} (ties broken by nearest),
+     * scanning every known tower from {@code murmur.MurmurTowerIndex}, filtered to {@code level}'s
+     * own dimension (never compared across dimensions -- see that class's own doc). A tower whose
+     * own chunk isn't currently loaded is silently skipped, same accepted limitation every other
+     * index-backed scan in this mod already carries -- in practice this won't matter for a real
+     * caller here, since anyone close enough to query this is already within {@code
+     * zone.SettlementProximityTicker}'s own 300-block force-load range, well past any Tier's own
+     * (smaller) max broadcast range.
+     */
+    public static Optional<MurmurSignal> findNearestMurmurSignal(ServerLevel level, BlockPos pos) {
+        MurmurSignal best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (Map.Entry<UUID, GlobalPos> entry : com.github.cerealklla.settlemynts.murmur.MurmurTowerIndex.get(level.getServer()).all().entrySet()) {
+            GlobalPos towerGlobalPos = entry.getValue();
+            if (!towerGlobalPos.dimension().equals(level.dimension())) {
+                continue;
+            }
+            BlockPos towerPos = towerGlobalPos.pos();
+            if (!(level.getBlockEntity(towerPos) instanceof com.github.cerealklla.settlemynts.murmur.MurmurTowerBlockEntity tower)) {
+                continue;
+            }
+            int tier = tower.resolveBuiltTier(level);
+            if (tier <= 0) {
+                continue;
+            }
+            int maxRangeBlocks = com.github.cerealklla.settlemynts.murmur.MurmurTowerRanges.maxRangeBlocks(tier);
+            double distSq = pos.distSqr(towerPos);
+            if (distSq > (double) maxRangeBlocks * maxRangeBlocks) {
+                continue;
+            }
+            long settlementPlaceId = tower.settlementCoreId() != null
+                    && level.getEntity(tower.settlementCoreId()) instanceof GhostTownHallCoreEntity core
+                    && core.getCartographyrEntityId() != null
+                    ? core.getCartographyrEntityId()
+                    : 0L;
+            boolean better = best == null
+                    || maxRangeBlocks > best.maxRangeBlocks()
+                    || (maxRangeBlocks == best.maxRangeBlocks() && distSq < bestDistSq);
+            if (better) {
+                best = new MurmurSignal(towerPos, tier, maxRangeBlocks, settlementPlaceId);
+                bestDistSq = distSq;
+            }
+        }
+        return Optional.ofNullable(best);
+    }
 }

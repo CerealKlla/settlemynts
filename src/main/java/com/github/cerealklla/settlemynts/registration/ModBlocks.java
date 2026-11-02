@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.registration;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.guardhouse.GuardhouseBlock;
+import com.github.cerealklla.settlemynts.murmur.MurmurTowerBlock;
 import com.github.cerealklla.settlemynts.watchtower.WatchTowerBeaconBlock;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlock;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignRelocatorItem;
@@ -88,6 +89,17 @@ public final class ModBlocks {
                     .mapColor(MapColor.STONE)
                     .strength(-1.0F, 3600000.0F)
                     .sound(SoundType.STONE)
+                    .setId(ResourceKey.create(Registries.BLOCK, id))));
+
+    // The Murmur Tower's own structure (explicit user spec, 2026-11-02) -- indestructible/never
+    // player-placed, same shape as WATCH_TOWER_BEACON above; no default BlockItem, only its own
+    // Blueprint content ever places one.
+    public static final DeferredBlock<MurmurTowerBlock> MURMUR_TOWER = BLOCKS.register(
+            "murmur_tower",
+            id -> new MurmurTowerBlock(BlockBehaviour.Properties.of()
+                    .mapColor(MapColor.COLOR_PURPLE)
+                    .strength(-1.0F, 3600000.0F)
+                    .sound(SoundType.AMETHYST)
                     .setId(ResourceKey.create(Registries.BLOCK, id))));
 
     // Roadways Milestone 1 (added 2026-10-06), widened to a 5-tier visual progression tied to a

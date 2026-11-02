@@ -198,6 +198,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.ResidentSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.ResidentConversionGuard());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.ShopMidnightRestockTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.SettlementProximityTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.lumberyard.LumberjackSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.farm.FarmerSpawnTicker());
@@ -248,7 +249,8 @@ public class SettlemyntsMod {
         modEventBus.addListener(this::commonSetup);
         modEventBus.addListener(this::registerPayloads);
         modEventBus.addListener(this::registerAttributes);
-        modEventBus.addListener(com.github.cerealklla.settlemynts.zone.MidnightChunkWaker::registerController);
+        // Chunk force-loading is now registered once, centrally, by Nuclyus's shared
+        // chunkload.ChunkClaims -- see zone.MidnightChunkWaker's own doc for the migration.
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
