@@ -46,10 +46,19 @@ import net.minecraft.world.entity.ai.goal.Goal;
  * code path ({@code getControllingPassenger()} is hard-gated to {@code Player}, see this class's own
  * earlier entry), which a non-player rider can never reach no matter what it asks its own navigation
  * to do. Replicating that full steering/boost mechanic for a non-player rider is a real, separate
- * engineering effort, not a one-line fix -- as a pragmatic stand-in, {@link #currentSpeedModifier()}
- * now uses a noticeably higher modifier specifically while mounted (flagged placeholder/tunable, same
- * footing as every other numeric curve in this codebase) so a mounted companion at least reads as
- * meaningfully faster than walking, even though it's still Navigation-driven rather than a true gallop.
+ * engineering effort, not a one-line fix -- as a pragmatic stand-in, a mounted companion now uses a
+ * noticeably higher modifier (flagged placeholder/tunable, same footing as every other numeric curve
+ * in this codebase) so it at least reads as meaningfully faster than walking, even though it's still
+ * Navigation-driven rather than a true gallop.
+ *
+ * <p><b>Always galloping looked wrong once mounted, same day (third real report)</b> -- "it's moving
+ * at max speed constantly while i'm just standing still." The mounted speed bump above applied
+ * unconditionally to every leg of travel, including trivial few-block repositions right next to the
+ * owner, which read as excessive. Explicit user spec: walk if the companion is within 20 blocks of
+ * its owner, gallop otherwise. {@link #currentSpeedModifier(ServerPlayer)} now takes the owner and
+ * only picks the higher mounted modifier past {@link #RUN_DISTANCE_BLOCKS}, using the same
+ * on-foot-pace modifier as the close-range mounted case too -- re-evaluated fresh each time a new
+ * target is picked ({@link #start()}), not continuously mid-path.
  */
 public class CompanionFollowPlayerGoal extends Goal {
 
@@ -57,7 +66,10 @@ public class CompanionFollowPlayerGoal extends Goal {
     private static final double ARRIVE_DIST_SQ = 4.0;
     private static final int MAX_SAMPLE_ATTEMPTS = 10;
 
-    /** Navigation speedModifier used while riding a mount -- see this class's own doc for why this can't just be the mount's real gallop speed. Flagged placeholder/tunable. */
+    /** Below this distance from the owner, a mounted companion just walks instead of galloping -- explicit user spec. */
+    private static final double RUN_DISTANCE_BLOCKS = 20.0;
+
+    /** Navigation speedModifier used while riding a mount and past {@link #RUN_DISTANCE_BLOCKS} from the owner -- see this class's own doc for why this can't just be the mount's real gallop speed. Flagged placeholder/tunable. */
     private static final double MOUNTED_SPEED_MODIFIER = 2.5;
 
     private final TavernNpcEntity npc;
@@ -75,9 +87,12 @@ public class CompanionFollowPlayerGoal extends Goal {
         return npc.getVehicle() instanceof PathfinderMob mount ? mount : npc;
     }
 
-    /** {@link #speedModifier} while on foot, {@link #MOUNTED_SPEED_MODIFIER} while riding a mount. */
-    private double currentSpeedModifier() {
-        return npc.getVehicle() instanceof PathfinderMob ? MOUNTED_SPEED_MODIFIER : speedModifier;
+    /** {@link #speedModifier} while on foot, or while mounted but close to {@code owner}; {@link #MOUNTED_SPEED_MODIFIER} while mounted and more than {@link #RUN_DISTANCE_BLOCKS} away. */
+    private double currentSpeedModifier(ServerPlayer owner) {
+        if (!(npc.getVehicle() instanceof PathfinderMob)) {
+            return speedModifier;
+        }
+        return npc.distanceTo(owner) < RUN_DISTANCE_BLOCKS ? speedModifier : MOUNTED_SPEED_MODIFIER;
     }
 
     @Override
@@ -100,7 +115,7 @@ public class CompanionFollowPlayerGoal extends Goal {
         }
         target = pickTargetNear(level, owner);
         if (target != null) {
-            mover().getNavigation().moveTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5, currentSpeedModifier());
+            mover().getNavigation().moveTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5, currentSpeedModifier(owner));
         }
     }
 
