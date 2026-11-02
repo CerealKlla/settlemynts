@@ -36,12 +36,29 @@ import net.minecraft.world.entity.ai.goal.Goal;
  * to the companion's {@linkplain net.minecraft.world.entity.Entity#getVehicle() vehicle} instead of
  * the companion itself whenever it's riding one, so the actual navigating/moving entity is always
  * whichever one vanilla will really reposition.
+ *
+ * <p><b>Still too slow even mounted, same day (second real report)</b> -- confirmed via RCON that the
+ * companion genuinely was riding its mount (a real NBT {@code Passengers} relationship), so the fix
+ * above was working as designed -- the actual remaining gap is that it drives the mount through the
+ * exact same plain {@code Navigation}/{@code moveTo} pathing any walking {@code Mob} uses, bounded by
+ * the mount's own base {@code movement_speed} attribute (a horse's is only ~0.2-0.3) -- real galloping
+ * speed only ever comes from vanilla's separate, Player-only {@code AbstractHorse#travel} steering
+ * code path ({@code getControllingPassenger()} is hard-gated to {@code Player}, see this class's own
+ * earlier entry), which a non-player rider can never reach no matter what it asks its own navigation
+ * to do. Replicating that full steering/boost mechanic for a non-player rider is a real, separate
+ * engineering effort, not a one-line fix -- as a pragmatic stand-in, {@link #currentSpeedModifier()}
+ * now uses a noticeably higher modifier specifically while mounted (flagged placeholder/tunable, same
+ * footing as every other numeric curve in this codebase) so a mounted companion at least reads as
+ * meaningfully faster than walking, even though it's still Navigation-driven rather than a true gallop.
  */
 public class CompanionFollowPlayerGoal extends Goal {
 
     private static final double FOLLOW_RADIUS_BLOCKS = 15.0;
     private static final double ARRIVE_DIST_SQ = 4.0;
     private static final int MAX_SAMPLE_ATTEMPTS = 10;
+
+    /** Navigation speedModifier used while riding a mount -- see this class's own doc for why this can't just be the mount's real gallop speed. Flagged placeholder/tunable. */
+    private static final double MOUNTED_SPEED_MODIFIER = 2.5;
 
     private final TavernNpcEntity npc;
     private final double speedModifier;
@@ -56,6 +73,11 @@ public class CompanionFollowPlayerGoal extends Goal {
     /** The entity that actually gets repositioned by pathing right now -- the companion's mount while riding one, otherwise the companion itself. */
     private PathfinderMob mover() {
         return npc.getVehicle() instanceof PathfinderMob mount ? mount : npc;
+    }
+
+    /** {@link #speedModifier} while on foot, {@link #MOUNTED_SPEED_MODIFIER} while riding a mount. */
+    private double currentSpeedModifier() {
+        return npc.getVehicle() instanceof PathfinderMob ? MOUNTED_SPEED_MODIFIER : speedModifier;
     }
 
     @Override
@@ -78,7 +100,7 @@ public class CompanionFollowPlayerGoal extends Goal {
         }
         target = pickTargetNear(level, owner);
         if (target != null) {
-            mover().getNavigation().moveTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5, speedModifier);
+            mover().getNavigation().moveTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5, currentSpeedModifier());
         }
     }
 

@@ -14,12 +14,16 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 
 /**
- * Sneak + right-click an empty, indexed Tavern Stool to pick it back up -- a normal (non-sneaking)
+ * Sneak + right-click an indexed Tavern Stool to pick it back up -- a normal (non-sneaking)
  * right-click is left alone entirely, so {@code com.github.cerealklla.lyfe.rest.StoolBlock}'s own
  * vanilla sit behavior still works unchanged (a player can sit at the bar, same as any other
- * stool -- "reuse the stool with some added features," 2026-10-31). A still-occupied stool (a seated
- * {@link TavernNpcEntity} waiting to be hired) can't be picked up at all -- right-click the NPC
- * itself to hire them instead (see {@link TavernHireInteractListener}).
+ * stool -- "reuse the stool with some added features," 2026-10-31).
+ *
+ * <p><b>Picking up an occupied stool is allowed too, 2026-11-01</b> -- real user pushback: "expecting
+ * me to actually hire all the npcs just to move the stools is wild." A still-seated
+ * {@link TavernNpcEntity} is simply discarded (no Companion Token, no payment -- this is rearranging
+ * furniture, not a real hire) rather than requiring the full hire flow just to free the stool up for
+ * relocation; see {@link TavernHireHandler#pickUpStool}'s own doc for that half.
  */
 public final class TavernStoolPickupListener {
 
@@ -41,10 +45,6 @@ public final class TavernStoolPickupListener {
         }
         event.setCanceled(true);
         event.setCancellationResult(InteractionResult.SUCCESS_SERVER);
-        if (info.get().seatedNpcId().isPresent()) {
-            player.sendSystemMessage(Component.literal("Right-click the seated NPC to hire them."));
-            return;
-        }
         TavernHireHandler.pickUpStool(player, level, globalPos);
     }
 }
