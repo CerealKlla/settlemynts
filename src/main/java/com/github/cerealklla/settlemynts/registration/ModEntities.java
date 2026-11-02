@@ -207,6 +207,10 @@ public final class ModEntities {
     // The seated NPC itself -- a plain profession-less Villager, same shape as RESIDENT_VILLAGER/
     // LUMBERJACK_WORKER/FARMER_WORKER/MINER_WORKER above (real vanilla hitbox/rendering, Brain never
     // ticked). Never naturally spawned -- only ever created by TavernDailySpawnTicker.
+    // A Companion riding a mount sat too high -- see TavernNpcEntity#getVehicleAttachmentPoint's own
+    // doc for the real fix, deliberately NOT done here via `.ridingOffset(...)` (that would apply the
+    // correction universally, including to the stool's own non-living SeatEntity mount point, which
+    // was separately tuned and confirmed working).
     public static final DeferredHolder<EntityType<?>, EntityType<com.github.cerealklla.settlemynts.tavern.TavernNpcEntity>> TAVERN_NPC = ENTITIES.registerEntityType(
             "tavern_npc",
             com.github.cerealklla.settlemynts.tavern.TavernNpcEntity::new,

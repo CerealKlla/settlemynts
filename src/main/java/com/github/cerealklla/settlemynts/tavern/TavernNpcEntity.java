@@ -193,6 +193,34 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob {
         playSound(SoundEvents.SKELETON_SHOOT, 1.0F, 1.0F / (getRandom().nextFloat() * 0.4F + 0.8F));
     }
 
+    /**
+     * Real complaint, 2026-11-01: a Companion riding a horse sat a full 0.6 blocks too high, reading
+     * as floating. Root-caused with real numbers via RCON (exact X/Z match with the horse, Y matching
+     * the horse's own raw passenger-attachment height with zero correction applied), then confirmed
+     * against the real decompiled {@code EntityType.java} source: {@code EntityType.PLAYER} is
+     * registered with an explicit {@code .vehicleAttachment(Avatar.DEFAULT_VEHICLE_ATTACHMENT)} --
+     * {@code Vec3(0, 0.6, 0)} -- which is what actually pulls a real player DOWN into a proper seated
+     * position on anything it mounts; {@code Zombie}/{@code Husk}/{@code Vindicator} each carry their
+     * own equivalent {@code .ridingOffset(...)}, but {@code Villager} (and this entity type, which
+     * copies neither) has none at all, so it fell back to zero correction -- a real, measured gap
+     * between how a player and a generic humanoid Mob sit on the exact same mount, not "that's just
+     * how vanilla looks."
+     *
+     * <p>Deliberately overridden here (an instance method) rather than via {@code
+     * ModEntities#TAVERN_NPC}'s own {@code EntityType.Builder#ridingOffset(...)}, which would apply
+     * universally to ANY vehicle -- including the Tavern Stool's own non-living {@code
+     * com.github.cerealklla.lyfe.rest.SeatEntity} mount point, separately tuned and already confirmed
+     * working ("they look decent now"). Scoped to only correct for a real {@link LivingEntity} (a
+     * horse or any other live mount), leaving stool-sitting completely untouched.
+     */
+    @Override
+    public net.minecraft.world.phys.Vec3 getVehicleAttachmentPoint(net.minecraft.world.entity.Entity vehicle) {
+        if (vehicle instanceof LivingEntity) {
+            return new net.minecraft.world.phys.Vec3(0.0, 0.6, 0.0);
+        }
+        return super.getVehicleAttachmentPoint(vehicle);
+    }
+
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
         super.addAdditionalSaveData(output);
