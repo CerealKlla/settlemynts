@@ -12,80 +12,50 @@ import net.minecraft.core.GlobalPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.AABB;
-import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.ModList;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
- * "New NPCs will show up every day" -- same real-day-boundary detection shape as {@code
- * zone.ShopMidnightRestockTicker}, but iterates every known Tavern Stool directly (via
- * {@link TavernStoolIndex}) rather than force-loading whole settlements -- same "known scaling
- * simplification" {@code guardhouse.GuardSpawnTicker} already explicitly accepts for Guard Kit
- * Stands: a stool whose chunk isn't currently loaded is silently skipped for that day's scan. This
- * is a deliberately lighter-weight choice than {@code ShopMidnightRestockTicker}'s own {@code
- * MidnightChunkWaker}/{@code MidnightWorkQueue} machinery (built specifically to survive heavy,
- * nested box-scanning work like {@code PlannedInventoryClearing}) -- rolling one NPC per empty stool
- * is cheap, one-shot, per-stool work with no equivalent watchdog-crash risk.
+ * "New NPCs will show up every day."
  *
- * <p>On each boundary: any still-unhired {@link TavernNpcEntity} is discarded first (user's explicit
- * choice -- "despawns next daily cycle, stool reopens"), then every now-empty stool (up to its
- * plot's own {@link TavernConstants#stoolCountForTier}) gets a freshly rolled NPC, mounted onto the
- * stool's real Lyfe seat via {@link LyfeTavernBridge#seatOnStool}.
+ * <p><b>Rewritten 2026-11-01</b> -- this used to be its own independent event-subscribed ticker,
+ * detecting the real day boundary itself and silently skipping any stool whose chunk wasn't loaded
+ * at that exact moment (explicitly flagged as a "lighter-weight" choice than {@code
+ * zone.ShopMidnightRestockTicker}'s own force-load machinery). Real user correction: "the settlement
+ * is supposed to come out of stasis at midnight to run a bunch of other stuff; this tavern npc
+ * regeneration should happen at the same time so that even if no player is present the new npcs are
+ * generated" -- that "lighter-weight" choice was exactly the bug, not an acceptable tradeoff: a
+ * chunk-dependent scan can only ever work by coincidence, and the discard-before-respawn shape (see
+ * {@link #processStool}'s own doc) turns a missed scan into a *permanent* loss, not just a skipped
+ * one. This class is no longer an event subscriber at all -- {@code zone.ShopMidnightRestockTicker}
+ * now calls {@link #processStool} directly from inside its own per-settlement, force-loaded,
+ * {@code zone.MidnightWorkQueue}-paced pipeline (see that class's own doc), the same real "wake the
+ * whole settlement, do every job, let it rest" mechanism every other midnight settlement job already
+ * uses -- so Tavern stools get the exact same regardless-of-player-presence guarantee for free,
+ * with no separate chunk-loading story of their own to get wrong.
+ *
+ * <p>Any still-unhired {@link TavernNpcEntity} is discarded first (user's explicit choice --
+ * "despawns next daily cycle, stool reopens"), then every now-empty stool (up to its plot's own
+ * {@link TavernConstants#stoolCountForTier}) gets a freshly rolled NPC, mounted onto the stool's real
+ * Lyfe seat via {@link LyfeTavernBridge#seatOnStool}. A freshly-*placed* stool is handled separately,
+ * immediately, by {@link TavernStoolItem#useOn} calling {@link #spawnNpc} directly -- it doesn't need
+ * to wait for any midnight pass at all.
  */
 public final class TavernDailySpawnTicker {
 
-    private static final long TICKS_PER_DAY = 24000L;
-
-    // A few seconds' grace after boot before the one-time startup catch-up pass runs, so nearby
-    // chunks/entities actually have time to load first -- an otherwise-eligible stool whose chunk
-    // still isn't loaded even then is silently skipped, same accepted limitation as every other scan
-    // here (see this class's own doc).
-    private static final int STARTUP_DELAY_TICKS = 100;
-
-    private long lastKnownDay = -1;
-    private boolean startupPassRun = false;
-
-    @SubscribeEvent
-    public void onServerTick(ServerTickEvent.Post event) {
-        MinecraftServer server = event.getServer();
-        long currentDay = Math.floorDiv(server.overworld().getOverworldClockTime(), TICKS_PER_DAY);
-        if (lastKnownDay < 0) {
-            lastKnownDay = currentDay;
-        }
-        boolean dayBoundaryCrossed = currentDay > lastKnownDay;
-        // Runs once, shortly after each server (re)start, so a stool left empty by the restart (or
-        // placed before this ticker's first real day boundary) gets filled right away instead of
-        // waiting out a full in-game day -- a real bug, caught 2026-10-31 ("I don't see any NPCs
-        // spawning"): this ticker previously only ever baselined on its first tick, never spawned.
-        boolean startupCatchUp = !startupPassRun && server.getTickCount() >= STARTUP_DELAY_TICKS;
-        if (!dayBoundaryCrossed && !startupCatchUp) {
-            return;
-        }
-        lastKnownDay = currentDay;
-        if (startupCatchUp) {
-            startupPassRun = true;
-        }
-
-        if (!LyfeTavernBridge.isLoaded()) {
-            return;
-        }
-        for (Map.Entry<GlobalPos, TavernStoolIndex.StoolInfo> entry : TavernStoolIndex.get(server).all().entrySet()) {
-            GlobalPos pos = entry.getKey();
-            ServerLevel level = server.getLevel(pos.dimension());
-            if (level == null) {
-                continue;
-            }
-            processStool(level, pos, entry.getValue());
-        }
+    private TavernDailySpawnTicker() {
     }
 
     /**
-     * Forces every known stool belonging to one plot through the exact same {@link #processStool}
-     * logic the daily boundary/startup catch-up passes use, right now -- for {@code
-     * debug.DebugCommands}' admin-only command, added 2026-11-01 so a plot stuck with stale/missing
-     * NPCs (the race {@link #processStool} itself was just fixed for) doesn't have to wait on a real
-     * day boundary lining up with someone standing nearby. Returns how many stools were actually
-     * processed (chunk loaded, core/plot/tier all resolved) out of the plot's total known stools.
+     * Forces every known stool belonging to one plot through {@link #processStool}, right now. Two
+     * callers: {@code zone.ShopMidnightRestockTicker}'s own per-settlement midnight pipeline (the
+     * real one, see this class's own top-level doc) -- called only after that pipeline has already
+     * force-loaded every one of this plot's stool positions via {@code zone.MidnightChunkWaker}, so
+     * every stool is guaranteed resolvable there, not merely likely to be; and {@code
+     * debug.DebugCommands}' admin-only {@code tavernrefresh} command, added 2026-11-01 for a plot that
+     * already lost NPCs before this class's chunk-dependent-race fix shipped and doesn't want to wait
+     * for the next midnight pass to repair it -- there, a stool's chunk may or may not happen to be
+     * loaded, same best-effort basis as before. Returns how many stools were actually processed
+     * (chunk loaded, core/plot/tier all resolved) out of the plot's total known stools.
      */
     public static int forceRefreshPlot(MinecraftServer server, java.util.UUID settlementCoreId, java.util.UUID plotId) {
         if (!LyfeTavernBridge.isLoaded()) {
@@ -174,12 +144,9 @@ public final class TavernDailySpawnTicker {
     }
 
     /**
-     * Rolls and seats a fresh NPC on a currently-empty stool -- shared by the daily refresh above and
-     * {@link TavernStoolItem#useOn}, which calls this directly the moment a stool is placed so a
-     * freshly-placed stool doesn't sit empty until the next in-game day boundary (a real bug, caught
-     * 2026-10-31: {@link #onServerTick}'s very first tick after each server start only ever baselines
-     * {@link #lastKnownDay} without spawning, so newly placed stools showed nothing for up to a full
-     * day).
+     * Rolls and seats a fresh NPC on a currently-empty stool -- shared by {@link #processStool} above
+     * and {@link TavernStoolItem#useOn}, which calls this directly the moment a stool is placed so a
+     * freshly-placed stool doesn't sit empty until the next midnight pass.
      *
      * <p><b>No longer rolls starting gear, 2026-11-01</b> -- real report: a hired NPC's free rolled
      * loadout (up to a full Netherite set + shield at Tier 5) was extractable whole via the

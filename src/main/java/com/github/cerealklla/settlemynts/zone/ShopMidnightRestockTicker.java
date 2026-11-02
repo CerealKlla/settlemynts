@@ -112,12 +112,24 @@ public final class ShopMidnightRestockTicker {
             if (plot.zoneTypeId().equals(GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID)) {
                 GuardhouseIndex.get(level.getServer()).get(plot.plotId()).ifPresent(pos -> wakePositions.add(pos.pos()));
             }
+            // Tavern Plot Type (added 2026-11-01, real user correction -- see
+            // tavern.TavernDailySpawnTicker's own doc for why this moved here instead of staying its
+            // own independent, chunk-dependent ticker): wake every one of this plot's own stools too.
+            for (var stoolEntry : com.github.cerealklla.settlemynts.tavern.TavernStoolIndex.get(level.getServer()).all().entrySet()) {
+                if (stoolEntry.getValue().plotId().equals(plot.plotId())) {
+                    wakePositions.add(stoolEntry.getKey().pos());
+                }
+            }
         }
         MidnightChunkWaker.wake(level, coreId, wakePositions);
 
         for (PlotRecord plot : core.getPlots()) {
             PlotConfigSignIndex.get(level.getServer()).get(plot.plotId())
                     .ifPresent(signPos -> workQueue.enqueue(() -> ShopSeeding.restockAtMidnight(level, plot, signPos.pos())));
+            // Every one of this plot's stools (just force-loaded above) is now guaranteed resolvable,
+            // so this always actually runs instead of merely being likely to.
+            workQueue.enqueue(() -> com.github.cerealklla.settlemynts.tavern.TavernDailySpawnTicker.forceRefreshPlot(
+                    level.getServer(), coreId, plot.plotId()));
         }
         enqueueSettlementPipeline(level, core);
     }
