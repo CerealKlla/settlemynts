@@ -66,6 +66,16 @@ import net.minecraft.world.entity.ai.goal.Goal;
  * {@link #TELEPORT_DISTANCE_BLOCKS} from the owner, it's assumed stuck -- rather than issue yet
  * another {@code Navigation} leg that may fail the same way, {@link #mover()} is snapped directly to
  * the freshly-picked target instead of pathing to it.
+ *
+ * <p><b>On-foot walk/run split added, same day (fifth spec)</b> -- "please add the capability for the
+ * companions to run vs walk when they are too far, just like for when on horse back." A generic
+ * {@code Mob} has no real "sprint" state of its own the way a player does -- its limb-swing animation
+ * speed is purely a function of how fast it's actually moving, driven entirely by whatever
+ * {@code speedModifier} a goal hands {@code Navigation#moveTo}. {@link #currentSpeedModifier(ServerPlayer)}
+ * is generalized to both cases now: within {@link #RUN_DISTANCE_BLOCKS} of the owner it's the base
+ * {@link #speedModifier} (walk) whether mounted or not; past it, {@link #ON_FOOT_RUN_SPEED_MODIFIER}
+ * on foot or {@link #MOUNTED_SPEED_MODIFIER} mounted (run/gallop) -- same threshold, same shape as the
+ * mounted case, just a smaller speed bump since an on-foot companion has no real gallop to approximate.
  */
 public class CompanionFollowPlayerGoal extends Goal {
 
@@ -73,8 +83,11 @@ public class CompanionFollowPlayerGoal extends Goal {
     private static final double ARRIVE_DIST_SQ = 4.0;
     private static final int MAX_SAMPLE_ATTEMPTS = 10;
 
-    /** Below this distance from the owner, a mounted companion just walks instead of galloping -- explicit user spec. */
+    /** Below this distance from the owner, a companion just walks instead of running/galloping -- explicit user spec. */
     private static final double RUN_DISTANCE_BLOCKS = 20.0;
+
+    /** Navigation speedModifier used on foot and past {@link #RUN_DISTANCE_BLOCKS} from the owner. Flagged placeholder/tunable. */
+    private static final double ON_FOOT_RUN_SPEED_MODIFIER = 1.5;
 
     /** Navigation speedModifier used while riding a mount and past {@link #RUN_DISTANCE_BLOCKS} from the owner -- see this class's own doc for why this can't just be the mount's real gallop speed. Flagged placeholder/tunable. */
     private static final double MOUNTED_SPEED_MODIFIER = 2.5;
@@ -97,12 +110,12 @@ public class CompanionFollowPlayerGoal extends Goal {
         return npc.getVehicle() instanceof PathfinderMob mount ? mount : npc;
     }
 
-    /** {@link #speedModifier} while on foot, or while mounted but close to {@code owner}; {@link #MOUNTED_SPEED_MODIFIER} while mounted and more than {@link #RUN_DISTANCE_BLOCKS} away. */
+    /** {@link #speedModifier} within {@link #RUN_DISTANCE_BLOCKS} of {@code owner}, whether mounted or not; past it, {@link #MOUNTED_SPEED_MODIFIER} while mounted or {@link #ON_FOOT_RUN_SPEED_MODIFIER} on foot. */
     private double currentSpeedModifier(ServerPlayer owner) {
-        if (!(npc.getVehicle() instanceof PathfinderMob)) {
+        if (npc.distanceTo(owner) < RUN_DISTANCE_BLOCKS) {
             return speedModifier;
         }
-        return npc.distanceTo(owner) < RUN_DISTANCE_BLOCKS ? speedModifier : MOUNTED_SPEED_MODIFIER;
+        return npc.getVehicle() instanceof PathfinderMob ? MOUNTED_SPEED_MODIFIER : ON_FOOT_RUN_SPEED_MODIFIER;
     }
 
     @Override
