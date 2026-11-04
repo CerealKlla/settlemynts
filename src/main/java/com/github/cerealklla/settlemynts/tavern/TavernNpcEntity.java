@@ -3,11 +3,13 @@ package com.github.cerealklla.settlemynts.tavern;
 import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge;
+import com.github.cerealklla.settlemynts.bridge.LyfeSummoningBridge;
 
 import net.minecraft.core.GlobalPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
@@ -203,6 +205,34 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, c
         if (slot == EquipmentSlot.MAINHAND || slot == EquipmentSlot.OFFHAND) {
             reassessWeaponGoal();
         }
+    }
+
+    /**
+     * Real report, 2026-11-03: "my own companion killed me, that shouldn't be possible." Root cause:
+     * this class had no owner-alliance concept at all -- {@link HurtByTargetGoal} (no predicate,
+     * registered above) sets {@code this.mob.setTarget(...)} to whoever last damaged it with zero
+     * ally filtering of its own; the actual filtering vanilla relies on happens one level up, inside
+     * {@code TargetingConditions#test} (confirmed against the real decompiled source -- {@code
+     * forCombat()}'s {@code targeter.isAlliedTo(target)} check), which only returns true if
+     * {@link #considersEntityAsAlly} says so. {@code Entity#isAlliedTo} itself is {@code final} and
+     * can't be overridden directly -- this protected hook is the real, intended extension point,
+     * confirmed as exactly what vanilla's own {@code TamableAnimal#considersEntityAsAlly} overrides
+     * for its owner. So an owner accidentally hitting their own companion (a sweep attack, a stray
+     * arrow, AoE splash) used to make it retaliate for real -- now the owner is always an ally,
+     * regardless of what damaged it last. This also protects {@code MeleeAttackGoal}/
+     * {@code RangedBowAttackGoal}/{@code CompanionSpellCastGoal} for free, since all of them only ever
+     * act on whatever target {@code HurtByTargetGoal}/{@code CompanionSightGoal} set in the first
+     * place -- neither can ever set the owner as a target once this returns {@code true} for them.
+     * {@code guardhouse.GuardEntity} has the identical unguarded {@code HurtByTargetGoal} but no
+     * owner concept at all (a Guard retaliating against whoever hit it is the intended behavior
+     * there), so this fix is deliberately scoped to the owned Companion case only.
+     */
+    @Override
+    protected boolean considersEntityAsAlly(Entity other) {
+        return LyfeSummoningBridge.resolveCompanionOwner(this)
+                .map(ownerId -> ownerId.equals(other.getUUID()))
+                .orElse(false)
+                || super.considersEntityAsAlly(other);
     }
 
     /** Mirrors {@code guardhouse.GuardEntity#performRangedAttack} (itself mirroring {@code AbstractSkeleton}, confirmed against the real decompiled source). */
