@@ -21,6 +21,12 @@ import net.minecraft.world.phys.AABB;
  * ranged spell combat, then heal-to-full once no enemy remains, then whatever's at lower priority),
  * with exactly one addition: every entry point defers while {@link TavernNpcEntity#stoolPos()} is
  * non-null -- see {@link CompanionSightGoal}'s own doc for why that's the right gate.
+ *
+ * <p><b>Mounted approach fixed, 2026-11-03</b> -- {@link #engage} used to drive {@code npc}'s own
+ * {@code Navigation} directly, a no-op while mounted (same root cause as {@link
+ * CompanionMeleeAttackGoal}/{@link CompanionRangedAttackGoal}'s own doc explains in full). Now
+ * drives {@link TavernNpcEntity#mover()} instead, at {@link TavernNpcEntity#MOUNTED_COMBAT_SPEED_MODIFIER}
+ * while mounted.
  */
 public final class CompanionSpellCastGoal extends Goal {
 
@@ -97,13 +103,15 @@ public final class CompanionSpellCastGoal extends Goal {
     private void engage(LivingEntity target) {
         double distanceSqr = npc.distanceToSqr(target);
         boolean lineOfSight = npc.hasLineOfSight(target);
+        var mover = npc.mover();
         if (distanceSqr > CAST_RANGE_SQR || !lineOfSight) {
-            if (npc.getNavigation().isDone() && repathCooldown-- <= 0) {
-                npc.getNavigation().moveTo(target, 1.0);
+            if (mover.getNavigation().isDone() && repathCooldown-- <= 0) {
+                double speed = mover != npc ? TavernNpcEntity.MOUNTED_COMBAT_SPEED_MODIFIER : 1.0;
+                mover.getNavigation().moveTo(target, speed);
                 repathCooldown = 20;
             }
         } else {
-            npc.getNavigation().stop();
+            mover.getNavigation().stop();
         }
         double xd = target.getX() - npc.getX();
         double zd = target.getZ() - npc.getZ();

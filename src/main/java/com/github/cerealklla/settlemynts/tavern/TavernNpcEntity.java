@@ -19,9 +19,7 @@ import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
-import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
-import net.minecraft.world.entity.ai.goal.RangedBowAttackGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.player.Player;
@@ -78,9 +76,22 @@ import net.minecraft.world.level.storage.ValueOutput;
  */
 public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
-    private final RangedBowAttackGoal<TavernNpcEntity> bowGoal = new RangedBowAttackGoal<>(this, 1.0, 20, 15.0F);
-    private final MeleeAttackGoal meleeGoal = new MeleeAttackGoal(this, 1.0, false);
+    private final CompanionRangedAttackGoal bowGoal = new CompanionRangedAttackGoal(this, 1.0, 20, 15.0F);
+    private final CompanionMeleeAttackGoal meleeGoal = new CompanionMeleeAttackGoal(this, 1.0, false);
     private final CompanionSpellCastGoal spellCastGoal = new CompanionSpellCastGoal(this);
+
+    /**
+     * Mounted combat movement speed -- real report, 2026-11-03: "when a companion riding a horse
+     * targets an enemy they should move at mounted running speed to get to the target, not barely
+     * walking faster than a player walks." Same value as {@code CompanionFollowPlayerGoal
+     * #MOUNTED_SPEED_MODIFIER}, which this constant replaces that class's own private copy of (see
+     * {@link #mover()}'s own doc for the shared root cause). Used by {@link CompanionMeleeAttackGoal}/
+     * {@link CompanionRangedAttackGoal}/{@link CompanionSpellCastGoal} in place of their own base
+     * {@code speedModifier} whenever {@link #mover()} resolves to a mount -- on foot, each goal's own
+     * base speed (passed in at construction / {@code 1.0}) is unaffected, since that case was never
+     * reported broken.
+     */
+    public static final double MOUNTED_COMBAT_SPEED_MODIFIER = 2.5;
 
     private GlobalPos stoolPos;
     private UUID settlementCoreId;
@@ -233,6 +244,28 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, c
                 .map(ownerId -> ownerId.equals(other.getUUID()))
                 .orElse(false)
                 || super.considersEntityAsAlly(other);
+    }
+
+    /**
+     * The entity that actually gets repositioned by pathing right now -- the companion's mount while
+     * riding one, otherwise the companion itself. Originally a private method on {@link
+     * CompanionFollowPlayerGoal} only; moved here, 2026-11-03, so {@link CompanionMeleeAttackGoal}/
+     * {@link CompanionRangedAttackGoal} (new, same-day fix) can share the exact same resolution
+     * instead of each re-deriving it. Root cause this exists at all: a mounted passenger's own {@code
+     * Navigation}/{@code MoveControl} never actually repositions it -- vanilla only applies a mob's
+     * own pathing to its real position while it's NOT a passenger ({@code Entity#rideTick} drives
+     * position for a passenger instead, confirmed against the real decompiled source) -- so any goal
+     * that calls {@code this.mob.getNavigation().moveTo(...)} unconditionally (every vanilla combat
+     * goal does, confirmed by reading {@code MeleeAttackGoal}/{@code RangedBowAttackGoal}'s own real
+     * decompiled source: neither has a clean override point, {@code mob.getNavigation()} is called
+     * directly and repeatedly throughout both, not through one overridable hook) is a complete no-op
+     * for a mounted companion. Real report, 2026-11-03: "when a companion riding a horse targets an
+     * enemy they should move at mounted running speed to get to the target, not barely walking faster
+     * than a player walks" -- whatever tiny motion was visible was purely the mount's own idle wander
+     * AI, not real goal-directed movement toward the target.
+     */
+    public PathfinderMob mover() {
+        return getVehicle() instanceof PathfinderMob mount ? mount : this;
     }
 
     /** Mirrors {@code guardhouse.GuardEntity#performRangedAttack} (itself mirroring {@code AbstractSkeleton}, confirmed against the real decompiled source). */

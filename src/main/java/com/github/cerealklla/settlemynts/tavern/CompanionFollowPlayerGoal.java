@@ -89,8 +89,15 @@ public class CompanionFollowPlayerGoal extends Goal {
     /** Navigation speedModifier used on foot and past {@link #RUN_DISTANCE_BLOCKS} from the owner. Flagged placeholder/tunable. */
     private static final double ON_FOOT_RUN_SPEED_MODIFIER = 1.5;
 
-    /** Navigation speedModifier used while riding a mount and past {@link #RUN_DISTANCE_BLOCKS} from the owner -- see this class's own doc for why this can't just be the mount's real gallop speed. Flagged placeholder/tunable. */
-    private static final double MOUNTED_SPEED_MODIFIER = 2.5;
+    /**
+     * Navigation speedModifier used while riding a mount and past {@link #RUN_DISTANCE_BLOCKS} from
+     * the owner -- see this class's own doc for why this can't just be the mount's real gallop speed.
+     * Flagged placeholder/tunable. Moved to {@link TavernNpcEntity#MOUNTED_COMBAT_SPEED_MODIFIER},
+     * 2026-11-03, once {@link CompanionMeleeAttackGoal}/{@link CompanionRangedAttackGoal} needed the
+     * identical value -- kept as a local alias here so every existing reference in this file stays
+     * unchanged.
+     */
+    private static final double MOUNTED_SPEED_MODIFIER = TavernNpcEntity.MOUNTED_COMBAT_SPEED_MODIFIER;
 
     /** Starting a fresh cycle still this far from the owner means the previous leg didn't actually close the gap -- assumed stuck, teleport instead of pathing again. Explicit user spec. */
     private static final double TELEPORT_DISTANCE_BLOCKS = 40.0;
@@ -105,9 +112,9 @@ public class CompanionFollowPlayerGoal extends Goal {
         setFlags(EnumSet.of(Flag.MOVE));
     }
 
-    /** The entity that actually gets repositioned by pathing right now -- the companion's mount while riding one, otherwise the companion itself. */
+    /** Delegates to {@link TavernNpcEntity#mover()} -- moved there 2026-11-03 so {@link CompanionMeleeAttackGoal}/{@link CompanionRangedAttackGoal} can share the same resolution. See that method's own doc for the root cause. */
     private PathfinderMob mover() {
-        return npc.getVehicle() instanceof PathfinderMob mount ? mount : npc;
+        return npc.mover();
     }
 
     /** {@link #speedModifier} within {@link #RUN_DISTANCE_BLOCKS} of {@code owner}, whether mounted or not; past it, {@link #MOUNTED_SPEED_MODIFIER} while mounted or {@link #ON_FOOT_RUN_SPEED_MODIFIER} on foot. */
