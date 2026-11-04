@@ -7,6 +7,7 @@ import java.util.UUID;
 
 import com.github.cerealklla.kyt.loadout.LoadoutRecord;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
+import com.github.cerealklla.settlemynts.bridge.AudybleIdentityBridge;
 import com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 
@@ -127,6 +128,9 @@ public final class GuardSpawnTicker {
         guard.equipFromLoadoutUsingBoxes(record.get(), plotBoxes);
         guard.setPlotIdentity(stand.settlementCoreId(), stand.plotId());
         guard.setAssignedStandId(standId);
+        if (AudybleIdentityBridge.isLoaded()) {
+            AudybleIdentityBridge.assumeGuardIdentity(standId, core.getCartographyrEntityId());
+        }
         guard.setHomePos(spawnPos);
         guard.setHomeDimension(level.dimension());
         level.addFreshEntity(guard);

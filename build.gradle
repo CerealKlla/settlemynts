@@ -201,6 +201,12 @@ dependencies {
     // same reasoning.
     compileOnly files("../Myssions/build/libs/myssions-${myssions_version}.jar")
 
+    // Audyble is an optional soft dependency (see neoforge.mods.toml) -- spawn tickers resolve/
+    // create a plot-bound worker's persistent NPC identity (see bridge.AudybleIdentityBridge),
+    // gated behind ModList.get().isLoaded("audyble") at runtime, same isolation pattern as
+    // Blueprynts/Protectyons/Kyt/Yconomics/Lyfe/Myssions above. compileOnly only, same reasoning.
+    compileOnly files("../Audyble/build/libs/audyble-${audyble_version}.jar")
+
     // Plain JUnit 5 for pure Codec round-trip tests (no live server/registry needed, so
     // ModDevGradle's neoForge { unitTest {} } FML-bootstrap machinery isn't required here).
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'

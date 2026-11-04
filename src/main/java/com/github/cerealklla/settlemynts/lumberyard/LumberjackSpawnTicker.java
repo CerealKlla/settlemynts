@@ -3,11 +3,13 @@ package com.github.cerealklla.settlemynts.lumberyard;
 import java.util.Map;
 import java.util.UUID;
 
+import com.github.cerealklla.settlemynts.bridge.AudybleIdentityBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignIndex;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
+import com.github.cerealklla.settlemynts.zone.PlotWorkerKind;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
@@ -76,6 +78,9 @@ public final class LumberjackSpawnTicker {
         worker.setPos(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
         worker.setSpawnPos(spawnPos);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
+        if (AudybleIdentityBridge.isLoaded()) {
+            AudybleIdentityBridge.assumeWorkerIdentity(plotId, PlotWorkerKind.Kind.LUMBERJACK, core.getCartographyrEntityId());
+        }
         level.addFreshEntity(worker);
         sign.setLumberjackWorkerId(worker.getUUID());
     }
