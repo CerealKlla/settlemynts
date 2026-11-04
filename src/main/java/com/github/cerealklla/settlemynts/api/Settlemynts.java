@@ -23,6 +23,7 @@ import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
 import com.github.cerealklla.settlemynts.zone.PlotGeometry;
 import com.github.cerealklla.settlemynts.zone.PlotPermissions;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
+import com.github.cerealklla.settlemynts.zone.PlotWorkerKind;
 import com.github.cerealklla.settlemynts.zone.ShopResource;
 import com.github.cerealklla.settlemynts.zone.ShopSeedCatalog;
 import com.github.cerealklla.settlemynts.zone.ShopSeedCatalogRegistry;
@@ -35,6 +36,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.fml.ModList;
@@ -964,5 +966,42 @@ public final class Settlemynts {
             }
         }
         return Optional.ofNullable(best);
+    }
+
+    /** One of the four plot-bound worker roles identifying {@code entity}, plus its owning plot's real id. */
+    public record PlotWorkerIdentity(UUID plotId, PlotWorkerKind.Kind kind) {
+    }
+
+    /**
+     * Resolves a real plot-bound worker entity (Farmer/Lumberjack/Miner/Resident) back to its owning
+     * plot id and role -- added 2026-11-04 for Audyble's Phase 5b conversation engine, which needs to
+     * answer "which persistent NPC identity does this entity speak as" for an arbitrary entity it's
+     * asked to hold a conversation with, not just at spawn time (unlike {@code
+     * bridge.AudybleIdentityBridge}'s existing spawn-time-only {@code assumeWorkerIdentity}). {@link
+     * #resolveGuardStandId} is the separate Guard case, since a Guard's identity keys off its Guard
+     * Kit Stand's UUID, not a plot id, and {@code PlotWorkerKind.Kind} has no {@code GUARD} value.
+     */
+    public static Optional<PlotWorkerIdentity> resolvePlotWorkerIdentity(Entity entity) {
+        if (entity instanceof com.github.cerealklla.settlemynts.farm.FarmerWorkerEntity w) {
+            return Optional.of(new PlotWorkerIdentity(w.plotId(), PlotWorkerKind.Kind.FARMER));
+        }
+        if (entity instanceof com.github.cerealklla.settlemynts.lumberyard.LumberjackWorkerEntity w) {
+            return Optional.of(new PlotWorkerIdentity(w.plotId(), PlotWorkerKind.Kind.LUMBERJACK));
+        }
+        if (entity instanceof com.github.cerealklla.settlemynts.mineshaft.MinerWorkerEntity w) {
+            return Optional.of(new PlotWorkerIdentity(w.plotId(), PlotWorkerKind.Kind.MINER));
+        }
+        if (entity instanceof com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity w) {
+            return Optional.of(new PlotWorkerIdentity(w.plotId(), PlotWorkerKind.Kind.RESIDENT));
+        }
+        return Optional.empty();
+    }
+
+    /** The Guard Kit Stand id identifying {@code entity}, if it's a real spawned {@code GuardEntity} -- see {@link #resolvePlotWorkerIdentity}'s own doc. */
+    public static Optional<UUID> resolveGuardStandId(Entity entity) {
+        if (entity instanceof com.github.cerealklla.settlemynts.guardhouse.GuardEntity guard) {
+            return Optional.ofNullable(guard.assignedStandId());
+        }
+        return Optional.empty();
     }
 }
