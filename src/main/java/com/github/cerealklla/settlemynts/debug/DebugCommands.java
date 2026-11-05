@@ -219,43 +219,6 @@ public final class DebugCommands {
         return 1;
     }
 
-    /**
-     * Stable list of the old mechanical disambiguation suffixes both NPC birth and this command used
-     * to append before being replaced by {@link NameBank}, 2026-11-05 -- real user feedback: labeling
-     * two unrelated strangers "the Elder"/"the Younger" implies a relationship that doesn't exist,
-     * especially once they share an exact full first-and-last name. Kept here, and only here, so this
-     * one-time command can find and clean up names it (or NPC birth) already produced under the old
-     * scheme -- never used to produce a new name again.
-     */
-    private static final String[] LEGACY_EPITHETS = {
-            "the Younger", "the Elder", "of the North Road", "of the West Gate", "the Second"
-    };
-
-    /**
-     * ADMIN ONLY -- one-time data fix, 2026-11-05. Real report: "there are a lot of duplicated NPC
-     * names in starterville." Root cause confirmed by reading the real persisted store directly: every
-     * already-generated name collision in {@code settlemynts_npc_identities.json} predates the
-     * 2026-11-05 ownership move (see {@code npc.NpcIdentityStore}'s own class doc) -- these NPCs were
-     * born back when Audyble's own uniqueness check silently never worked at all, and even after that
-     * was fixed, a small local LLM asked to invent a name from scratch kept clustering on the same
-     * handful of fantasy-sounding roots regardless of prompting (see {@code npc.NameBank}'s own class
-     * doc) -- "Kaelin Vex" appeared four separate times across roles in the live data, two of them an
-     * exact full-name match. Naming itself is now fixed going forward (birth draws from
-     * {@link NameBank} directly instead of asking the LLM) -- this command is purely for the
-     * already-persisted backlog of collisions that fix can't retroactively touch, plus (as of the same
-     * day) cleaning up any name still carrying the old, since-retired epithet suffix from an earlier
-     * run of this same command. Scans every loaded settlement on the server (no player position
-     * needed, so this runs cleanly from RCON), keeps the first identity in each same-name group within
-     * a settlement untouched, and draws a wholly fresh {@link NameBank} name for every later duplicate
-     * -- not a tweak of the old name, since the actual complaint was two unrelated people sharing one.
-     * Backstory/key facts are left alone -- only the name changes, since a player may have already
-     * read/talked about this character's backstory. Placeholder ("Unnamed X") entries are skipped
-     * entirely -- those are a loading state, not a real collision, and will resolve themselves once
-     * generation completes. Also force-pushes the renamed value onto any currently-loaded live
-     * entity's {@code DATA_DISPLAY_NAME} directly (the entity's own {@code syncDisplayName} never
-     * re-checks once a real name is already synced, so without this the fix wouldn't show up in-world
-     * until that entity's next full reload).
-     */
     /** Read-only: lists every real (non-placeholder) NPC name per loaded settlement, grouped by role, so a player/admin can see current names without digging through the raw save file. */
     private static int listNpcNames(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
@@ -292,6 +255,35 @@ public final class DebugCommands {
         return settlementsReported;
     }
 
+    /**
+     * ADMIN ONLY -- one-time data fix, 2026-11-05. Real report: "there are a lot of duplicated NPC
+     * names in starterville." Root cause confirmed by reading the real persisted store directly: every
+     * already-generated name collision in {@code settlemynts_npc_identities.json} predates the
+     * 2026-11-05 ownership move (see {@code npc.NpcIdentityStore}'s own class doc) -- these NPCs were
+     * born back when Audyble's own uniqueness check silently never worked at all, and even after that
+     * was fixed, a small local LLM asked to invent a name from scratch kept clustering on the same
+     * handful of fantasy-sounding roots regardless of prompting (see {@code npc.NameBank}'s own class
+     * doc) -- "Kaelin Vex" appeared four separate times across roles in the live data, two of them an
+     * exact full-name match. Naming itself is now fixed going forward (birth draws from
+     * {@link NameBank} directly instead of asking the LLM).
+     *
+     * <p><b>Broadened the same day</b>, after a direct follow-up report that several still-similar
+     * names (Kael Darkhaven/Kael Blackwood/Kaelin Thorne/Kaelin Vex/Kael Vex, etc.) were still visibly
+     * clustering even after the exact-collision pass above ran clean -- none of those were ever an
+     * *exact* match, so the original narrower pass correctly, but unhelpfully, left every one of them
+     * in place. This command now replaces **every** name that didn't come from {@link NameBank} at
+     * all (see {@link #isLegacyName}), not just exact duplicates -- the real complaint was never "two
+     * names happen to collide," it was "why do unrelated people sound almost identical," and the old
+     * LLM-generated cluster is the actual source of that regardless of whether any two of them are a
+     * literal string match. Scans every loaded settlement on the server (no player position needed, so
+     * this runs cleanly from RCON). Backstory/key facts are left alone -- only the name changes, since
+     * a player may have already read/talked about this character's backstory. Placeholder ("Unnamed
+     * X") entries are skipped entirely -- those are a loading state, not a real name, and will resolve
+     * themselves once generation completes. Also force-pushes the renamed value onto any
+     * currently-loaded live entity's {@code DATA_DISPLAY_NAME} directly (the entity's own {@code
+     * syncDisplayName} never re-checks once a real name is already synced, so without this the fix
+     * wouldn't show up in-world until that entity's next full reload).
+     */
     private static int dedupNpcNames(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
         int renamed = 0;
@@ -304,8 +296,8 @@ public final class DebugCommands {
         }
         int finalRenamed = renamed;
         source.sendSuccess(() -> Component.literal(finalRenamed == 0
-                ? "No duplicate NPC names found."
-                : "Renamed " + finalRenamed + " duplicate NPC name(s)."), true);
+                ? "No old-style NPC names found."
+                : "Renamed " + finalRenamed + " NPC name(s)."), true);
         return renamed;
     }
 
@@ -319,14 +311,16 @@ public final class DebugCommands {
             }
         }
 
-        // One-time cleanup: any name still carrying an old, since-retired epithet suffix (possibly
-        // even stacked, from a bug in an earlier version of this same command) gets a wholly fresh
-        // name instead of a patched-up old one -- see this command's own doc for why. Harmless no-op
-        // once no such name remains anywhere.
+        // One-time cleanup: any name that didn't come from NameBank at all -- every old LLM-generated
+        // name from before 2026-11-05, whether or not it happens to be an exact duplicate of another
+        // one -- gets replaced with a wholly fresh NameBank name. The original report was about exact
+        // collisions, but the real complaint was "why do unrelated NPCs sound almost identical" (Kael/
+        // Kaelin/Elara/Thorne/Vex-style names, never an exact match, so the exact-collision pass alone
+        // left every one of them in place). Harmless no-op once no such name remains anywhere.
         int repaired = 0;
         List<NpcIdentity> corrected = new ArrayList<>();
         for (NpcIdentity identity : identities) {
-            if (identity.name().startsWith("Unnamed ") || !hasLegacyEpithet(identity.name())) {
+            if (identity.name().startsWith("Unnamed ") || !isLegacyName(identity.name())) {
                 corrected.add(identity);
                 continue;
             }
@@ -366,13 +360,21 @@ public final class DebugCommands {
         return renamed + repaired;
     }
 
-    private static boolean hasLegacyEpithet(String name) {
-        for (String epithet : LEGACY_EPITHETS) {
-            if (name.endsWith(" " + epithet)) {
-                return true;
+    /**
+     * True if {@code name}'s given-name token (everything before the first space) isn't one of
+     * {@link NameBank#GIVEN_NAMES} -- which, by construction, means it's a leftover from the old
+     * LLM-generated system (including anything carrying one of the old, since-retired mechanical
+     * epithet suffixes -- the base name underneath one of those was never a NameBank name either, so
+     * this one check subsumes that old separate check entirely).
+     */
+    private static boolean isLegacyName(String name) {
+        String givenToken = name.split(" ", 2)[0];
+        for (String bankName : NameBank.GIVEN_NAMES) {
+            if (bankName.equalsIgnoreCase(givenToken)) {
+                return false;
             }
         }
-        return false;
+        return true;
     }
 
     /** Draws a brand-new {@link NameBank} name guaranteed not to collide with anything in {@code usedNames} (retried a handful of times against the fixed-size pool's vanishingly rare exact clash before just accepting one). */
