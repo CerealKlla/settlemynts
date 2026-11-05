@@ -82,6 +82,9 @@ public final class PlotConfigScreen extends NuclyusContainerScreen<PlotConfigMen
         if (data.canManage() && data.isTavern()) {
             tabs.add(new TavernTab(data));
         }
+        if (data.canManage() && data.isMurmurTower()) {
+            tabs.add(new RadioTab(data));
+        }
         if (data.canManage() && data.isTownHall()) {
             tabs.add(new ManagementTab(data));
         }

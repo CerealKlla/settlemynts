@@ -65,14 +65,16 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
     private static final int FLAG_FARM = 2;
     private static final int FLAG_LUMBERYARD = 4;
     private static final int FLAG_TAVERN = 8;
+    private static final int FLAG_MURMUR_TOWER = 16;
 
-    /** Packs the four single-purpose zone-type booleans into {@link #zoneTypeFlags} -- see this record's own class doc. */
-    public static int zoneFlags(boolean isMineshaft, boolean isFarm, boolean isLumberyard, boolean isTavern) {
+    /** Packs the five single-purpose zone-type booleans into {@link #zoneTypeFlags} -- see this record's own class doc. */
+    public static int zoneFlags(boolean isMineshaft, boolean isFarm, boolean isLumberyard, boolean isTavern, boolean isMurmurTower) {
         int bits = 0;
         if (isMineshaft) bits |= FLAG_MINESHAFT;
         if (isFarm) bits |= FLAG_FARM;
         if (isLumberyard) bits |= FLAG_LUMBERYARD;
         if (isTavern) bits |= FLAG_TAVERN;
+        if (isMurmurTower) bits |= FLAG_MURMUR_TOWER;
         return bits;
     }
 
@@ -90,6 +92,10 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
 
     public boolean isTavern() {
         return (zoneTypeFlags & FLAG_TAVERN) != 0;
+    }
+
+    public boolean isMurmurTower() {
+        return (zoneTypeFlags & FLAG_MURMUR_TOWER) != 0;
     }
 
     public static final Type<OpenPlotConfigSignMenuPayload> TYPE =

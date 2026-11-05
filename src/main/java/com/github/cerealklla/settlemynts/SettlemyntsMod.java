@@ -608,6 +608,23 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.SetPlannedInventoryPayload.STREAM_CODEC,
                 (payload, context) -> setPlannedInventory(payload, context));
 
+        // "Radio" tab (Murmur Tower playlist + song-request pipeline) -- see bridge.AudybleMusicBridge's own doc.
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestMurmurRadioPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestMurmurRadioPayload.STREAM_CODEC,
+                (payload, context) -> requestMurmurRadio(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenMurmurRadioPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenMurmurRadioPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestMurmurRadio(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetMurmurPlaylistPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SetMurmurPlaylistPayload.STREAM_CODEC,
+                (payload, context) -> setMurmurPlaylist(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SubmitSongRequestPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SubmitSongRequestPayload.STREAM_CODEC,
+                (payload, context) -> submitSongRequest(payload, context));
+
         // "Press G to talk" proximity prompt (2026-10-05, reworked 2026-10-16 for the NPC Menu) --
         // see PlotShopProximityTicker's own doc.
         registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.PlotShopPromptPayload.TYPE,
@@ -2362,6 +2379,70 @@ public class SettlemyntsMod {
         resolved.get().core().updatePlot(resolved.get().plot().withPlannedInventory(targets));
         com.github.cerealklla.settlemynts.zone.ShopWishlistCache.invalidate(resolved.get().plot().plotId());
         player.sendSystemMessage(Component.literal("Planned Inventory updated."));
+    }
+
+    /** "Radio" tab on open -- same {@code canManage} gate and plot-resolution shape as {@link #requestPlannedInventory}. */
+    private static void requestMurmurRadio(com.github.cerealklla.settlemynts.plotsign.RequestMurmurRadioPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
+            return;
+        }
+        long settlementPlaceId = settlementPlaceIdOf(resolved.get().core());
+        boolean audybleLoaded = com.github.cerealklla.settlemynts.bridge.AudybleMusicBridge.isLoaded();
+        java.util.List<com.github.cerealklla.settlemynts.plotsign.OpenMurmurRadioPayload.CatalogEntry> catalog = audybleLoaded
+                ? com.github.cerealklla.settlemynts.bridge.AudybleMusicBridge.listCatalog().stream()
+                        .map(t -> new com.github.cerealklla.settlemynts.plotsign.OpenMurmurRadioPayload.CatalogEntry(t.trackId(), t.artist(), t.song())).toList()
+                : java.util.List.of();
+        java.util.List<String> playlist = audybleLoaded
+                ? com.github.cerealklla.settlemynts.bridge.AudybleMusicBridge.getStationPlaylist(settlementPlaceId)
+                : java.util.List.of();
+        boolean requestsEnabled = audybleLoaded && com.github.cerealklla.settlemynts.bridge.AudybleMusicBridge.songRequestsEnabled();
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenMurmurRadioPayload(payload.signPos(), catalog, playlist, requestsEnabled));
+    }
+
+    /** "Save Playlist" on the Radio tab. */
+    private static void setMurmurPlaylist(com.github.cerealklla.settlemynts.plotsign.SetMurmurPlaylistPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
+            return;
+        }
+        if (com.github.cerealklla.settlemynts.bridge.AudybleMusicBridge.isLoaded()) {
+            long settlementPlaceId = settlementPlaceIdOf(resolved.get().core());
+            com.github.cerealklla.settlemynts.bridge.AudybleMusicBridge.setStationPlaylist(settlementPlaceId, payload.trackIds());
+            player.sendSystemMessage(Component.literal("Station playlist updated."));
+        }
+    }
+
+    /** "Submit Request" on the Radio tab -- same {@code canManage} permission tier as the playlist picker itself, per explicit design. */
+    private static void submitSongRequest(com.github.cerealklla.settlemynts.plotsign.SubmitSongRequestPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        java.util.Optional<PlotRecordAndCore> resolved = resolvePlotForManage(serverLevel, payload.signPos(), player.getUUID());
+        if (resolved.isEmpty()) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you can't manage it."));
+            return;
+        }
+        if (com.github.cerealklla.settlemynts.bridge.AudybleMusicBridge.isLoaded()) {
+            long settlementPlaceId = settlementPlaceIdOf(resolved.get().core());
+            com.github.cerealklla.settlemynts.bridge.AudybleMusicBridge.submitSongRequest(
+                    settlementPlaceId, payload.url(), player.getGameProfile().name());
+            player.sendSystemMessage(Component.literal("Song request submitted."));
+        }
+    }
+
+    /** {@code core.getCartographyrEntityId()} is nullable (not yet registered) -- {@code 0L} is a safe, inert key for the Audyble-side stores either way (never a real place id). */
+    private static long settlementPlaceIdOf(GhostTownHallCoreEntity core) {
+        Long id = core.getCartographyrEntityId();
+        return id != null ? id : 0L;
     }
 
     private record PlotRecordAndCore(PlotRecord plot, GhostTownHallCoreEntity core) {

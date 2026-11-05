@@ -22,6 +22,7 @@ public final class ClientPlotSignRequests {
     private static final ClientRequestSlot<EstablishHighwayCandidatesPayload> ESTABLISH_HIGHWAY_MAP = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenNpcMenuPayload> NPC_MENU = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenConfigurePlotPayload> CONFIGURE_PLOT = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenMurmurRadioPayload> MURMUR_RADIO = new ClientRequestSlot<>();
 
     private ClientPlotSignRequests() {
     }
@@ -112,5 +113,13 @@ public final class ClientPlotSignRequests {
 
     public static Optional<OpenConfigurePlotPayload> takePendingConfigurePlot() {
         return CONFIGURE_PLOT.takePending();
+    }
+
+    public static void requestMurmurRadio(OpenMurmurRadioPayload payload) {
+        MURMUR_RADIO.request(payload);
+    }
+
+    public static Optional<OpenMurmurRadioPayload> takePendingMurmurRadio() {
+        return MURMUR_RADIO.takePending();
     }
 }

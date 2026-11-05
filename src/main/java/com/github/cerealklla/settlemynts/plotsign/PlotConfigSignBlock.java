@@ -42,6 +42,10 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
 
     public static final MapCodec<PlotConfigSignBlock> CODEC = simpleCodec(PlotConfigSignBlock::new);
 
+    /** Same id {@code bridge.SettlemyntsMurmurBridge#registerShopCatalog} (Audyble-side) already registers the Murmur Crystal catalog listing against. */
+    private static final net.minecraft.resources.Identifier MURMUR_TOWER_ZONE_TYPE_ID =
+            net.minecraft.resources.Identifier.fromNamespaceAndPath("blueprynts", "murmur_tower");
+
     public PlotConfigSignBlock(Properties properties) {
         super(properties);
         registerDefaultState(defaultBlockState().setValue(FACING, Direction.NORTH));
@@ -82,6 +86,7 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
         boolean isLumberyard = false;
         boolean isTavern = false;
         int tavernStoolsAvailable = 0;
+        boolean isMurmurTower = false;
         if (sign.settlementCoreId() != null && serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core) {
             PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
             if (plot != null) {
@@ -92,6 +97,7 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
                 isFarm = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.FARM_ZONE_TYPE_ID);
                 isLumberyard = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.LUMBERYARD_ZONE_TYPE_ID);
                 isTavern = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.tavern.TavernConstants.TAVERN_ZONE_TYPE_ID);
+                isMurmurTower = plot.zoneTypeId().equals(MURMUR_TOWER_ZONE_TYPE_ID);
                 hasConstructionBox = plot.constructionBoxId().isPresent();
                 tier = plot.tier();
                 maxPlotTier = isTownHall ? 5 : core.townHallPlot().map(PlotRecord::tier).orElse(5);
@@ -118,7 +124,7 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
         // and let the client build a plain, non-container NuclyusMenuScreen from it.
         com.github.cerealklla.settlemynts.SettlemyntsMod.openPlotConfigMenu(serverPlayer,
                 new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc,
-                        guardKitStandsAvailable, OpenPlotConfigSignMenuPayload.zoneFlags(isMineshaft, isFarm, isLumberyard, isTavern),
+                        guardKitStandsAvailable, OpenPlotConfigSignMenuPayload.zoneFlags(isMineshaft, isFarm, isLumberyard, isTavern, isMurmurTower),
                         tavernStoolsAvailable));
         return InteractionResult.SUCCESS_SERVER;
     }
