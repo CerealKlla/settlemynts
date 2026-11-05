@@ -24,6 +24,9 @@ import com.github.cerealklla.settlemynts.zone.ShopResource;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
@@ -158,16 +161,35 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         return assignedStandId;
     }
 
-    /** Floating nameplate text (Nuclyus's stat-bar overlay) -- this guard's own persisted identity name, keyed by its Guard Kit Stand (not the plot -- a plot can have several stands), or {@code null} before {@link #setAssignedStandId} has run or a name has been generated yet. */
+    /** See {@code farm.FarmerWorkerEntity#DATA_DISPLAY_NAME}'s own doc for why this is real {@link SynchedEntityData}, not a direct {@code NpcIdentityStore} lookup from client-side rendering code. */
+    private static final EntityDataAccessor<String> DATA_DISPLAY_NAME =
+            SynchedEntityData.defineId(GuardEntity.class, EntityDataSerializers.STRING);
+
+    /** Floating nameplate text (Nuclyus's stat-bar overlay) -- reads the already-synced {@link #DATA_DISPLAY_NAME}. */
     @Override
     public net.minecraft.network.chat.Component displayName() {
+        String name = entityData.get(DATA_DISPLAY_NAME);
+        return name.isEmpty() ? null : net.minecraft.network.chat.Component.literal(name);
+    }
+
+    @Override
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(DATA_DISPLAY_NAME, "");
+    }
+
+    /** Keeps {@link #DATA_DISPLAY_NAME} in sync with this guard's real persisted identity (keyed by its Guard Kit Stand, not the plot -- a plot can have several stands) -- stops re-checking once a real (non-placeholder) name is resolved. */
+    private void syncDisplayName() {
         if (assignedStandId == null) {
-            return null;
+            return;
         }
-        return com.github.cerealklla.settlemynts.npc.NpcIdentityStore
+        String current = entityData.get(DATA_DISPLAY_NAME);
+        if (!current.isEmpty() && !current.startsWith("Unnamed ")) {
+            return;
+        }
+        com.github.cerealklla.settlemynts.npc.NpcIdentityStore
                 .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(assignedStandId, com.github.cerealklla.settlemynts.npc.NpcRole.GUARD))
-                .map(identity -> net.minecraft.network.chat.Component.literal(identity.name()))
-                .orElse(null);
+                .ifPresent(identity -> entityData.set(DATA_DISPLAY_NAME, identity.name()));
     }
 
     /** Called once by {@link GuardSpawnTicker} right after construction -- this guard's own spawn point (its assigned stand's position), the rescue destination {@link #stuckWatchdog} teleports back to if this guard ever gets stuck. */
@@ -478,6 +500,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         super.customServerAiStep(level);
         stuckWatchdog.tick(this, homePos);
         maintainStrandedChunkClaim(level);
+        syncDisplayName();
     }
 
     /**

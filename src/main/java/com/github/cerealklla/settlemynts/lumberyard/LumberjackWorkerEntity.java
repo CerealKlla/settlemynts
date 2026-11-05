@@ -12,6 +12,9 @@ import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
@@ -45,6 +48,10 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
     private static final int UNDERGROUND_TELEPORT_THRESHOLD_BLOCKS = 5;
 
     private final com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog stuckWatchdog = new com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog();
+
+    /** See {@code farm.FarmerWorkerEntity#DATA_DISPLAY_NAME}'s own doc for why this is real {@link SynchedEntityData}, not a direct {@code NpcIdentityStore} lookup from client-side rendering code. */
+    private static final EntityDataAccessor<String> DATA_DISPLAY_NAME =
+            SynchedEntityData.defineId(LumberjackWorkerEntity.class, EntityDataSerializers.STRING);
 
     private UUID settlementCoreId;
     private UUID plotId;
@@ -88,16 +95,31 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         return settlementCoreId;
     }
 
-    /** Floating nameplate text (Nuclyus's stat-bar overlay) -- this worker's own persisted identity name, or {@code null} before {@link #setPlotIdentity} has run or a name has been generated yet. */
+    /** Floating nameplate text (Nuclyus's stat-bar overlay) -- reads the already-synced {@link #DATA_DISPLAY_NAME}. */
     @Override
     public net.minecraft.network.chat.Component displayName() {
+        String name = entityData.get(DATA_DISPLAY_NAME);
+        return name.isEmpty() ? null : net.minecraft.network.chat.Component.literal(name);
+    }
+
+    @Override
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(DATA_DISPLAY_NAME, "");
+    }
+
+    /** Keeps {@link #DATA_DISPLAY_NAME} in sync with this worker's real persisted identity -- stops re-checking once a real (non-placeholder) name is resolved. */
+    private void syncDisplayName() {
         if (plotId == null) {
-            return null;
+            return;
         }
-        return com.github.cerealklla.settlemynts.npc.NpcIdentityStore
+        String current = entityData.get(DATA_DISPLAY_NAME);
+        if (!current.isEmpty() && !current.startsWith("Unnamed ")) {
+            return;
+        }
+        com.github.cerealklla.settlemynts.npc.NpcIdentityStore
                 .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(plotId, com.github.cerealklla.settlemynts.npc.NpcRole.LUMBERJACK))
-                .map(identity -> net.minecraft.network.chat.Component.literal(identity.name()))
-                .orElse(null);
+                .ifPresent(identity -> entityData.set(DATA_DISPLAY_NAME, identity.name()));
     }
 
     /** Called once by {@link LumberjackSpawnTicker} right after construction -- this worker's own spawn point (its Plot Config Sign's position), the rescue destination {@link #stuckWatchdog} (and {@link LumberjackWorkGoal}'s own pathfinding-give-up rescue) teleport back to if this worker ever gets stuck. */
@@ -200,6 +222,7 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
             return;
         }
         stuckWatchdog.tick(this, spawnPos);
+        syncDisplayName();
     }
 
     /**

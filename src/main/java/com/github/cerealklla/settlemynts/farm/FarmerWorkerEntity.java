@@ -11,6 +11,9 @@ import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
 
 import net.minecraft.core.UUIDUtil;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
@@ -33,6 +36,23 @@ import net.minecraft.world.level.storage.ValueOutput;
 public class FarmerWorkerEntity extends Villager implements com.github.cerealklla.settlemynts.zone.PlotNpc, com.github.cerealklla.nuclyus.statbar.StatBarOwner {
 
     private final com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog stuckWatchdog = new com.github.cerealklla.settlemynts.npc.NpcStuckWatchdog();
+
+    /**
+     * Real bug, found live 2026-11-05 right after the nameplate feature shipped: {@link #displayName}
+     * used to call {@code npc.NpcIdentityStore} directly, but that store is server-side-only persisted
+     * state (populated by {@code loadOrGenerate(MinecraftServer)} at server boot) -- on a real dedicated
+     * server, the client's own JVM never runs that at all, so a direct lookup from client-side rendering
+     * code (Nuclyus's {@code StatBarWorldOverlay}) always came back empty, and every worker/guard nameplate
+     * silently showed nothing (confirmed live: "All the shop NPCs and guards look unchanged" -- only
+     * Wandering Traders, which use a real vanilla synced {@code CustomName} instead, actually worked).
+     * Fixed with a real {@link SynchedEntityData} field instead, same mechanism vanilla's own
+     * {@code CustomName} already uses to cross the client/server boundary -- {@link #customServerAiStep}
+     * keeps it updated server-side (stopping once a real, non-placeholder name is resolved, so this
+     * doesn't poll forever), {@link #displayName} just reads the already-synced value, safe on either
+     * side.
+     */
+    private static final EntityDataAccessor<String> DATA_DISPLAY_NAME =
+            SynchedEntityData.defineId(FarmerWorkerEntity.class, EntityDataSerializers.STRING);
 
     private UUID settlementCoreId;
     private UUID plotId;
@@ -62,16 +82,31 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
         return settlementCoreId;
     }
 
-    /** Floating nameplate text (Nuclyus's stat-bar overlay) -- this worker's own persisted identity name, or {@code null} before {@link #setPlotIdentity} has run or a name has been generated yet. */
+    /** Floating nameplate text (Nuclyus's stat-bar overlay) -- reads the already-synced {@link #DATA_DISPLAY_NAME} (see its own doc for why this can't just hit {@code NpcIdentityStore} directly). */
     @Override
     public net.minecraft.network.chat.Component displayName() {
+        String name = entityData.get(DATA_DISPLAY_NAME);
+        return name.isEmpty() ? null : net.minecraft.network.chat.Component.literal(name);
+    }
+
+    @Override
+    protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(DATA_DISPLAY_NAME, "");
+    }
+
+    /** Keeps {@link #DATA_DISPLAY_NAME} in sync with this worker's real persisted identity -- stops re-checking once a real (non-placeholder) name is resolved, so this isn't an unbounded per-tick poll. */
+    private void syncDisplayName() {
         if (plotId == null) {
-            return null;
+            return;
         }
-        return com.github.cerealklla.settlemynts.npc.NpcIdentityStore
+        String current = entityData.get(DATA_DISPLAY_NAME);
+        if (!current.isEmpty() && !current.startsWith("Unnamed ")) {
+            return;
+        }
+        com.github.cerealklla.settlemynts.npc.NpcIdentityStore
                 .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(plotId, com.github.cerealklla.settlemynts.npc.NpcRole.FARMER))
-                .map(identity -> net.minecraft.network.chat.Component.literal(identity.name()))
-                .orElse(null);
+                .ifPresent(identity -> entityData.set(DATA_DISPLAY_NAME, identity.name()));
     }
 
     /** Called once by {@link FarmerSpawnTicker} right after construction -- this worker's own spawn point (its Plot Config Sign's position), the rescue destination {@link #stuckWatchdog} teleports back to if this worker ever gets stuck. */
@@ -127,6 +162,7 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
     @Override
     protected void customServerAiStep(ServerLevel level) {
         stuckWatchdog.tick(this, spawnPos);
+        syncDisplayName();
     }
 
     @Override
