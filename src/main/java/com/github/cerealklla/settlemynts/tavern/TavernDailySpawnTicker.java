@@ -101,6 +101,33 @@ public final class TavernDailySpawnTicker {
             return false;
         }
 
+        // Real report, 2026-11-05: "I changed the blueprint for the tavern, which removed all the
+        // stools but left the NPCs standing there, and the plot config sign isn't allowing me to pick
+        // up new stools." Root cause: this method never checked whether the stool block itself still
+        // physically exists -- a Blueprint change/reposition tears down and repastes a plot's
+        // structure through Blueprynts' own terrain-restore, a direct setBlock that completely
+        // bypasses TavernStoolPickupListener's interaction-based cleanup (the only other place that
+        // ever discarded a seated NPC or removed a TavernStoolIndex entry). Without this check, a
+        // destroyed stool's index entry lived on forever (keeping plot.tavernStoolsIssued() at the
+        // plot's full tier cap, so the Plot Config Sign's "Get Tavern Stools" refused to grant any
+        // more) and the stool's own seated NPC was simply left floating in place with nothing to sit
+        // on -- and this method would have made it *worse* by spawning a brand new NPC on top of a
+        // position with no stool at all, had the midnight pass or /settlemynts tavernrefresh ever run
+        // against it. Now: a confirmed-gone stool is cleaned up instead of processed -- any NPC still
+        // tied to this exact position is discarded, the stale index entry is removed, and the plot's
+        // own tavernStoolsIssued count is decremented (floored at 0) so the sign naturally re-offers a
+        // replacement, no manual admin fix needed for this going forward.
+        if (!LyfeTavernBridge.isStool(level, pos.pos())) {
+            List<TavernNpcEntity> orphaned = level.getEntitiesOfClass(TavernNpcEntity.class,
+                    new AABB(pos.pos()).inflate(1.5), npc -> pos.equals(npc.stoolPos()));
+            for (TavernNpcEntity npc : orphaned) {
+                npc.discard();
+            }
+            TavernStoolIndex.get(level.getServer()).remove(pos);
+            core.updatePlot(plot.withTavernStoolsIssued(Math.max(0, plot.tavernStoolsIssued() - 1)));
+            return false;
+        }
+
         // Real NPC-loss bug, caught 2026-11-01 ("previously when there were dupes they all had NPCs,
         // now only 2 do"): resolveTier below was being called AFTER the discard scan further down,
         // so a stool whose own chunk was loaded but whose Construction Box (routinely in a different
