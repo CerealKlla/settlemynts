@@ -96,12 +96,18 @@ public final class NpcIdentityPrompting {
                 for (int attempt = 1; attempt <= MAX_NAME_ATTEMPTS; attempt++) {
                     String userMessage = "Generate a brand-new " + roleName + " character for this settlement. "
                             + "Respond in EXACTLY this format and nothing else -- no preamble, no extra commentary:\n"
-                            + "NAME: <a short first and last name fitting this world>\n"
+                            + "NAME: <a short given name only, fitting this world -- add a surname ONLY if this "
+                            + "character is a noble, an appointed official, or from a notable/wealthy family, and "
+                            + "say so in the backstory; otherwise a single given name alone, no surname>\n"
                             + "BACKSTORY: <2 to 4 sentences of personal backstory>\n"
                             + "FACT: <one short fact about them>\n"
                             + "FACT: <one short fact about them>\n"
-                            + "FACT: <one short fact about them>"
-                            + (usedNames.isEmpty() ? "" : "\nNames already in use in this settlement -- do NOT reuse any of these: "
+                            + "FACT: <one short fact about them>\n"
+                            + "Make the name genuinely varied -- do NOT default to generic fantasy names like "
+                            + "Kael, Kaelin, Elara, Thorne, or Vex. Draw from a wide range of different naming "
+                            + "styles and roots so two different characters don't end up sounding alike."
+                            + (usedNames.isEmpty() ? "" : "\nNames already in use in this settlement -- do NOT reuse any of these, "
+                                    + "or anything that sounds like a close variant of one of them: "
                                     + String.join(", ", usedNames) + ".");
 
                     lastReply = OllamaClient.chat(systemPrompt, List.of(), userMessage);
