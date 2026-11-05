@@ -70,6 +70,18 @@ public class MinerWorkerEntity extends Villager implements PlotNpc, com.github.c
         return settlementCoreId;
     }
 
+    /** Floating nameplate text (Nuclyus's stat-bar overlay) -- this worker's own persisted identity name, or {@code null} before {@link #setPlotIdentity} has run or a name has been generated yet. */
+    @Override
+    public net.minecraft.network.chat.Component displayName() {
+        if (plotId == null) {
+            return null;
+        }
+        return com.github.cerealklla.settlemynts.npc.NpcIdentityStore
+                .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(plotId, com.github.cerealklla.settlemynts.npc.NpcRole.MINER))
+                .map(identity -> net.minecraft.network.chat.Component.literal(identity.name()))
+                .orElse(null);
+    }
+
     /** Called once by {@link MineshaftSpawnTicker} right after construction -- this worker's own spawn point (its Plot Config Sign's position), the rescue destination {@link #stuckWatchdog} teleports back to if this worker ever gets stuck. */
     public void setSpawnPos(net.minecraft.core.BlockPos spawnPos) {
         this.spawnPos = spawnPos;

@@ -3,6 +3,7 @@ package com.github.cerealklla.settlemynts.npc;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 
@@ -39,6 +40,16 @@ public final class NpcIdentityBirth {
      * @param settlementName the settlement's real, player-given name (e.g. "Starterville"), or blank/{@code null} if unknown -- so a freshly-born NPC's generated backstory references the real town instead of inventing one
      */
     public static NpcIdentity resolveOrBeginBirth(ServerLevel level, NpcIdentityKey key, GhostTownHallCoreEntity core, String settlementName) {
+        return resolveOrBeginBirth(level, key, core, settlementName, null);
+    }
+
+    /**
+     * Same as {@link #resolveOrBeginBirth(ServerLevel, NpcIdentityKey, GhostTownHallCoreEntity,
+     * String)}, with an extra {@code onGenerated} callback -- see {@link
+     * NpcIdentityPrompting#generateAsync}'s own doc for why this exists ({@link
+     * WanderingIdentityListener}'s vanilla-nametag push is the only real caller today).
+     */
+    public static NpcIdentity resolveOrBeginBirth(ServerLevel level, NpcIdentityKey key, GhostTownHallCoreEntity core, String settlementName, Consumer<NpcIdentity> onGenerated) {
         Optional<NpcIdentity> existing = NpcIdentityStore.find(key);
         if (existing.isPresent()) {
             return existing.get();
@@ -50,7 +61,7 @@ public final class NpcIdentityBirth {
         Long settlementPlaceId = core != null ? core.getCartographyrEntityId() : null;
         LoreEntry lore = settlementPlaceId != null ? SettlementLoreStore.getOrAssign(settlementPlaceId) : GENERIC_LORE;
         List<String> usedNames = core != null ? NpcSettlementNames.inSettlement(level, core) : List.of();
-        NpcIdentityPrompting.generateAsync(placeholder, lore, settlementName, usedNames);
+        NpcIdentityPrompting.generateAsync(placeholder, lore, settlementName, usedNames, onGenerated);
         return placeholder;
     }
 }

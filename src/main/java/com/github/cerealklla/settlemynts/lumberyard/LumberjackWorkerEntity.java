@@ -88,6 +88,18 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         return settlementCoreId;
     }
 
+    /** Floating nameplate text (Nuclyus's stat-bar overlay) -- this worker's own persisted identity name, or {@code null} before {@link #setPlotIdentity} has run or a name has been generated yet. */
+    @Override
+    public net.minecraft.network.chat.Component displayName() {
+        if (plotId == null) {
+            return null;
+        }
+        return com.github.cerealklla.settlemynts.npc.NpcIdentityStore
+                .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(plotId, com.github.cerealklla.settlemynts.npc.NpcRole.LUMBERJACK))
+                .map(identity -> net.minecraft.network.chat.Component.literal(identity.name()))
+                .orElse(null);
+    }
+
     /** Called once by {@link LumberjackSpawnTicker} right after construction -- this worker's own spawn point (its Plot Config Sign's position), the rescue destination {@link #stuckWatchdog} (and {@link LumberjackWorkGoal}'s own pathfinding-give-up rescue) teleport back to if this worker ever gets stuck. */
     public net.minecraft.core.BlockPos spawnPos() {
         return spawnPos;

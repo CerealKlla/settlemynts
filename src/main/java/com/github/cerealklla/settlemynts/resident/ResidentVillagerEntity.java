@@ -96,6 +96,18 @@ public class ResidentVillagerEntity extends Villager implements com.github.cerea
         return settlementCoreId;
     }
 
+    /** Floating nameplate text (Nuclyus's stat-bar overlay) -- this resident's own persisted identity name, or {@code null} before {@link #setPlotIdentity} has run or a name has been generated yet. */
+    @Override
+    public net.minecraft.network.chat.Component displayName() {
+        if (plotId == null) {
+            return null;
+        }
+        return com.github.cerealklla.settlemynts.npc.NpcIdentityStore
+                .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(plotId, com.github.cerealklla.settlemynts.npc.NpcRole.RESIDENT))
+                .map(identity -> net.minecraft.network.chat.Component.literal(identity.name()))
+                .orElse(null);
+    }
+
     /** Same resolution chain as {@code GuardEntity#resolvePatrolArea} -- see that method's own doc. */
     public Optional<Geometry.Polygon> resolvePatrolArea(ServerLevel level) {
         if (settlementCoreId == null || plotId == null) {

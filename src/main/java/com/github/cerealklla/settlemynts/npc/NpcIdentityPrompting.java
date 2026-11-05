@@ -6,6 +6,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 import com.github.cerealklla.nuclyus.llm.OllamaClient;
 import com.github.cerealklla.nuclyus.llm.WorldLore;
@@ -51,8 +52,20 @@ public final class NpcIdentityPrompting {
      * logging a warning if the LLM is unreachable/unconfigured or the response can't be parsed -- the
      * placeholder identity (set by the caller before this was ever invoked) stays in place either way,
      * so a bad/missing response never leaves the NPC without SOME identity.
+     *
+     * @param onGenerated optional (nullable), called with the real generated identity once persisted
+     *                     -- only on success, never on a no-op/unparseable/unreachable-LLM path, and
+     *                     always from this class's own single-thread executor, never the server
+     *                     thread. Added 2026-11-05 for {@link WanderingIdentityListener}'s own
+     *                     nameplate push: a {@code WanderingTrader} is a real vanilla entity class
+     *                     that can't implement {@code StatBarOwner} (no mixin exists for this suite's
+     *                     one deliberate exception doesn't cover it), so its name has to be pushed
+     *                     onto the live entity's own real {@code CustomName} instead of being resolved
+     *                     live the way {@code Nuclyus's StatBarWorldOverlay} does for the other 5
+     *                     roles -- this callback is how the caller gets notified once there's a real
+     *                     name to push. Every other caller passes {@code null}.
      */
-    public static void generateAsync(NpcIdentity placeholder, LoreEntry lore, String settlementName, List<String> usedNamesIn) {
+    public static void generateAsync(NpcIdentity placeholder, LoreEntry lore, String settlementName, List<String> usedNamesIn, Consumer<NpcIdentity> onGenerated) {
         if (!OllamaClient.isConfigured()) {
             return; // Placeholder identity stays in place -- see this method's own doc.
         }
@@ -115,6 +128,9 @@ public final class NpcIdentityPrompting {
 
                 if (generated != null) {
                     NpcIdentityStore.put(generated);
+                    if (onGenerated != null) {
+                        onGenerated.accept(generated);
+                    }
                 } else {
                     SettlemyntsMod.LOGGER.warn("Settlemynts NPC birth generation returned an unparseable reply for {} -- leaving placeholder identity in place: {}",
                             placeholder.key(), lastReply);

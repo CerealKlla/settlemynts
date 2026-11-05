@@ -158,6 +158,18 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         return assignedStandId;
     }
 
+    /** Floating nameplate text (Nuclyus's stat-bar overlay) -- this guard's own persisted identity name, keyed by its Guard Kit Stand (not the plot -- a plot can have several stands), or {@code null} before {@link #setAssignedStandId} has run or a name has been generated yet. */
+    @Override
+    public net.minecraft.network.chat.Component displayName() {
+        if (assignedStandId == null) {
+            return null;
+        }
+        return com.github.cerealklla.settlemynts.npc.NpcIdentityStore
+                .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(assignedStandId, com.github.cerealklla.settlemynts.npc.NpcRole.GUARD))
+                .map(identity -> net.minecraft.network.chat.Component.literal(identity.name()))
+                .orElse(null);
+    }
+
     /** Called once by {@link GuardSpawnTicker} right after construction -- this guard's own spawn point (its assigned stand's position), the rescue destination {@link #stuckWatchdog} teleports back to if this guard ever gets stuck. */
     public void setHomePos(net.minecraft.core.BlockPos homePos) {
         this.homePos = homePos;
