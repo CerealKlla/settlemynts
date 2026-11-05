@@ -378,7 +378,13 @@ public final class PlannedInventoryClearing {
      * -- callers that only need "any one recipe" (e.g. the existence check below) can just take the
      * first entry; callers that need to choose the cheapest/currently-stocked fuel should not.
      */
-    private static List<LyfeCraftingBridge.RecipeInfo> resolveRecipes(ServerLevel level, Identifier id) {
+    // Package-private (not private), 2026-11-05 -- ShopWishlist#computeDeficits used to call
+    // LyfeCraftingBridge.getRecipe directly instead of this method, so a sold item's material need
+    // only ever surfaced for a real Lyfe equipment/food recipe, never a plain vanilla Furnace/
+    // Stonecutter/Crafting-Table one (e.g. Cobblestone -> Cobblestone Stairs) -- see that method's
+    // own doc for the full real-report writeup. Reusing this one resolution instead of a second
+    // hand-copied one means the two can never drift apart again the way they already had.
+    static List<LyfeCraftingBridge.RecipeInfo> resolveRecipes(ServerLevel level, Identifier id) {
         List<LyfeCraftingBridge.RecipeInfo> smelting = SmeltingRecipes.getAll(level, id);
         if (!smelting.isEmpty()) {
             return smelting;
@@ -428,7 +434,7 @@ public final class PlannedInventoryClearing {
     }
 
     /** Convenience wrapper over {@link #resolveRecipes} for call sites that only need to know whether {@code id} has any known recipe at all, not which one. */
-    private static Optional<LyfeCraftingBridge.RecipeInfo> resolveRecipe(ServerLevel level, Identifier id) {
+    static Optional<LyfeCraftingBridge.RecipeInfo> resolveRecipe(ServerLevel level, Identifier id) {
         List<LyfeCraftingBridge.RecipeInfo> all = resolveRecipes(level, id);
         return all.isEmpty() ? Optional.empty() : Optional.of(all.get(0));
     }

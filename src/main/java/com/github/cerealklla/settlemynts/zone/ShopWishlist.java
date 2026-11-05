@@ -40,6 +40,22 @@ import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
  * crafting structure for that recipe ("he has a crafting table capable of building them"), the same
  * tier gate {@code zone.PlotCraftingStructures}/{@code PlannedInventoryClearing} already use.
  *
+ * <p><b>Real report, 2026-11-05: "why is this building supplier not buying cobblestone to craft the
+ * cobblestone stairs it wants to sell?"</b> Root cause: this method only ever resolved a sold item's
+ * recipe via {@code LyfeCraftingBridge.getRecipe}, so a sold item whose only real recipe is a plain
+ * vanilla one (a Stonecutter/Furnace/Crafting-Table recipe resolved by {@code StonecuttingRecipes}/
+ * {@code SmeltingRecipes}/{@code CraftingTableRecipes}, added 2026-10-16/24 -- Cobblestone Stairs is
+ * exactly this, a 1:1 Stonecutter recipe with no Lyfe recipe at all) was always treated as "not a
+ * known recipe," so its material need (Cobblestone) could never surface here -- and since this
+ * deficit list is also what {@code PlannedInventoryClearing#settleGroup} folds into its own
+ * tradeable-resource set for the midnight settlement pass, Cobblestone could never even be
+ * considered for inter-plot buying for this shop either. Now resolves through {@link
+ * PlannedInventoryClearing#resolveRecipe}, the same unified Smelting/Stonecutting/CraftingTable/Lyfe
+ * lookup the rest of the engine already uses, and checks real {@link PlotCraftingCapability} (via
+ * {@code RecipeInfo#craftableWith}) instead of a Lyfe-structure-only tier comparison, so a plain
+ * vanilla Stonecutter/Furnace/Crafting-Table requirement is honored correctly too -- a Lyfe
+ * crafting-structure recipe still needs the right Lyfe structure, nothing changes for that case.
+ *
  * <p>**A third correction, 2026-10-11**: any Planned Inventory target that *wasn't* a currently-sold,
  * in-deficit, craftable finished good was still being listed directly (a leftover "direct deficit"
  * fallback) -- in practice this meant a plot's own raw-material targets (auto-seeded for NPC shops
@@ -72,7 +88,10 @@ public final class ShopWishlist {
      */
     public static List<DeficitEntry> computeDeficits(ServerLevel level, PlotRecord plot) {
         List<DeficitEntry> deficits = new ArrayList<>();
-        if (plot.plannedInventory().isEmpty() || !LyfeCraftingBridge.isLoaded()) {
+        // No longer gated on LyfeCraftingBridge.isLoaded() -- see this method's own 2026-11-05 doc.
+        // A plain vanilla Stonecutter/Furnace/Crafting-Table recipe needs no Lyfe at all, same
+        // reasoning PlannedInventoryClearing#resolveRecipes already established for those sources.
+        if (plot.plannedInventory().isEmpty()) {
             return deficits;
         }
         List<Container> boxes = Settlemynts.resolvePlotBoxes(level, plot.plotId());
@@ -85,7 +104,7 @@ public final class ShopWishlist {
                 .orElse(Set.of());
 
         Map<Identifier, Integer> materialUnitsRequired = new LinkedHashMap<>();
-        int structureTier = -1; // Lazily resolved -- -1 means "not checked yet."
+        PlotCraftingCapability capability = null; // Lazily resolved -- null means "not checked yet."
 
         for (PlannedInventoryTarget target : plot.plannedInventory()) {
             if (target.isTag() || !soldItemIds.contains(target.resourceKey())) {
@@ -97,15 +116,18 @@ public final class ShopWishlist {
             if (unitsShort <= 0) {
                 continue;
             }
-            Optional<LyfeCraftingBridge.RecipeInfo> recipeOpt = LyfeCraftingBridge.getRecipe(target.resourceKey());
+            // Unified Smelting/Stonecutting/CraftingTable/Lyfe resolution -- see this method's own
+            // 2026-11-05 doc for why LyfeCraftingBridge.getRecipe alone used to miss plain vanilla
+            // recipes entirely.
+            Optional<LyfeCraftingBridge.RecipeInfo> recipeOpt = PlannedInventoryClearing.resolveRecipe(level, target.resourceKey());
             if (recipeOpt.isEmpty()) {
                 continue; // Sold, in deficit, but not a known recipe -- nothing to wishlist for it.
             }
-            if (structureTier < 0) {
-                structureTier = PlotCraftingStructures.maxCraftingStructureTier(level, plot.plotId());
+            if (capability == null) {
+                capability = PlotCraftingCapability.resolve(level, plot.plotId());
             }
             LyfeCraftingBridge.RecipeInfo recipe = recipeOpt.get();
-            if (structureTier < recipe.tier()) {
+            if (!recipe.craftableWith(capability)) {
                 continue; // Can't actually craft it here regardless -- same gate PlannedInventoryClearing itself uses.
             }
             for (Map.Entry<Identifier, Integer> component : recipe.specificComponents().entrySet()) {
