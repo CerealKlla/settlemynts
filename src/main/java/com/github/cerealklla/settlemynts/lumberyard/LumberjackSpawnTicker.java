@@ -79,7 +79,7 @@ public final class LumberjackSpawnTicker {
         worker.setSpawnPos(spawnPos);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
         if (AudybleIdentityBridge.isLoaded()) {
-            AudybleIdentityBridge.assumeWorkerIdentity(plotId, PlotWorkerKind.Kind.LUMBERJACK, core.getCartographyrEntityId());
+            AudybleIdentityBridge.assumeWorkerIdentity(plotId, PlotWorkerKind.Kind.LUMBERJACK, core.getCartographyrEntityId(), core.getSettlementName());
         }
         level.addFreshEntity(worker);
         sign.setLumberjackWorkerId(worker.getUUID());

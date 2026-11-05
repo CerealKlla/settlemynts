@@ -80,7 +80,7 @@ public final class MineshaftSpawnTicker {
         worker.setSpawnPos(spawnPos);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
         if (AudybleIdentityBridge.isLoaded()) {
-            AudybleIdentityBridge.assumeWorkerIdentity(plotId, PlotWorkerKind.Kind.MINER, core.getCartographyrEntityId());
+            AudybleIdentityBridge.assumeWorkerIdentity(plotId, PlotWorkerKind.Kind.MINER, core.getCartographyrEntityId(), core.getSettlementName());
         }
         level.addFreshEntity(worker);
         sign.setMinerWorkerId(worker.getUUID());

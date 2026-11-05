@@ -38,7 +38,7 @@ public final class AudybleIdentityBridge {
     }
 
     /** For Farmer/Lumberjack/Miner/Resident -- {@code kind} must not be {@code NONE}. */
-    public static void assumeWorkerIdentity(UUID plotId, PlotWorkerKind.Kind kind, Long settlementPlaceId) {
+    public static void assumeWorkerIdentity(UUID plotId, PlotWorkerKind.Kind kind, Long settlementPlaceId, String settlementName) {
         PlotRole role = switch (kind) {
             case FARMER -> PlotRole.FARMER;
             case LUMBERJACK -> PlotRole.LUMBERJACK;
@@ -46,10 +46,10 @@ public final class AudybleIdentityBridge {
             case RESIDENT -> PlotRole.RESIDENT;
             case NONE -> throw new IllegalArgumentException("PlotWorkerKind.Kind.NONE has no NPC identity");
         };
-        Audyble.resolveOrBeginBirth(new NpcIdentityKey(plotId, role), settlementPlaceId);
+        Audyble.resolveOrBeginBirth(new NpcIdentityKey(plotId, role), settlementPlaceId, settlementName);
     }
 
-    public static void assumeGuardIdentity(UUID standId, Long settlementPlaceId) {
-        Audyble.resolveOrBeginBirth(new NpcIdentityKey(standId, PlotRole.GUARD), settlementPlaceId);
+    public static void assumeGuardIdentity(UUID standId, Long settlementPlaceId, String settlementName) {
+        Audyble.resolveOrBeginBirth(new NpcIdentityKey(standId, PlotRole.GUARD), settlementPlaceId, settlementName);
     }
 }

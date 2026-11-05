@@ -1004,4 +1004,33 @@ public final class Settlemynts {
         }
         return Optional.empty();
     }
+
+    /**
+     * {@code entity}'s owning settlement's real, player-given name (via its plot), for any of the 5
+     * plot-bound worker/guard types -- added 2026-11-04 for Audyble's Phase 5b conversation engine,
+     * which otherwise has no way to know an NPC's real settlement name and was inventing/hallucinating
+     * one instead of referencing the actual town. Empty if {@code entity} isn't a recognized worker/
+     * guard, its level isn't a {@link ServerLevel}, its plot has no resolvable sign/core, or the
+     * settlement's name is blank (a natural/NPC village, which has no player-set name).
+     */
+    public static Optional<String> resolveSettlementName(Entity entity) {
+        UUID plotId = null;
+        if (entity instanceof com.github.cerealklla.settlemynts.farm.FarmerWorkerEntity w) {
+            plotId = w.plotId();
+        } else if (entity instanceof com.github.cerealklla.settlemynts.lumberyard.LumberjackWorkerEntity w) {
+            plotId = w.plotId();
+        } else if (entity instanceof com.github.cerealklla.settlemynts.mineshaft.MinerWorkerEntity w) {
+            plotId = w.plotId();
+        } else if (entity instanceof com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity w) {
+            plotId = w.plotId();
+        } else if (entity instanceof com.github.cerealklla.settlemynts.guardhouse.GuardEntity w) {
+            plotId = w.plotId();
+        }
+        if (plotId == null || !(entity.level() instanceof ServerLevel level)) {
+            return Optional.empty();
+        }
+        return findPlotLocation(level, plotId)
+                .map(PlotLocation::settlementName)
+                .filter(name -> !name.isBlank());
+    }
 }

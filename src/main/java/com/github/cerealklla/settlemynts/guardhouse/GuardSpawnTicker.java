@@ -129,7 +129,7 @@ public final class GuardSpawnTicker {
         guard.setPlotIdentity(stand.settlementCoreId(), stand.plotId());
         guard.setAssignedStandId(standId);
         if (AudybleIdentityBridge.isLoaded()) {
-            AudybleIdentityBridge.assumeGuardIdentity(standId, core.getCartographyrEntityId());
+            AudybleIdentityBridge.assumeGuardIdentity(standId, core.getCartographyrEntityId(), core.getSettlementName());
         }
         guard.setHomePos(spawnPos);
         guard.setHomeDimension(level.dimension());

@@ -91,7 +91,7 @@ public final class FarmerSpawnTicker {
         worker.setPos(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
         if (AudybleIdentityBridge.isLoaded()) {
-            AudybleIdentityBridge.assumeWorkerIdentity(plotId, PlotWorkerKind.Kind.FARMER, core.getCartographyrEntityId());
+            AudybleIdentityBridge.assumeWorkerIdentity(plotId, PlotWorkerKind.Kind.FARMER, core.getCartographyrEntityId(), core.getSettlementName());
         }
         worker.setSpawnPos(spawnPos);
         // Cosmetic only (2026-10-09, explicit request) -- the zone here is always Farm, so the

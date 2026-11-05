@@ -114,7 +114,7 @@ public final class ResidentSpawnTicker {
         resident.setPos(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
         resident.setPlotIdentity(sign.settlementCoreId(), plotId);
         if (AudybleIdentityBridge.isLoaded()) {
-            AudybleIdentityBridge.assumeWorkerIdentity(plotId, PlotWorkerKind.Kind.RESIDENT, core.getCartographyrEntityId());
+            AudybleIdentityBridge.assumeWorkerIdentity(plotId, PlotWorkerKind.Kind.RESIDENT, core.getCartographyrEntityId(), core.getSettlementName());
         }
         resident.setSpawnPos(spawnPos);
         com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator.representativeProfessionFor(plot.zoneTypeId())
