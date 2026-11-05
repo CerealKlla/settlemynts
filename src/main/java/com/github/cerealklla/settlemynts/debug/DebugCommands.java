@@ -183,7 +183,10 @@ public final class DebugCommands {
                         .then(Commands.literal("dedupnames")
                                 // ADMIN ONLY -- one-time data fix, see #dedupNpcNames's own doc.
                                 .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-                                .executes(ctx -> dedupNpcNames(ctx.getSource()))));
+                                .executes(ctx -> dedupNpcNames(ctx.getSource())))
+                        .then(Commands.literal("listnames")
+                                // Read-only, no permission gate -- same precedent as this whole debug file.
+                                .executes(ctx -> listNpcNames(ctx.getSource()))));
     }
 
     private static NpcIdentityKey npcDebugParseKey(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
@@ -253,6 +256,42 @@ public final class DebugCommands {
      * re-checks once a real name is already synced, so without this the fix wouldn't show up in-world
      * until that entity's next full reload).
      */
+    /** Read-only: lists every real (non-placeholder) NPC name per loaded settlement, grouped by role, so a player/admin can see current names without digging through the raw save file. */
+    private static int listNpcNames(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        int settlementsReported = 0;
+        for (ServerLevel level : server.getAllLevels()) {
+            AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                    NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+            for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, c -> true)) {
+                List<NpcIdentity> identities = NpcSettlementNames.identitiesInSettlement(level, core);
+                String label = core.getSettlementName().isBlank() ? "(unnamed settlement)" : core.getSettlementName();
+                StringBuilder line = new StringBuilder(label).append(": ");
+                boolean any = false;
+                for (NpcIdentity identity : identities) {
+                    if (identity.name().startsWith("Unnamed ")) {
+                        continue;
+                    }
+                    if (any) {
+                        line.append(", ");
+                    }
+                    line.append(identity.key().role()).append(" ").append(identity.name());
+                    any = true;
+                }
+                if (!any) {
+                    line.append("(no named NPCs yet)");
+                }
+                settlementsReported++;
+                String finalLine = line.toString();
+                source.sendSuccess(() -> Component.literal(finalLine), false);
+            }
+        }
+        if (settlementsReported == 0) {
+            source.sendSuccess(() -> Component.literal("No loaded settlements found."), false);
+        }
+        return settlementsReported;
+    }
+
     private static int dedupNpcNames(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
         int renamed = 0;
