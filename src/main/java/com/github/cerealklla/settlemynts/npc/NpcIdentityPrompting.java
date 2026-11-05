@@ -24,24 +24,20 @@ import com.github.cerealklla.settlemynts.SettlemyntsMod;
  *
  * <p>A dedicated single-thread executor, same shape as Audyble's own conversation pipeline executor,
  * so a slow/unreachable Ollama can never stall the server tick thread a birth was triggered from.
+ *
+ * <p><b>The name itself no longer comes from the LLM</b> -- real report, 2026-11-05: generated names
+ * kept clustering around a small handful of fantasy-sounding roots ("Kaelin Vex"/"Kael Vex"/"Kaelin
+ * Thorne" all in one settlement, two of them an exact full-name match), because a small local model
+ * asked to invent a name from scratch regresses to the same narrow cluster no matter how the prompt is
+ * worded. {@link NameBank} picks the name directly in code instead -- real, guaranteed variety, trivial
+ * exact-match avoidance -- and the LLM is only asked for backstory/facts to go with it. This also
+ * retired the old "ask 3 times, then bolt on a mechanical epithet" fallback entirely: there's no more
+ * LLM-side name collision to fall back from.
  */
 public final class NpcIdentityPrompting {
 
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(
             r -> new Thread(r, "settlemynts-npc-birth"));
-
-    /** Total LLM attempts (including the first) before falling back to a mechanical disambiguator. */
-    private static final int MAX_NAME_ATTEMPTS = 3;
-
-    /**
-     * Stable, deterministic suffixes for the rare case a settlement's name pool collides 3 times in a
-     * row. Package-visibility-plus (public) so {@code debug.DebugCommands#dedupNpcNames} can reuse
-     * the exact same disambiguation vocabulary for already-persisted collisions instead of inventing
-     * a second one.
-     */
-    public static final String[] DISAMBIGUATING_EPITHETS = {
-            "the Younger", "the Elder", "of the North Road", "of the West Gate", "the Second"
-    };
 
     private NpcIdentityPrompting() {
     }
@@ -52,8 +48,9 @@ public final class NpcIdentityPrompting {
     }
 
     /**
-     * Asynchronously generates a real name/backstory/key facts for {@code placeholder} via the shared
-     * LLM client, persisting the result (overwriting the placeholder) once it returns. A no-op beyond
+     * Asynchronously generates a real backstory/key facts for {@code placeholder} via the shared LLM
+     * client (the name itself is picked from {@link NameBank}, not the LLM -- see this class's own
+     * doc), persisting the result (overwriting the placeholder) once it returns. A no-op beyond
      * logging a warning if the LLM is unreachable/unconfigured or the response can't be parsed -- the
      * placeholder identity (set by the caller before this was ever invoked) stays in place either way,
      * so a bad/missing response never leaves the NPC without SOME identity.
@@ -71,6 +68,12 @@ public final class NpcIdentityPrompting {
      *                     name to push. Every other caller passes {@code null}.
      */
     public static void generateAsync(NpcIdentity placeholder, LoreEntry lore, String settlementName, List<String> usedNamesIn, Consumer<NpcIdentity> onGenerated) {
+        // The name is picked up front, synchronously -- it's a plain in-memory list pick, no reason to
+        // defer it onto the executor, and NpcIdentityBirth's placeholder display text can use the real
+        // given name immediately instead of "Unnamed X" even before the backstory comes back.
+        String givenName = NameBank.pickGivenName(usedNamesIn);
+        String name = NameBank.rollSurname() ? givenName + " " + NameBank.pickSurname() : givenName;
+
         if (!OllamaClient.isConfigured()) {
             return; // Placeholder identity stays in place -- see this method's own doc.
         }
@@ -86,56 +89,17 @@ public final class NpcIdentityPrompting {
                 String systemPrompt = WorldLore.TEXT + "\n\nThis settlement: " + settlementLine + lore.text();
                 String roleName = placeholder.key().role().name().toLowerCase(Locale.ROOT);
 
-                // No-repeat-names-within-a-settlement -- births are already strictly sequential (this
-                // whole class runs on one single-thread EXECUTOR), so by the time this task runs, every
-                // earlier birth in this same settlement has already been persisted and would already be
-                // reflected the next time a caller computes usedNamesIn fresh.
-                List<String> usedNames = new ArrayList<>(usedNamesIn);
-                NpcIdentity generated = null;
-                String lastReply = null;
-                for (int attempt = 1; attempt <= MAX_NAME_ATTEMPTS; attempt++) {
-                    String userMessage = "Generate a brand-new " + roleName + " character for this settlement. "
-                            + "Respond in EXACTLY this format and nothing else -- no preamble, no extra commentary:\n"
-                            + "NAME: <a short given name only, fitting this world -- add a surname ONLY if this "
-                            + "character is a noble, an appointed official, or from a notable/wealthy family, and "
-                            + "say so in the backstory; otherwise a single given name alone, no surname>\n"
-                            + "BACKSTORY: <2 to 4 sentences of personal backstory>\n"
-                            + "FACT: <one short fact about them>\n"
-                            + "FACT: <one short fact about them>\n"
-                            + "FACT: <one short fact about them>\n"
-                            + "Make the name genuinely varied -- do NOT default to generic fantasy names like "
-                            + "Kael, Kaelin, Elara, Thorne, or Vex. Draw from a wide range of different naming "
-                            + "styles and roots so two different characters don't end up sounding alike."
-                            + (usedNames.isEmpty() ? "" : "\nNames already in use in this settlement -- do NOT reuse any of these, "
-                                    + "or anything that sounds like a close variant of one of them: "
-                                    + String.join(", ", usedNames) + ".");
+                String userMessage = "This character is named " + name + ", a brand-new " + roleName
+                        + " for this settlement. Write their personal backstory and a few facts about "
+                        + "them. Respond in EXACTLY this format and nothing else -- no preamble, no extra "
+                        + "commentary, and do not invent or restate a different name:\n"
+                        + "BACKSTORY: <2 to 4 sentences of personal backstory>\n"
+                        + "FACT: <one short fact about them>\n"
+                        + "FACT: <one short fact about them>\n"
+                        + "FACT: <one short fact about them>";
 
-                    lastReply = OllamaClient.chat(systemPrompt, List.of(), userMessage);
-                    NpcIdentity candidate = parse(placeholder, lastReply);
-                    if (candidate == null) {
-                        break; // unparseable -- retrying won't help, fall through to the placeholder-stays-in-place branch below.
-                    }
-                    boolean collides = usedNames.stream().anyMatch(n -> n.equalsIgnoreCase(candidate.name()));
-                    if (!collides) {
-                        generated = candidate;
-                        break;
-                    }
-                    usedNames.add(candidate.name()); // also exclude this rejected name on the next attempt.
-                }
-
-                if (generated == null && lastReply != null) {
-                    // Every attempt either collided or (rare) kept re-parsing fine but kept colliding --
-                    // apply a deterministic mechanical fallback rather than looping forever or leaving
-                    // two NPCs in the same settlement with the literal same name.
-                    NpcIdentity lastCandidate = parse(placeholder, lastReply);
-                    if (lastCandidate != null) {
-                        String epithet = DISAMBIGUATING_EPITHETS[Math.abs(placeholder.key().hashCode()) % DISAMBIGUATING_EPITHETS.length];
-                        generated = new NpcIdentity(lastCandidate.key(), lastCandidate.name() + " " + epithet,
-                                lastCandidate.backstory(), lastCandidate.keyFacts(), true, Optional.empty());
-                        SettlemyntsMod.LOGGER.warn("Settlemynts NPC birth name collided {} times in settlement for {} -- disambiguated to '{}'",
-                                MAX_NAME_ATTEMPTS, placeholder.key(), generated.name());
-                    }
-                }
+                String reply = OllamaClient.chat(systemPrompt, List.of(), userMessage);
+                NpcIdentity generated = parse(placeholder, name, reply);
 
                 if (generated != null) {
                     NpcIdentityStore.put(generated);
@@ -144,7 +108,7 @@ public final class NpcIdentityPrompting {
                     }
                 } else {
                     SettlemyntsMod.LOGGER.warn("Settlemynts NPC birth generation returned an unparseable reply for {} -- leaving placeholder identity in place: {}",
-                            placeholder.key(), lastReply);
+                            placeholder.key(), reply);
                 }
             } catch (Exception e) {
                 SettlemyntsMod.LOGGER.warn("Settlemynts NPC birth generation failed for {} -- leaving placeholder identity in place", placeholder.key(), e);
@@ -152,21 +116,18 @@ public final class NpcIdentityPrompting {
         });
     }
 
-    private static NpcIdentity parse(NpcIdentity placeholder, String reply) {
-        String name = null;
+    private static NpcIdentity parse(NpcIdentity placeholder, String name, String reply) {
         String backstory = null;
         List<String> facts = new ArrayList<>();
         for (String line : reply.split("\n")) {
             String trimmed = line.trim();
-            if (trimmed.regionMatches(true, 0, "NAME:", 0, 5)) {
-                name = trimmed.substring(5).trim();
-            } else if (trimmed.regionMatches(true, 0, "BACKSTORY:", 0, 10)) {
+            if (trimmed.regionMatches(true, 0, "BACKSTORY:", 0, 10)) {
                 backstory = trimmed.substring(10).trim();
             } else if (trimmed.regionMatches(true, 0, "FACT:", 0, 5)) {
                 facts.add(trimmed.substring(5).trim());
             }
         }
-        if (name == null || name.isBlank() || backstory == null || backstory.isBlank()) {
+        if (backstory == null || backstory.isBlank()) {
             return null;
         }
         return new NpcIdentity(placeholder.key(), name, backstory, List.copyOf(facts), true, Optional.empty());

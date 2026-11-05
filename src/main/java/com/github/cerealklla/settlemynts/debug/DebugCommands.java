@@ -22,11 +22,12 @@ import com.github.cerealklla.settlemynts.guardhouse.GuardEntity;
 import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity;
 import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandIndex;
 import com.github.cerealklla.settlemynts.guardhouse.GuardPendingDeathIndex;
+import com.github.cerealklla.settlemynts.npc.NameBank;
 import com.github.cerealklla.settlemynts.npc.NpcIdentity;
 import com.github.cerealklla.settlemynts.npc.NpcIdentityKey;
-import com.github.cerealklla.settlemynts.npc.NpcIdentityPrompting;
 import com.github.cerealklla.settlemynts.npc.NpcIdentityStore;
 import com.github.cerealklla.settlemynts.npc.NpcRole;
+import com.github.cerealklla.settlemynts.npc.NpcSettlementNames;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.roadway.HighwayConnectionMarkerEntity;
 import com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity;
@@ -216,28 +217,41 @@ public final class DebugCommands {
     }
 
     /**
+     * Stable list of the old mechanical disambiguation suffixes both NPC birth and this command used
+     * to append before being replaced by {@link NameBank}, 2026-11-05 -- real user feedback: labeling
+     * two unrelated strangers "the Elder"/"the Younger" implies a relationship that doesn't exist,
+     * especially once they share an exact full first-and-last name. Kept here, and only here, so this
+     * one-time command can find and clean up names it (or NPC birth) already produced under the old
+     * scheme -- never used to produce a new name again.
+     */
+    private static final String[] LEGACY_EPITHETS = {
+            "the Younger", "the Elder", "of the North Road", "of the West Gate", "the Second"
+    };
+
+    /**
      * ADMIN ONLY -- one-time data fix, 2026-11-05. Real report: "there are a lot of duplicated NPC
      * names in starterville." Root cause confirmed by reading the real persisted store directly: every
      * already-generated name collision in {@code settlemynts_npc_identities.json} predates the
      * 2026-11-05 ownership move (see {@code npc.NpcIdentityStore}'s own class doc) -- these NPCs were
-     * born back when Audyble's own uniqueness check silently never worked at all (it filtered a cached
-     * {@code settlementPlaceId} field the real call site never populated), so the LLM was free to
-     * independently pick the same flavorful name ("Kaelin Vex" appears four separate times across
-     * roles in the live data) more than once with nothing to stop it. The uniqueness check itself is
-     * already fixed going forward ({@code npc.NpcSettlementNames#inSettlement}, now resolved live
-     * instead of from that dead field) -- this command is purely for the already-persisted backlog of
-     * collisions that fix can't retroactively touch. Scans every loaded settlement on the server (no
-     * player position needed, so this runs cleanly from RCON), keeps the first identity in each
-     * same-name group within a settlement untouched, and appends one of {@link
-     * NpcIdentityPrompting#DISAMBIGUATING_EPITHETS} to each later duplicate's name -- the exact same
-     * disambiguation vocabulary a brand-new collision would get today, reused rather than invented
-     * fresh. Backstory/key facts are left alone -- only the name changes, since the complaint is
-     * specifically about the name, and a player may have already read/talked about this character's
-     * backstory. Placeholder ("Unnamed X") entries are skipped entirely -- those are a loading state,
-     * not a real collision, and will resolve themselves once generation completes. Also force-pushes
-     * the renamed value onto any currently-loaded live entity's {@code DATA_DISPLAY_NAME} directly
-     * (the entity's own {@code syncDisplayName} never re-checks once a real name is already synced, so
-     * without this the fix wouldn't show up in-world until that entity's next full reload).
+     * born back when Audyble's own uniqueness check silently never worked at all, and even after that
+     * was fixed, a small local LLM asked to invent a name from scratch kept clustering on the same
+     * handful of fantasy-sounding roots regardless of prompting (see {@code npc.NameBank}'s own class
+     * doc) -- "Kaelin Vex" appeared four separate times across roles in the live data, two of them an
+     * exact full-name match. Naming itself is now fixed going forward (birth draws from
+     * {@link NameBank} directly instead of asking the LLM) -- this command is purely for the
+     * already-persisted backlog of collisions that fix can't retroactively touch, plus (as of the same
+     * day) cleaning up any name still carrying the old, since-retired epithet suffix from an earlier
+     * run of this same command. Scans every loaded settlement on the server (no player position
+     * needed, so this runs cleanly from RCON), keeps the first identity in each same-name group within
+     * a settlement untouched, and draws a wholly fresh {@link NameBank} name for every later duplicate
+     * -- not a tweak of the old name, since the actual complaint was two unrelated people sharing one.
+     * Backstory/key facts are left alone -- only the name changes, since a player may have already
+     * read/talked about this character's backstory. Placeholder ("Unnamed X") entries are skipped
+     * entirely -- those are a loading state, not a real collision, and will resolve themselves once
+     * generation completes. Also force-pushes the renamed value onto any currently-loaded live
+     * entity's {@code DATA_DISPLAY_NAME} directly (the entity's own {@code syncDisplayName} never
+     * re-checks once a real name is already synced, so without this the fix wouldn't show up in-world
+     * until that entity's next full reload).
      */
     private static int dedupNpcNames(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
@@ -257,78 +271,54 @@ public final class DebugCommands {
     }
 
     private static int dedupSettlement(ServerLevel level, GhostTownHallCoreEntity core) {
-        List<com.github.cerealklla.settlemynts.npc.NpcIdentity> identities =
-                com.github.cerealklla.settlemynts.npc.NpcSettlementNames.identitiesInSettlement(level, core);
-        int repaired = 0;
-        // One-time self-heal for a now-fixed bug in this same command: before the epithet-collision
-        // fix above, two separate runs could each independently append the same epithet, and once
-        // that collided a SECOND time the old code appended another epithet on top of the first
-        // instead of replacing it (e.g. "Kaelin Vex the Younger the Younger"). Any identity already
-        // carrying that doubled suffix gets collapsed back to a single occurrence here, using the
-        // corrected name for the rest of this method. Harmless no-op once no such name remains.
-        List<com.github.cerealklla.settlemynts.npc.NpcIdentity> corrected = new ArrayList<>();
-        for (com.github.cerealklla.settlemynts.npc.NpcIdentity identity : identities) {
-            String collapsed = collapseStackedEpithet(identity.name());
-            if (!collapsed.equals(identity.name())) {
-                com.github.cerealklla.settlemynts.npc.NpcIdentity fixed = new com.github.cerealklla.settlemynts.npc.NpcIdentity(
-                        identity.key(), collapsed, identity.backstory(), identity.keyFacts(), identity.alive(), identity.deathContext());
-                NpcIdentityStore.put(fixed);
-                pushLiveDisplayName(level, identity.key(), collapsed);
-                corrected.add(fixed);
-                repaired++;
-            } else {
-                corrected.add(identity);
+        List<NpcIdentity> identities = NpcSettlementNames.identitiesInSettlement(level, core);
+
+        java.util.Set<String> usedNames = new java.util.HashSet<>();
+        for (NpcIdentity identity : identities) {
+            if (!identity.name().startsWith("Unnamed ")) {
+                usedNames.add(identity.name().toLowerCase(java.util.Locale.ROOT));
             }
         }
+
+        // One-time cleanup: any name still carrying an old, since-retired epithet suffix (possibly
+        // even stacked, from a bug in an earlier version of this same command) gets a wholly fresh
+        // name instead of a patched-up old one -- see this command's own doc for why. Harmless no-op
+        // once no such name remains anywhere.
+        int repaired = 0;
+        List<NpcIdentity> corrected = new ArrayList<>();
+        for (NpcIdentity identity : identities) {
+            if (identity.name().startsWith("Unnamed ") || !hasLegacyEpithet(identity.name())) {
+                corrected.add(identity);
+                continue;
+            }
+            usedNames.remove(identity.name().toLowerCase(java.util.Locale.ROOT));
+            String freshName = freshName(usedNames);
+            usedNames.add(freshName.toLowerCase(java.util.Locale.ROOT));
+            NpcIdentity fixed = withName(identity, freshName);
+            NpcIdentityStore.put(fixed);
+            pushLiveDisplayName(level, identity.key(), freshName);
+            corrected.add(fixed);
+            repaired++;
+        }
         identities = corrected;
-        Map<String, List<com.github.cerealklla.settlemynts.npc.NpcIdentity>> byName = new java.util.LinkedHashMap<>();
-        // Every name currently in the settlement, including ones already disambiguated by an earlier
-        // run of this same command -- without tracking this, two separate runs (e.g. one before and
-        // one after a previously-unloaded chunk came online) can each independently pick the same
-        // *first* epithet for "the extra one in a group of 2," renaming two different NPCs to the
-        // exact same new name instead of actually fixing the collision. Confirmed live, 2026-11-05.
-        java.util.Set<String> usedNames = new java.util.HashSet<>();
-        for (com.github.cerealklla.settlemynts.npc.NpcIdentity identity : identities) {
+
+        Map<String, List<NpcIdentity>> byName = new java.util.LinkedHashMap<>();
+        for (NpcIdentity identity : identities) {
             if (identity.name().startsWith("Unnamed ")) {
                 continue; // Placeholder, not a real collision -- see this command's own doc.
             }
-            usedNames.add(identity.name().toLowerCase(java.util.Locale.ROOT));
             byName.computeIfAbsent(identity.name().toLowerCase(java.util.Locale.ROOT), k -> new ArrayList<>()).add(identity);
         }
         int renamed = 0;
-        for (List<com.github.cerealklla.settlemynts.npc.NpcIdentity> group : byName.values()) {
+        for (List<NpcIdentity> group : byName.values()) {
             if (group.size() <= 1) {
                 continue;
             }
             for (int i = 1; i < group.size(); i++) {
-                com.github.cerealklla.settlemynts.npc.NpcIdentity original = group.get(i);
-                // Strip an epithet this same command already appended (e.g. an earlier run's own
-                // output colliding with another identity under the exact same renamed string) --
-                // otherwise a second pass stacks a duplicate suffix ("... the Younger the Younger")
-                // instead of swapping in a fresh one. Confirmed live, 2026-11-05.
-                String baseName = original.name();
-                for (String existingEpithet : NpcIdentityPrompting.DISAMBIGUATING_EPITHETS) {
-                    if (baseName.endsWith(" " + existingEpithet)) {
-                        baseName = baseName.substring(0, baseName.length() - existingEpithet.length() - 1);
-                        break;
-                    }
-                }
-                String newName = null;
-                for (int attempt = 0; attempt < NpcIdentityPrompting.DISAMBIGUATING_EPITHETS.length; attempt++) {
-                    String candidate = baseName + " " + NpcIdentityPrompting.DISAMBIGUATING_EPITHETS[attempt];
-                    if (usedNames.add(candidate.toLowerCase(java.util.Locale.ROOT))) {
-                        newName = candidate;
-                        break;
-                    }
-                }
-                if (newName == null) {
-                    // Every epithet is already taken (a real settlement would need 6+ exact-same-name
-                    // collisions to hit this) -- fall back to a numeric suffix that's guaranteed unique.
-                    newName = baseName + " (" + (i + 1) + ")";
-                    usedNames.add(newName.toLowerCase(java.util.Locale.ROOT));
-                }
-                com.github.cerealklla.settlemynts.npc.NpcIdentity renamedIdentity = new com.github.cerealklla.settlemynts.npc.NpcIdentity(
-                        original.key(), newName, original.backstory(), original.keyFacts(), original.alive(), original.deathContext());
+                NpcIdentity original = group.get(i);
+                String newName = freshName(usedNames);
+                usedNames.add(newName.toLowerCase(java.util.Locale.ROOT));
+                NpcIdentity renamedIdentity = withName(original, newName);
                 NpcIdentityStore.put(renamedIdentity);
                 pushLiveDisplayName(level, original.key(), newName);
                 renamed++;
@@ -337,19 +327,30 @@ public final class DebugCommands {
         return renamed + repaired;
     }
 
-    /**
-     * Collapses a name ending in the exact same epithet twice in a row (e.g. "Kaelin Vex the Younger
-     * the Younger") back down to a single occurrence -- see {@link #dedupSettlement}'s own doc for
-     * why this can exist at all. Returns {@code name} unchanged if it doesn't match that pattern.
-     */
-    private static String collapseStackedEpithet(String name) {
-        for (String epithet : NpcIdentityPrompting.DISAMBIGUATING_EPITHETS) {
-            String doubled = " " + epithet + " " + epithet;
-            if (name.endsWith(doubled)) {
-                return name.substring(0, name.length() - doubled.length()) + " " + epithet;
+    private static boolean hasLegacyEpithet(String name) {
+        for (String epithet : LEGACY_EPITHETS) {
+            if (name.endsWith(" " + epithet)) {
+                return true;
             }
         }
-        return name;
+        return false;
+    }
+
+    /** Draws a brand-new {@link NameBank} name guaranteed not to collide with anything in {@code usedNames} (retried a handful of times against the fixed-size pool's vanishingly rare exact clash before just accepting one). */
+    private static String freshName(java.util.Set<String> usedNames) {
+        String candidate = null;
+        for (int attempt = 0; attempt < 20; attempt++) {
+            String given = NameBank.pickGivenName(List.copyOf(usedNames));
+            candidate = NameBank.rollSurname() ? given + " " + NameBank.pickSurname() : given;
+            if (!usedNames.contains(candidate.toLowerCase(java.util.Locale.ROOT))) {
+                break;
+            }
+        }
+        return candidate;
+    }
+
+    private static NpcIdentity withName(NpcIdentity identity, String name) {
+        return new NpcIdentity(identity.key(), name, identity.backstory(), identity.keyFacts(), identity.alive(), identity.deathContext());
     }
 
     /** Force-pushes a renamed identity onto any currently-loaded live entity matching {@code key} -- see {@link #dedupNpcNames}'s own doc for why {@code syncDisplayName} itself can't be relied on to pick this up. */
