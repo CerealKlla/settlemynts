@@ -260,10 +260,17 @@ public final class DebugCommands {
         List<com.github.cerealklla.settlemynts.npc.NpcIdentity> identities =
                 com.github.cerealklla.settlemynts.npc.NpcSettlementNames.identitiesInSettlement(level, core);
         Map<String, List<com.github.cerealklla.settlemynts.npc.NpcIdentity>> byName = new java.util.LinkedHashMap<>();
+        // Every name currently in the settlement, including ones already disambiguated by an earlier
+        // run of this same command -- without tracking this, two separate runs (e.g. one before and
+        // one after a previously-unloaded chunk came online) can each independently pick the same
+        // *first* epithet for "the extra one in a group of 2," renaming two different NPCs to the
+        // exact same new name instead of actually fixing the collision. Confirmed live, 2026-11-05.
+        java.util.Set<String> usedNames = new java.util.HashSet<>();
         for (com.github.cerealklla.settlemynts.npc.NpcIdentity identity : identities) {
             if (identity.name().startsWith("Unnamed ")) {
                 continue; // Placeholder, not a real collision -- see this command's own doc.
             }
+            usedNames.add(identity.name().toLowerCase(java.util.Locale.ROOT));
             byName.computeIfAbsent(identity.name().toLowerCase(java.util.Locale.ROOT), k -> new ArrayList<>()).add(identity);
         }
         int renamed = 0;
@@ -273,9 +280,20 @@ public final class DebugCommands {
             }
             for (int i = 1; i < group.size(); i++) {
                 com.github.cerealklla.settlemynts.npc.NpcIdentity original = group.get(i);
-                String epithet = NpcIdentityPrompting.DISAMBIGUATING_EPITHETS[
-                        (i - 1) % NpcIdentityPrompting.DISAMBIGUATING_EPITHETS.length];
-                String newName = original.name() + " " + epithet;
+                String newName = null;
+                for (int attempt = 0; attempt < NpcIdentityPrompting.DISAMBIGUATING_EPITHETS.length; attempt++) {
+                    String candidate = original.name() + " " + NpcIdentityPrompting.DISAMBIGUATING_EPITHETS[attempt];
+                    if (usedNames.add(candidate.toLowerCase(java.util.Locale.ROOT))) {
+                        newName = candidate;
+                        break;
+                    }
+                }
+                if (newName == null) {
+                    // Every epithet is already taken (a real settlement would need 6+ exact-same-name
+                    // collisions to hit this) -- fall back to a numeric suffix that's guaranteed unique.
+                    newName = original.name() + " (" + (i + 1) + ")";
+                    usedNames.add(newName.toLowerCase(java.util.Locale.ROOT));
+                }
                 com.github.cerealklla.settlemynts.npc.NpcIdentity renamedIdentity = new com.github.cerealklla.settlemynts.npc.NpcIdentity(
                         original.key(), newName, original.backstory(), original.keyFacts(), original.alive(), original.deathContext());
                 NpcIdentityStore.put(renamedIdentity);
