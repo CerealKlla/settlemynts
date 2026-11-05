@@ -95,6 +95,11 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
         builder.define(DATA_DISPLAY_NAME, "");
     }
 
+    /** Overwrites {@link #DATA_DISPLAY_NAME} directly, bypassing {@link #syncDisplayName}'s "already has a real name" guard -- only for {@code debug.DebugCommands#dedupNpcNames}, a one-time admin fix for already-persisted duplicate names (see that command's own doc). */
+    public void forceDisplayName(String name) {
+        entityData.set(DATA_DISPLAY_NAME, name);
+    }
+
     /** Keeps {@link #DATA_DISPLAY_NAME} in sync with this worker's real persisted identity -- stops re-checking once a real (non-placeholder) name is resolved, so this isn't an unbounded per-tick poll. */
     private void syncDisplayName() {
         if (plotId == null) {

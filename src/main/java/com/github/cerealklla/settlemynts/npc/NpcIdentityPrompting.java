@@ -33,8 +33,13 @@ public final class NpcIdentityPrompting {
     /** Total LLM attempts (including the first) before falling back to a mechanical disambiguator. */
     private static final int MAX_NAME_ATTEMPTS = 3;
 
-    /** Stable, deterministic suffixes for the rare case a settlement's name pool collides 3 times in a row. */
-    private static final String[] DISAMBIGUATING_EPITHETS = {
+    /**
+     * Stable, deterministic suffixes for the rare case a settlement's name pool collides 3 times in a
+     * row. Package-visibility-plus (public) so {@code debug.DebugCommands#dedupNpcNames} can reuse
+     * the exact same disambiguation vocabulary for already-persisted collisions instead of inventing
+     * a second one.
+     */
+    public static final String[] DISAMBIGUATING_EPITHETS = {
             "the Younger", "the Elder", "of the North Road", "of the West Gate", "the Second"
     };
 

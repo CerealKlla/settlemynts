@@ -24,6 +24,7 @@ import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandIndex;
 import com.github.cerealklla.settlemynts.guardhouse.GuardPendingDeathIndex;
 import com.github.cerealklla.settlemynts.npc.NpcIdentity;
 import com.github.cerealklla.settlemynts.npc.NpcIdentityKey;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityPrompting;
 import com.github.cerealklla.settlemynts.npc.NpcIdentityStore;
 import com.github.cerealklla.settlemynts.npc.NpcRole;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
@@ -177,7 +178,11 @@ public final class DebugCommands {
                                         .then(Commands.argument("role", StringArgumentType.word())
                                                 .then(Commands.argument("ownerId", StringArgumentType.word())
                                                         .executes(DebugCommands::npcDebugGet))))
-                                .then(Commands.literal("deceased").executes(DebugCommands::npcDebugDeceased)))));
+                                .then(Commands.literal("deceased").executes(DebugCommands::npcDebugDeceased))))
+                        .then(Commands.literal("dedupnames")
+                                // ADMIN ONLY -- one-time data fix, see #dedupNpcNames's own doc.
+                                .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                                .executes(ctx -> dedupNpcNames(ctx.getSource()))));
     }
 
     private static NpcIdentityKey npcDebugParseKey(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
@@ -208,6 +213,101 @@ public final class DebugCommands {
         ctx.getSource().sendSuccess(() -> Component.literal(deceased.isEmpty()
                 ? "No deceased identities." : deceased.size() + " deceased: " + deceased), false);
         return 1;
+    }
+
+    /**
+     * ADMIN ONLY -- one-time data fix, 2026-11-05. Real report: "there are a lot of duplicated NPC
+     * names in starterville." Root cause confirmed by reading the real persisted store directly: every
+     * already-generated name collision in {@code settlemynts_npc_identities.json} predates the
+     * 2026-11-05 ownership move (see {@code npc.NpcIdentityStore}'s own class doc) -- these NPCs were
+     * born back when Audyble's own uniqueness check silently never worked at all (it filtered a cached
+     * {@code settlementPlaceId} field the real call site never populated), so the LLM was free to
+     * independently pick the same flavorful name ("Kaelin Vex" appears four separate times across
+     * roles in the live data) more than once with nothing to stop it. The uniqueness check itself is
+     * already fixed going forward ({@code npc.NpcSettlementNames#inSettlement}, now resolved live
+     * instead of from that dead field) -- this command is purely for the already-persisted backlog of
+     * collisions that fix can't retroactively touch. Scans every loaded settlement on the server (no
+     * player position needed, so this runs cleanly from RCON), keeps the first identity in each
+     * same-name group within a settlement untouched, and appends one of {@link
+     * NpcIdentityPrompting#DISAMBIGUATING_EPITHETS} to each later duplicate's name -- the exact same
+     * disambiguation vocabulary a brand-new collision would get today, reused rather than invented
+     * fresh. Backstory/key facts are left alone -- only the name changes, since the complaint is
+     * specifically about the name, and a player may have already read/talked about this character's
+     * backstory. Placeholder ("Unnamed X") entries are skipped entirely -- those are a loading state,
+     * not a real collision, and will resolve themselves once generation completes. Also force-pushes
+     * the renamed value onto any currently-loaded live entity's {@code DATA_DISPLAY_NAME} directly
+     * (the entity's own {@code syncDisplayName} never re-checks once a real name is already synced, so
+     * without this the fix wouldn't show up in-world until that entity's next full reload).
+     */
+    private static int dedupNpcNames(CommandSourceStack source) {
+        MinecraftServer server = source.getServer();
+        int renamed = 0;
+        for (ServerLevel level : server.getAllLevels()) {
+            AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                    NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+            for (GhostTownHallCoreEntity core : level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), worldBounds, c -> true)) {
+                renamed += dedupSettlement(level, core);
+            }
+        }
+        int finalRenamed = renamed;
+        source.sendSuccess(() -> Component.literal(finalRenamed == 0
+                ? "No duplicate NPC names found."
+                : "Renamed " + finalRenamed + " duplicate NPC name(s)."), true);
+        return renamed;
+    }
+
+    private static int dedupSettlement(ServerLevel level, GhostTownHallCoreEntity core) {
+        List<com.github.cerealklla.settlemynts.npc.NpcIdentity> identities =
+                com.github.cerealklla.settlemynts.npc.NpcSettlementNames.identitiesInSettlement(level, core);
+        Map<String, List<com.github.cerealklla.settlemynts.npc.NpcIdentity>> byName = new java.util.LinkedHashMap<>();
+        for (com.github.cerealklla.settlemynts.npc.NpcIdentity identity : identities) {
+            if (identity.name().startsWith("Unnamed ")) {
+                continue; // Placeholder, not a real collision -- see this command's own doc.
+            }
+            byName.computeIfAbsent(identity.name().toLowerCase(java.util.Locale.ROOT), k -> new ArrayList<>()).add(identity);
+        }
+        int renamed = 0;
+        for (List<com.github.cerealklla.settlemynts.npc.NpcIdentity> group : byName.values()) {
+            if (group.size() <= 1) {
+                continue;
+            }
+            for (int i = 1; i < group.size(); i++) {
+                com.github.cerealklla.settlemynts.npc.NpcIdentity original = group.get(i);
+                String epithet = NpcIdentityPrompting.DISAMBIGUATING_EPITHETS[
+                        (i - 1) % NpcIdentityPrompting.DISAMBIGUATING_EPITHETS.length];
+                String newName = original.name() + " " + epithet;
+                com.github.cerealklla.settlemynts.npc.NpcIdentity renamedIdentity = new com.github.cerealklla.settlemynts.npc.NpcIdentity(
+                        original.key(), newName, original.backstory(), original.keyFacts(), original.alive(), original.deathContext());
+                NpcIdentityStore.put(renamedIdentity);
+                pushLiveDisplayName(level, original.key(), newName);
+                renamed++;
+            }
+        }
+        return renamed;
+    }
+
+    /** Force-pushes a renamed identity onto any currently-loaded live entity matching {@code key} -- see {@link #dedupNpcNames}'s own doc for why {@code syncDisplayName} itself can't be relied on to pick this up. */
+    private static void pushLiveDisplayName(ServerLevel level, NpcIdentityKey key, String name) {
+        AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
+                NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
+        switch (key.role()) {
+            case FARMER -> level.getEntitiesOfClass(com.github.cerealklla.settlemynts.farm.FarmerWorkerEntity.class, worldBounds,
+                    e -> key.ownerId().equals(e.plotId())).forEach(e -> e.forceDisplayName(name));
+            case LUMBERJACK -> level.getEntitiesOfClass(com.github.cerealklla.settlemynts.lumberyard.LumberjackWorkerEntity.class, worldBounds,
+                    e -> key.ownerId().equals(e.plotId())).forEach(e -> e.forceDisplayName(name));
+            case MINER -> level.getEntitiesOfClass(com.github.cerealklla.settlemynts.mineshaft.MinerWorkerEntity.class, worldBounds,
+                    e -> key.ownerId().equals(e.plotId())).forEach(e -> e.forceDisplayName(name));
+            case RESIDENT -> level.getEntitiesOfClass(com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity.class, worldBounds,
+                    e -> key.ownerId().equals(e.plotId())).forEach(e -> e.forceDisplayName(name));
+            case GUARD -> level.getEntitiesOfClass(GuardEntity.class, worldBounds,
+                    e -> key.ownerId().equals(e.assignedStandId())).forEach(e -> e.forceDisplayName(name));
+            case WANDERING -> {
+                // Not covered -- a Wandering Trader uses vanilla's own synced CustomName (see
+                // npc.WanderingIdentityListener), not this mod's DATA_DISPLAY_NAME mechanism, and
+                // WANDERING identities aren't settlement-bound in the first place (never returned by
+                // NpcSettlementNames#identitiesInSettlement), so this case can't actually be reached.
+            }
+        }
     }
 
     /**
