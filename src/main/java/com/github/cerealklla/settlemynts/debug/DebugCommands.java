@@ -259,6 +259,28 @@ public final class DebugCommands {
     private static int dedupSettlement(ServerLevel level, GhostTownHallCoreEntity core) {
         List<com.github.cerealklla.settlemynts.npc.NpcIdentity> identities =
                 com.github.cerealklla.settlemynts.npc.NpcSettlementNames.identitiesInSettlement(level, core);
+        int repaired = 0;
+        // One-time self-heal for a now-fixed bug in this same command: before the epithet-collision
+        // fix above, two separate runs could each independently append the same epithet, and once
+        // that collided a SECOND time the old code appended another epithet on top of the first
+        // instead of replacing it (e.g. "Kaelin Vex the Younger the Younger"). Any identity already
+        // carrying that doubled suffix gets collapsed back to a single occurrence here, using the
+        // corrected name for the rest of this method. Harmless no-op once no such name remains.
+        List<com.github.cerealklla.settlemynts.npc.NpcIdentity> corrected = new ArrayList<>();
+        for (com.github.cerealklla.settlemynts.npc.NpcIdentity identity : identities) {
+            String collapsed = collapseStackedEpithet(identity.name());
+            if (!collapsed.equals(identity.name())) {
+                com.github.cerealklla.settlemynts.npc.NpcIdentity fixed = new com.github.cerealklla.settlemynts.npc.NpcIdentity(
+                        identity.key(), collapsed, identity.backstory(), identity.keyFacts(), identity.alive(), identity.deathContext());
+                NpcIdentityStore.put(fixed);
+                pushLiveDisplayName(level, identity.key(), collapsed);
+                corrected.add(fixed);
+                repaired++;
+            } else {
+                corrected.add(identity);
+            }
+        }
+        identities = corrected;
         Map<String, List<com.github.cerealklla.settlemynts.npc.NpcIdentity>> byName = new java.util.LinkedHashMap<>();
         // Every name currently in the settlement, including ones already disambiguated by an earlier
         // run of this same command -- without tracking this, two separate runs (e.g. one before and
@@ -280,9 +302,20 @@ public final class DebugCommands {
             }
             for (int i = 1; i < group.size(); i++) {
                 com.github.cerealklla.settlemynts.npc.NpcIdentity original = group.get(i);
+                // Strip an epithet this same command already appended (e.g. an earlier run's own
+                // output colliding with another identity under the exact same renamed string) --
+                // otherwise a second pass stacks a duplicate suffix ("... the Younger the Younger")
+                // instead of swapping in a fresh one. Confirmed live, 2026-11-05.
+                String baseName = original.name();
+                for (String existingEpithet : NpcIdentityPrompting.DISAMBIGUATING_EPITHETS) {
+                    if (baseName.endsWith(" " + existingEpithet)) {
+                        baseName = baseName.substring(0, baseName.length() - existingEpithet.length() - 1);
+                        break;
+                    }
+                }
                 String newName = null;
                 for (int attempt = 0; attempt < NpcIdentityPrompting.DISAMBIGUATING_EPITHETS.length; attempt++) {
-                    String candidate = original.name() + " " + NpcIdentityPrompting.DISAMBIGUATING_EPITHETS[attempt];
+                    String candidate = baseName + " " + NpcIdentityPrompting.DISAMBIGUATING_EPITHETS[attempt];
                     if (usedNames.add(candidate.toLowerCase(java.util.Locale.ROOT))) {
                         newName = candidate;
                         break;
@@ -291,7 +324,7 @@ public final class DebugCommands {
                 if (newName == null) {
                     // Every epithet is already taken (a real settlement would need 6+ exact-same-name
                     // collisions to hit this) -- fall back to a numeric suffix that's guaranteed unique.
-                    newName = original.name() + " (" + (i + 1) + ")";
+                    newName = baseName + " (" + (i + 1) + ")";
                     usedNames.add(newName.toLowerCase(java.util.Locale.ROOT));
                 }
                 com.github.cerealklla.settlemynts.npc.NpcIdentity renamedIdentity = new com.github.cerealklla.settlemynts.npc.NpcIdentity(
@@ -301,7 +334,22 @@ public final class DebugCommands {
                 renamed++;
             }
         }
-        return renamed;
+        return renamed + repaired;
+    }
+
+    /**
+     * Collapses a name ending in the exact same epithet twice in a row (e.g. "Kaelin Vex the Younger
+     * the Younger") back down to a single occurrence -- see {@link #dedupSettlement}'s own doc for
+     * why this can exist at all. Returns {@code name} unchanged if it doesn't match that pattern.
+     */
+    private static String collapseStackedEpithet(String name) {
+        for (String epithet : NpcIdentityPrompting.DISAMBIGUATING_EPITHETS) {
+            String doubled = " " + epithet + " " + epithet;
+            if (name.endsWith(doubled)) {
+                return name.substring(0, name.length() - doubled.length()) + " " + epithet;
+            }
+        }
+        return name;
     }
 
     /** Force-pushes a renamed identity onto any currently-loaded live entity matching {@code key} -- see {@link #dedupNpcNames}'s own doc for why {@code syncDisplayName} itself can't be relied on to pick this up. */
