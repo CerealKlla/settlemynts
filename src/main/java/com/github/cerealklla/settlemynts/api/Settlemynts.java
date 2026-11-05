@@ -17,6 +17,13 @@ import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.founding.SettlementCoreIndex;
+import com.github.cerealklla.settlemynts.npc.NpcIdentity;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityBirth;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityKey;
+import com.github.cerealklla.settlemynts.npc.NpcRole;
+import com.github.cerealklla.settlemynts.npc.PlayerRelationship;
+import com.github.cerealklla.settlemynts.npc.PlayerRelationshipStore;
+import com.github.cerealklla.settlemynts.npc.RelationshipKey;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.zone.ContainerDeposit;
 import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
@@ -976,9 +983,10 @@ public final class Settlemynts {
      * Resolves a real plot-bound worker entity (Farmer/Lumberjack/Miner/Resident) back to its owning
      * plot id and role -- added 2026-11-04 for Audyble's Phase 5b conversation engine, which needs to
      * answer "which persistent NPC identity does this entity speak as" for an arbitrary entity it's
-     * asked to hold a conversation with, not just at spawn time (unlike {@code
-     * bridge.AudybleIdentityBridge}'s existing spawn-time-only {@code assumeWorkerIdentity}). {@link
-     * #resolveGuardStandId} is the separate Guard case, since a Guard's identity keys off its Guard
+     * asked to hold a conversation with. Deliberately narrower than {@link #resolveOrBeginNpcIdentity}
+     * (which also assigns a generic "wandering" identity to anything else) -- this method alone is
+     * what gates conversational *eligibility*, so it must only ever match a real Settlemynts-spawned
+     * worker. {@link #resolveGuardStandId} is the separate Guard case, since a Guard's identity keys off its Guard
      * Kit Stand's UUID, not a plot id, and {@code PlotWorkerKind.Kind} has no {@code GUARD} value.
      */
     public static Optional<PlotWorkerIdentity> resolvePlotWorkerIdentity(Entity entity) {
@@ -1032,5 +1040,89 @@ public final class Settlemynts {
         return findPlotLocation(level, plotId)
                 .map(PlotLocation::settlementName)
                 .filter(name -> !name.isBlank());
+    }
+
+    /**
+     * A resolvable plot/guard entity's own owning settlement core, if any -- shared helper behind
+     * {@link #resolveOrBeginNpcIdentity}, same plot-id-to-core resolution {@link #findPlotLocation}
+     * already does internally, just returning the live core entity itself instead of a derived name.
+     */
+    private static Optional<GhostTownHallCoreEntity> resolveCoreForPlot(ServerLevel level, UUID plotId) {
+        net.minecraft.core.GlobalPos signPos = com.github.cerealklla.settlemynts.plotsign.PlotConfigSignIndex.get(level.getServer())
+                .get(plotId).orElse(null);
+        if (signPos == null) {
+            return Optional.empty();
+        }
+        ServerLevel signLevel = level.getServer().getLevel(signPos.dimension());
+        if (signLevel == null) {
+            return Optional.empty();
+        }
+        if (signLevel.getBlockEntity(signPos.pos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign
+                && sign.settlementCoreId() != null
+                && signLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core) {
+            return Optional.of(core);
+        }
+        return Optional.empty();
+    }
+
+    /** One NPC character's persistent identity, exposed cross-mod -- see {@code npc.NpcIdentity}'s own doc for the full real-report writeup behind this record dropping its old cached settlement field. */
+    public record NpcIdentitySnapshot(UUID ownerId, String roleName, String name, String backstory, String keyFactsPromptText) {
+    }
+
+    /**
+     * Resolves {@code entity}'s persistent NPC identity -- a real plot-bound worker/Guard if {@link
+     * #resolvePlotWorkerIdentity}/{@link #resolveGuardStandId} recognize it, otherwise a generic
+     * per-entity-UUID "wandering" identity (covers a real Wandering Trader, a manually-bound test
+     * entity, or anything else a caller already decided is conversational) -- creating one (and kicking
+     * off async name/backstory generation) if this is the first time. Added 2026-11-05 for Audyble's
+     * {@code bridge.SettlemyntsIdentityBridge}, replacing the old {@code api.Audyble#resolveOrBeginBirth}
+     * now that this mod owns NPC identity storage -- see {@code npc.NpcIdentityStore}'s own class doc
+     * for the full ownership-move writeup. Deliberately NOT used for conversational *eligibility*
+     * checking (that's still {@link #resolvePlotWorkerIdentity}/{@link #resolveGuardStandId} alone,
+     * which only match a real Settlemynts-spawned worker/guard) -- this method's own "else, assign a
+     * generic wandering identity" fallback would make every single entity in the world look
+     * identity-resolvable, which would wrongly make ordinary wildlife conversational if it were reused
+     * for that check too.
+     */
+    public static NpcIdentitySnapshot resolveOrBeginNpcIdentity(ServerLevel level, Entity entity) {
+        NpcIdentityKey key;
+        GhostTownHallCoreEntity core = null;
+        Optional<PlotWorkerIdentity> worker = resolvePlotWorkerIdentity(entity);
+        if (worker.isPresent()) {
+            NpcRole role = switch (worker.get().kind()) {
+                case FARMER -> NpcRole.FARMER;
+                case LUMBERJACK -> NpcRole.LUMBERJACK;
+                case MINER -> NpcRole.MINER;
+                case RESIDENT -> NpcRole.RESIDENT;
+                case NONE -> NpcRole.WANDERING; // Unreachable in practice -- resolvePlotWorkerIdentity never returns NONE.
+            };
+            key = new NpcIdentityKey(worker.get().plotId(), role);
+            core = resolveCoreForPlot(level, worker.get().plotId()).orElse(null);
+        } else {
+            Optional<UUID> standId = resolveGuardStandId(entity);
+            if (standId.isPresent()) {
+                key = new NpcIdentityKey(standId.get(), NpcRole.GUARD);
+                if (entity instanceof com.github.cerealklla.settlemynts.guardhouse.GuardEntity guard) {
+                    core = resolveCoreForPlot(level, guard.plotId()).orElse(null);
+                }
+            } else {
+                key = NpcIdentityKey.wandering(entity.getUUID());
+            }
+        }
+        String settlementName = core != null ? core.getSettlementName() : "";
+        NpcIdentity identity = NpcIdentityBirth.resolveOrBeginBirth(level, key, core, settlementName);
+        return new NpcIdentitySnapshot(key.ownerId(), key.role().name(), identity.name(), identity.backstory(), identity.keyFactsAsPromptText());
+    }
+
+    /** {@code playerId}'s current relationship summary with the NPC identified by {@code (ownerId, roleName)}, or blank if they've never spoken before -- never {@code null}. Added 2026-11-05 alongside {@link #resolveOrBeginNpcIdentity}. */
+    public static String getNpcRelationshipSummary(UUID ownerId, String roleName, UUID playerId) {
+        RelationshipKey key = new RelationshipKey(new NpcIdentityKey(ownerId, NpcRole.valueOf(roleName)), playerId);
+        return PlayerRelationshipStore.find(key).map(PlayerRelationship::summary).orElse("");
+    }
+
+    /** Persists a freshly LLM-summarized relationship between {@code playerId} and the NPC identified by {@code (ownerId, roleName)} -- the only write path for this data, called by Audyble's conversation engine once a conversation goes idle. */
+    public static void putNpcRelationshipSummary(ServerLevel level, UUID ownerId, String roleName, UUID playerId, String newSummary) {
+        RelationshipKey key = new RelationshipKey(new NpcIdentityKey(ownerId, NpcRole.valueOf(roleName)), playerId);
+        PlayerRelationshipStore.put(new PlayerRelationship(key, newSummary, level.getGameTime()));
     }
 }

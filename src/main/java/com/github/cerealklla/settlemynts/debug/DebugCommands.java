@@ -22,6 +22,10 @@ import com.github.cerealklla.settlemynts.guardhouse.GuardEntity;
 import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity;
 import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandIndex;
 import com.github.cerealklla.settlemynts.guardhouse.GuardPendingDeathIndex;
+import com.github.cerealklla.settlemynts.npc.NpcIdentity;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityKey;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityStore;
+import com.github.cerealklla.settlemynts.npc.NpcRole;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.roadway.HighwayConnectionMarkerEntity;
 import com.github.cerealklla.settlemynts.roadway.HighwayStakeEntity;
@@ -156,7 +160,54 @@ public final class DebugCommands {
                         // either way -- explicit user request, 2026-10-17.
                         .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
                         .then(Commands.argument("owner", StringArgumentType.word())
-                                .executes(ctx -> setPlotOwner(ctx.getSource(), StringArgumentType.getString(ctx, "owner"))))));
+                                .executes(ctx -> setPlotOwner(ctx.getSource(), StringArgumentType.getString(ctx, "owner")))))
+                // NPC identity debug surface -- moved here from Audyble's own `/audyble npc
+                // debugidentity`, 2026-11-05, now that this mod owns NPC identity storage (see
+                // npc.NpcIdentityStore's own class doc for the full ownership-move writeup).
+                // Unguarded, same precedent the original command had in Audyble.
+                .then(Commands.literal("npc")
+                        .then(Commands.literal("debugidentity")
+                                .then(Commands.literal("set")
+                                        .then(Commands.argument("role", StringArgumentType.word())
+                                                .then(Commands.argument("ownerId", StringArgumentType.word())
+                                                        .then(Commands.argument("name", StringArgumentType.word())
+                                                                .then(Commands.argument("backstory", StringArgumentType.greedyString())
+                                                                        .executes(DebugCommands::npcDebugSet))))))
+                                .then(Commands.literal("get")
+                                        .then(Commands.argument("role", StringArgumentType.word())
+                                                .then(Commands.argument("ownerId", StringArgumentType.word())
+                                                        .executes(DebugCommands::npcDebugGet))))
+                                .then(Commands.literal("deceased").executes(DebugCommands::npcDebugDeceased)))));
+    }
+
+    private static NpcIdentityKey npcDebugParseKey(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
+        NpcRole role = NpcRole.valueOf(StringArgumentType.getString(ctx, "role").toUpperCase(java.util.Locale.ROOT));
+        UUID ownerId = UUID.fromString(StringArgumentType.getString(ctx, "ownerId"));
+        return new NpcIdentityKey(ownerId, role);
+    }
+
+    private static int npcDebugSet(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
+        NpcIdentityKey key = npcDebugParseKey(ctx);
+        String name = StringArgumentType.getString(ctx, "name");
+        String backstory = StringArgumentType.getString(ctx, "backstory");
+        NpcIdentityStore.put(new NpcIdentity(key, name, backstory, List.of(), true, Optional.empty()));
+        ctx.getSource().sendSuccess(() -> Component.literal("Set identity " + key + " -> \"" + name + "\"."), false);
+        return 1;
+    }
+
+    private static int npcDebugGet(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
+        NpcIdentityKey key = npcDebugParseKey(ctx);
+        Optional<NpcIdentity> found = NpcIdentityStore.find(key);
+        ctx.getSource().sendSuccess(() -> Component.literal(found.isPresent()
+                ? "Identity " + key + " = " + found.get() : "No identity found for " + key + "."), false);
+        return 1;
+    }
+
+    private static int npcDebugDeceased(com.mojang.brigadier.context.CommandContext<CommandSourceStack> ctx) {
+        List<NpcIdentity> deceased = NpcIdentityStore.deceased();
+        ctx.getSource().sendSuccess(() -> Component.literal(deceased.isEmpty()
+                ? "No deceased identities." : deceased.size() + " deceased: " + deceased), false);
+        return 1;
     }
 
     /**

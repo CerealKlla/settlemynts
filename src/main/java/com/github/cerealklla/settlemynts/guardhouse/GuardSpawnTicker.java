@@ -7,8 +7,10 @@ import java.util.UUID;
 
 import com.github.cerealklla.kyt.loadout.LoadoutRecord;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
-import com.github.cerealklla.settlemynts.bridge.AudybleIdentityBridge;
 import com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityBirth;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityKey;
+import com.github.cerealklla.settlemynts.npc.NpcRole;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 
 import net.minecraft.core.BlockPos;
@@ -128,9 +130,10 @@ public final class GuardSpawnTicker {
         guard.equipFromLoadoutUsingBoxes(record.get(), plotBoxes);
         guard.setPlotIdentity(stand.settlementCoreId(), stand.plotId());
         guard.setAssignedStandId(standId);
-        if (AudybleIdentityBridge.isLoaded()) {
-            AudybleIdentityBridge.assumeGuardIdentity(standId, core.getCartographyrEntityId(), core.getSettlementName());
-        }
+        // Direct in-mod call, 2026-11-05 -- this mod now owns NPC identity storage itself (see
+        // npc.NpcIdentityStore's own class doc), so there's no cross-mod hop needed here anymore; the
+        // old bridge.AudybleIdentityBridge this replaced is deleted entirely.
+        NpcIdentityBirth.resolveOrBeginBirth(level, new NpcIdentityKey(standId, NpcRole.GUARD), core, core.getSettlementName());
         guard.setHomePos(spawnPos);
         guard.setHomeDimension(level.dimension());
         level.addFreshEntity(guard);

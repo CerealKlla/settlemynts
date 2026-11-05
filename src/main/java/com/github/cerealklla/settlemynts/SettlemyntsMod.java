@@ -216,6 +216,17 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalShopVaultProtectionListener());
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.server.ServerStartingEvent event) ->
                 com.github.cerealklla.settlemynts.zone.NaturalVillagePlotPending.clearStaleQueuesOnServerStart());
+        // NPC identity/memory storage, moved here from Audyble 2026-11-05 -- see npc.NpcIdentityStore's
+        // own class doc for the full ownership-move writeup. Mirrors Audyble's old npc.NpcStoreBootstrap.
+        NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.server.ServerStartingEvent event) -> {
+            com.github.cerealklla.settlemynts.npc.NpcIdentityStore.loadOrGenerate(event.getServer());
+            com.github.cerealklla.settlemynts.npc.PlayerRelationshipStore.loadOrGenerate(event.getServer());
+            com.github.cerealklla.settlemynts.npc.SettlementLoreStore.loadOrGenerate(event.getServer());
+        });
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.npc.WanderingIdentityListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.npc.WanderingDeathListener());
+        NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.server.ServerStoppingEvent event) ->
+                com.github.cerealklla.settlemynts.npc.NpcIdentityPrompting.shutdown());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerDeathListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerRespawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerShopInteractListener());

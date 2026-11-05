@@ -3,13 +3,14 @@ package com.github.cerealklla.settlemynts.mineshaft;
 import java.util.Map;
 import java.util.UUID;
 
-import com.github.cerealklla.settlemynts.bridge.AudybleIdentityBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityBirth;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityKey;
+import com.github.cerealklla.settlemynts.npc.NpcRole;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity;
 import com.github.cerealklla.settlemynts.plotsign.PlotConfigSignIndex;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
-import com.github.cerealklla.settlemynts.zone.PlotWorkerKind;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.GlobalPos;
@@ -79,9 +80,10 @@ public final class MineshaftSpawnTicker {
         worker.setPos(spawnPos.getX() + 0.5, spawnPos.getY(), spawnPos.getZ() + 0.5);
         worker.setSpawnPos(spawnPos);
         worker.setPlotIdentity(sign.settlementCoreId(), plotId);
-        if (AudybleIdentityBridge.isLoaded()) {
-            AudybleIdentityBridge.assumeWorkerIdentity(plotId, PlotWorkerKind.Kind.MINER, core.getCartographyrEntityId(), core.getSettlementName());
-        }
+        // Direct in-mod call, 2026-11-05 -- this mod now owns NPC identity storage itself (see
+        // npc.NpcIdentityStore's own class doc), so there's no cross-mod hop needed here anymore; the
+        // old bridge.AudybleIdentityBridge this replaced is deleted entirely.
+        NpcIdentityBirth.resolveOrBeginBirth(level, new NpcIdentityKey(plotId, NpcRole.MINER), core, core.getSettlementName());
         level.addFreshEntity(worker);
         sign.setMinerWorkerId(worker.getUUID());
     }

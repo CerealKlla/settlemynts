@@ -9,8 +9,8 @@ import net.neoforged.fml.ModList;
 /**
  * Settlemynts-side bridge for the Murmur Tower Radio tab -- Settlemynts -> Audyble direction (the
  * Plot Config Sign GUI lives here, but the real track/station data lives in Audyble), same
- * isolation convention as {@link AudybleIdentityBridge}: every call site elsewhere in this mod must
- * check {@link #isLoaded()} first, and this class's own public method signatures never leak an
+ * isolation convention every bridge class in this mod follows: every call site elsewhere in this mod
+ * must check {@link #isLoaded()} first, and this class's own public method signatures never leak an
  * Audyble type out (see {@link CatalogTrack}, a local copy of {@code voice.MusicLibrary.TrackSummary}).
  */
 public final class AudybleMusicBridge {
