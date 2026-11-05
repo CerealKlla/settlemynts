@@ -87,7 +87,7 @@ public final class GroundHeightFinder {
                 }
             }
         }
-        return fallbackScanDown(level, x, z, referenceY);
+        return fallbackScanDown(level, x, z, referenceY, clearanceBlocks);
     }
 
     /** {@code clearanceBlocks} consecutive blocks starting at {@code y} are all open (non-solid, non-leaf) and {@code y - 1} is real solid support -- i.e. {@code y} is somewhere an entity that tall could actually stand without clipping into a ceiling. */
@@ -108,10 +108,30 @@ public final class GroundHeightFinder {
         return !state.is(BlockTags.LEAVES) && !state.getCollisionShape(level, pos).isEmpty();
     }
 
-    /** Last-resort fallback if no genuinely walkable gap exists anywhere within {@link #SEARCH_RADIUS_BLOCKS} -- the original downward-only scan, still bounded near {@code referenceY} rather than the level's absolute top. */
-    private static int fallbackScanDown(ServerLevel level, int x, int z, int referenceY) {
+    /**
+     * Last-resort fallback if no genuinely walkable gap exists anywhere within {@link
+     * #SEARCH_RADIUS_BLOCKS} of {@code referenceY} -- the original downward-only scan, still bounded
+     * near {@code referenceY} rather than the level's absolute top.
+     *
+     * <p><b>Real bug report, 2026-11-05 (the exact same "mounted Companion's horse suffocating"
+     * incident recurring)</b>: this fallback used to return the very first solid surface it found,
+     * completely ignoring {@code clearanceBlocks} -- so a dense/built-up area (packed buildings, no
+     * genuine 2-tall gap within {@link #SEARCH_RADIUS_BLOCKS} of the reference height) silently fell
+     * straight back to the original single-open-block definition of "ground" that {@link #findNear}'s
+     * own class doc already explains is unsafe for a teleport. Now scans the full bounded column for
+     * a spot that actually satisfies {@code clearanceBlocks} first (same {@link #isWalkableSpace}
+     * check the radius search already uses, just without expanding outward in X/Z), and only drops to
+     * the old single-block surface as a genuinely last-resort fallback if nothing in the entire column
+     * has real clearance at all.
+     */
+    private static int fallbackScanDown(ServerLevel level, int x, int z, int referenceY, int clearanceBlocks) {
         int top = Math.min(level.getMaxY(), referenceY + FALLBACK_MARGIN_ABOVE);
         int bottom = level.getMinY();
+        for (int y = top; y >= bottom; y--) {
+            if (isWalkableSpace(level, x, y, z, clearanceBlocks)) {
+                return y;
+            }
+        }
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos(x, top, z);
         for (int y = top; y >= bottom; y--) {
             pos.setY(y);

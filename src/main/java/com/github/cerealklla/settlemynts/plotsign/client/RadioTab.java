@@ -38,6 +38,24 @@ public final class RadioTab implements NuclyusMenu {
     private static final int ROW_HEIGHT = 22;
     private static final int PANEL_HALF_WIDTH = 220;
 
+    // Fixed-height footer stacked below the scrollable catalog list, bottom to top: a bottom
+    // margin, the request text box + Submit button, the hint/confirmation line above it, then the
+    // Save Playlist button -- see #footerTop/#saveButtonTop/#requestHintTop/#requestBoxTop. Real
+    // live-test bug, 2026-11-05: these four pieces used to be independently positioned off
+    // `footerTop`/`area` bottom with magic-number offsets that didn't account for each other's own
+    // heights (`footer + 10` for Save Playlist landed on the exact same Y as the hint text's own
+    // `area bottom - 60`), so Save Playlist visibly overlapped the request box and its hint text
+    // whenever the catalog was tall enough to push the footer down to its own max. Now laid out
+    // sequentially, each one computed from the one above it, so they can never collide regardless
+    // of how much vertical room the catalog actually needs.
+    private static final int FOOTER_BUTTON_HEIGHT = 20;
+    private static final int FOOTER_GAP = 10;
+    private static final int FOOTER_HINT_HEIGHT = 12;
+    private static final int FOOTER_BOTTOM_MARGIN = 10;
+    private static final int FOOTER_RESERVED_HEIGHT =
+            FOOTER_GAP + FOOTER_BUTTON_HEIGHT + FOOTER_GAP + FOOTER_HINT_HEIGHT
+                    + FOOTER_BUTTON_HEIGHT + FOOTER_BOTTOM_MARGIN;
+
     private final OpenPlotConfigSignMenuPayload data;
     private WidgetHost host;
 
@@ -92,12 +110,24 @@ public final class RadioTab implements NuclyusMenu {
 
     /** Same content-sized-footer approach as {@code ShopTab#manageFooterTop} -- see that method's own doc. */
     private int footerTop(Rect2i area) {
-        int maxFooter = area.getY() + area.getHeight() - 70;
+        int maxFooter = area.getY() + area.getHeight() - FOOTER_RESERVED_HEIGHT;
         if (radioData == null) {
             return maxFooter;
         }
         int rowCount = Math.max(1, radioData.catalog().size());
         return Math.min(maxFooter, viewportTop(area) + rowCount * ROW_HEIGHT);
+    }
+
+    private int saveButtonTop(Rect2i area) {
+        return footerTop(area) + FOOTER_GAP;
+    }
+
+    private int requestHintTop(Rect2i area) {
+        return saveButtonTop(area) + FOOTER_BUTTON_HEIGHT + FOOTER_GAP;
+    }
+
+    private int requestBoxTop(Rect2i area) {
+        return requestHintTop(area) + FOOTER_HINT_HEIGHT;
     }
 
     private int maxScrollOffset(Rect2i area) {
@@ -172,7 +202,7 @@ public final class RadioTab implements NuclyusMenu {
             return;
         }
         int centerX = area.getX() + area.getWidth() / 2;
-        int y = area.getY() + area.getHeight() - 46;
+        int y = requestBoxTop(area);
         requestBox = new EditBox(Minecraft.getInstance().font, centerX - 150, y, 220, 20, Component.literal("YouTube URL"));
         requestBox.setMaxLength(512);
         host.addMenuWidget(requestBox);
@@ -206,9 +236,8 @@ public final class RadioTab implements NuclyusMenu {
                 rebuildRows(area);
                 removeSaveButton();
                 int centerX = area.getX() + area.getWidth() / 2;
-                int footer = footerTop(area);
                 saveButton = host.addMenuWidget(Button.builder(Component.literal("Save Playlist"), b -> saveChanges())
-                        .bounds(centerX - 75, footer + 10, 150, 20).build());
+                        .bounds(centerX - 75, saveButtonTop(area), 150, 20).build());
                 addRequestWidgets(area);
             });
         }
@@ -234,10 +263,10 @@ public final class RadioTab implements NuclyusMenu {
         }
 
         if (radioData.songRequestsEnabled() && !confirmationMessage.isEmpty()) {
-            int y = area.getY() + area.getHeight() - 60;
+            int y = requestHintTop(area);
             graphics.text(font, confirmationMessage, centerX - font.width(confirmationMessage) / 2, y, 0xFF55FF55);
         } else if (radioData.songRequestsEnabled()) {
-            int y = area.getY() + area.getHeight() - 60;
+            int y = requestHintTop(area);
             String hint = "Paste a YouTube link to request a song:";
             graphics.text(font, hint, centerX - font.width(hint) / 2, y, 0xFFAAAAAA);
         }
