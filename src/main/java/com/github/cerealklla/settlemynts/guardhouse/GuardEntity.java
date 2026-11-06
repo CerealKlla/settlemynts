@@ -165,6 +165,16 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     private static final EntityDataAccessor<String> DATA_DISPLAY_NAME =
             SynchedEntityData.defineId(GuardEntity.class, EntityDataSerializers.STRING);
 
+    /**
+     * Whether this guard's resolved identity is {@code npc.NpcGender#FEMALE} -- added 2026-11-05,
+     * synced the same way/at the same time as {@link #DATA_DISPLAY_NAME} (see {@link
+     * #syncDisplayName}), since both come from the same identity lookup and neither ever changes once
+     * a real identity is resolved. Read by {@code guardhouse.client.GuardRenderer} to pick which real
+     * vanilla default skin (Steve vs. Alex) to render.
+     */
+    private static final EntityDataAccessor<Boolean> DATA_FEMALE =
+            SynchedEntityData.defineId(GuardEntity.class, EntityDataSerializers.BOOLEAN);
+
     /** Floating nameplate text (Nuclyus's stat-bar overlay) -- reads the already-synced {@link #DATA_DISPLAY_NAME}. */
     @Override
     public net.minecraft.network.chat.Component displayName() {
@@ -172,10 +182,15 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         return name.isEmpty() ? null : net.minecraft.network.chat.Component.literal(name);
     }
 
+    public boolean isFemale() {
+        return entityData.get(DATA_FEMALE);
+    }
+
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
         builder.define(DATA_DISPLAY_NAME, "");
+        builder.define(DATA_FEMALE, false);
     }
 
     /** Overwrites {@link #DATA_DISPLAY_NAME} directly, bypassing {@link #syncDisplayName}'s "already has a real name" guard -- only for {@code debug.DebugCommands#dedupNpcNames}, a one-time admin fix for already-persisted duplicate names (see that command's own doc). */
@@ -183,7 +198,12 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         entityData.set(DATA_DISPLAY_NAME, name);
     }
 
-    /** Keeps {@link #DATA_DISPLAY_NAME} in sync with this guard's real persisted identity (keyed by its Guard Kit Stand, not the plot -- a plot can have several stands) -- stops re-checking once a real (non-placeholder) name is resolved. */
+    /** Overwrites {@link #DATA_FEMALE} directly -- same one-time admin use as {@link #forceDisplayName}, added alongside it 2026-11-05. */
+    public void forceFemale(boolean female) {
+        entityData.set(DATA_FEMALE, female);
+    }
+
+    /** Keeps {@link #DATA_DISPLAY_NAME}/{@link #DATA_FEMALE} in sync with this guard's real persisted identity (keyed by its Guard Kit Stand, not the plot -- a plot can have several stands) -- stops re-checking once a real (non-placeholder) name is resolved. */
     private void syncDisplayName() {
         if (assignedStandId == null) {
             return;
@@ -194,7 +214,10 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         }
         com.github.cerealklla.settlemynts.npc.NpcIdentityStore
                 .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(assignedStandId, com.github.cerealklla.settlemynts.npc.NpcRole.GUARD))
-                .ifPresent(identity -> entityData.set(DATA_DISPLAY_NAME, identity.name()));
+                .ifPresent(identity -> {
+                    entityData.set(DATA_DISPLAY_NAME, identity.name());
+                    entityData.set(DATA_FEMALE, identity.gender() == com.github.cerealklla.settlemynts.npc.NpcGender.FEMALE);
+                });
     }
 
     /** Called once by {@link GuardSpawnTicker} right after construction -- this guard's own spawn point (its assigned stand's position), the rescue destination {@link #stuckWatchdog} teleports back to if this guard ever gets stuck. */

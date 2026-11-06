@@ -1065,8 +1065,14 @@ public final class Settlemynts {
         return Optional.empty();
     }
 
-    /** One NPC character's persistent identity, exposed cross-mod -- see {@code npc.NpcIdentity}'s own doc for the full real-report writeup behind this record dropping its old cached settlement field. */
-    public record NpcIdentitySnapshot(UUID ownerId, String roleName, String name, String backstory, String keyFactsPromptText) {
+    /**
+     * One NPC character's persistent identity, exposed cross-mod -- see {@code npc.NpcIdentity}'s own
+     * doc for the full real-report writeup behind this record dropping its old cached settlement
+     * field. {@code genderName} is {@code npc.NpcGender}'s plain enum name ("MALE"/"FEMALE") rather
+     * than the real type, added 2026-11-05 -- same cross-mod-isolation convention {@code roleName}
+     * already uses for {@code NpcRole}, so this record stays free of any Settlemynts-owned type.
+     */
+    public record NpcIdentitySnapshot(UUID ownerId, String roleName, String name, String backstory, String keyFactsPromptText, String genderName) {
     }
 
     /**
@@ -1111,7 +1117,7 @@ public final class Settlemynts {
         }
         String settlementName = core != null ? core.getSettlementName() : "";
         NpcIdentity identity = NpcIdentityBirth.resolveOrBeginBirth(level, key, core, settlementName);
-        return new NpcIdentitySnapshot(key.ownerId(), key.role().name(), identity.name(), identity.backstory(), identity.keyFactsAsPromptText());
+        return new NpcIdentitySnapshot(key.ownerId(), key.role().name(), identity.name(), identity.backstory(), identity.keyFactsAsPromptText(), identity.gender().name());
     }
 
     /** {@code playerId}'s current relationship summary with the NPC identified by {@code (ownerId, roleName)}, or blank if they've never spoken before -- never {@code null}. Added 2026-11-05 alongside {@link #resolveOrBeginNpcIdentity}. */

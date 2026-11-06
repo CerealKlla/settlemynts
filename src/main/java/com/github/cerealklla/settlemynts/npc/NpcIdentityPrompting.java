@@ -33,6 +33,10 @@ import com.github.cerealklla.settlemynts.SettlemyntsMod;
  * exact-match avoidance -- and the LLM is only asked for backstory/facts to go with it. This also
  * retired the old "ask 3 times, then bolt on a mechanical epithet" fallback entirely: there's no more
  * LLM-side name collision to fall back from.
+ *
+ * <p><b>Gender rolled once per birth</b> ({@link NpcGender#roll()}), same day -- picks the matching
+ * {@link NameBank} pool and tells the LLM which pronouns to use, so name/backstory/voice/visual all
+ * agree for a given NPC instead of everything defaulting to male.
  */
 public final class NpcIdentityPrompting {
 
@@ -68,10 +72,12 @@ public final class NpcIdentityPrompting {
      *                     name to push. Every other caller passes {@code null}.
      */
     public static void generateAsync(NpcIdentity placeholder, LoreEntry lore, String settlementName, List<String> usedNamesIn, Consumer<NpcIdentity> onGenerated) {
-        // The name is picked up front, synchronously -- it's a plain in-memory list pick, no reason to
-        // defer it onto the executor, and NpcIdentityBirth's placeholder display text can use the real
-        // given name immediately instead of "Unnamed X" even before the backstory comes back.
-        String givenName = NameBank.pickGivenName(usedNamesIn);
+        // Gender and name are picked up front, synchronously -- both are plain in-memory picks, no
+        // reason to defer them onto the executor, and NpcIdentityBirth's placeholder display text can
+        // use the real given name immediately instead of "Unnamed X" even before the backstory comes
+        // back. Rolled once, here, and never again for this NPC's whole life.
+        NpcGender gender = NpcGender.roll();
+        String givenName = NameBank.pickGivenName(gender, usedNamesIn);
         String name = NameBank.rollSurname() ? givenName + " " + NameBank.pickSurname() : givenName;
 
         if (!OllamaClient.isConfigured()) {
@@ -89,17 +95,19 @@ public final class NpcIdentityPrompting {
                 String systemPrompt = WorldLore.TEXT + "\n\nThis settlement: " + settlementLine + lore.text();
                 String roleName = placeholder.key().role().name().toLowerCase(Locale.ROOT);
 
-                String userMessage = "This character is named " + name + ", a brand-new " + roleName
+                String pronoun = gender == NpcGender.FEMALE ? "She/her" : "He/him";
+                String userMessage = "This character is named " + name + " (" + pronoun + "), a brand-new " + roleName
                         + " for this settlement. Write their personal backstory and a few facts about "
-                        + "them. Respond in EXACTLY this format and nothing else -- no preamble, no extra "
-                        + "commentary, and do not invent or restate a different name:\n"
+                        + "them, using " + pronoun.toLowerCase(Locale.ROOT) + " pronouns throughout. Respond in "
+                        + "EXACTLY this format and nothing else -- no preamble, no extra commentary, and do not "
+                        + "invent or restate a different name:\n"
                         + "BACKSTORY: <2 to 4 sentences of personal backstory>\n"
                         + "FACT: <one short fact about them>\n"
                         + "FACT: <one short fact about them>\n"
                         + "FACT: <one short fact about them>";
 
                 String reply = OllamaClient.chat(systemPrompt, List.of(), userMessage);
-                NpcIdentity generated = parse(placeholder, name, reply);
+                NpcIdentity generated = parse(placeholder, name, gender, reply);
 
                 if (generated != null) {
                     NpcIdentityStore.put(generated);
@@ -116,7 +124,7 @@ public final class NpcIdentityPrompting {
         });
     }
 
-    private static NpcIdentity parse(NpcIdentity placeholder, String name, String reply) {
+    private static NpcIdentity parse(NpcIdentity placeholder, String name, NpcGender gender, String reply) {
         String backstory = null;
         List<String> facts = new ArrayList<>();
         for (String line : reply.split("\n")) {
@@ -130,6 +138,6 @@ public final class NpcIdentityPrompting {
         if (backstory == null || backstory.isBlank()) {
             return null;
         }
-        return new NpcIdentity(placeholder.key(), name, backstory, List.copyOf(facts), true, Optional.empty());
+        return new NpcIdentity(placeholder.key(), name, backstory, List.copyOf(facts), true, Optional.empty(), gender);
     }
 }

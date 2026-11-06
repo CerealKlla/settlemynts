@@ -22,9 +22,13 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
  * this), and (b) duplicated data Settlemynts already authoritatively owns and can resolve live. {@link
  * NpcSettlementNames#inSettlement} now walks a settlement's own real plot list (and known Guard Kit
  * Stands) directly instead of trusting a cached field that could silently go stale or stay unset.
+ *
+ * <p><b>{@code gender} added 2026-11-05</b> (see {@link NpcGender}'s own doc) -- an optional field
+ * defaulting to {@link NpcGender#MALE} on decode, so every identity persisted before this field
+ * existed keeps its already-shipped male name/voice/visual exactly, with no migration step needed.
  */
 public record NpcIdentity(NpcIdentityKey key, String name, String backstory, List<String> keyFacts,
-                           boolean alive, Optional<String> deathContext) {
+                           boolean alive, Optional<String> deathContext, NpcGender gender) {
 
     public static final Codec<NpcIdentity> CODEC = RecordCodecBuilder.create(i -> i.group(
             NpcIdentityKey.CODEC.fieldOf("key").forGetter(NpcIdentity::key),
@@ -32,11 +36,12 @@ public record NpcIdentity(NpcIdentityKey key, String name, String backstory, Lis
             Codec.STRING.fieldOf("backstory").forGetter(NpcIdentity::backstory),
             Codec.STRING.listOf().fieldOf("key_facts").forGetter(NpcIdentity::keyFacts),
             Codec.BOOL.fieldOf("alive").forGetter(NpcIdentity::alive),
-            Codec.STRING.optionalFieldOf("death_context").forGetter(NpcIdentity::deathContext)
+            Codec.STRING.optionalFieldOf("death_context").forGetter(NpcIdentity::deathContext),
+            NpcGender.CODEC.optionalFieldOf("gender", NpcGender.MALE).forGetter(NpcIdentity::gender)
     ).apply(i, NpcIdentity::new));
 
     public NpcIdentity withDeceased(String deathContext) {
-        return new NpcIdentity(key, name, backstory, keyFacts, false, Optional.of(deathContext));
+        return new NpcIdentity(key, name, backstory, keyFacts, false, Optional.of(deathContext), gender);
     }
 
     /** Joins {@link #keyFacts} into a simple bullet list for direct concatenation into an LLM prompt. */

@@ -23,6 +23,7 @@ import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity;
 import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandIndex;
 import com.github.cerealklla.settlemynts.guardhouse.GuardPendingDeathIndex;
 import com.github.cerealklla.settlemynts.npc.NameBank;
+import com.github.cerealklla.settlemynts.npc.NpcGender;
 import com.github.cerealklla.settlemynts.npc.NpcIdentity;
 import com.github.cerealklla.settlemynts.npc.NpcIdentityKey;
 import com.github.cerealklla.settlemynts.npc.NpcIdentityStore;
@@ -199,7 +200,7 @@ public final class DebugCommands {
         NpcIdentityKey key = npcDebugParseKey(ctx);
         String name = StringArgumentType.getString(ctx, "name");
         String backstory = StringArgumentType.getString(ctx, "backstory");
-        NpcIdentityStore.put(new NpcIdentity(key, name, backstory, List.of(), true, Optional.empty()));
+        NpcIdentityStore.put(new NpcIdentity(key, name, backstory, List.of(), true, Optional.empty(), NpcGender.MALE));
         ctx.getSource().sendSuccess(() -> Component.literal("Set identity " + key + " -> \"" + name + "\"."), false);
         return 1;
     }
@@ -325,11 +326,10 @@ public final class DebugCommands {
                 continue;
             }
             usedNames.remove(identity.name().toLowerCase(java.util.Locale.ROOT));
-            String freshName = freshName(usedNames);
-            usedNames.add(freshName.toLowerCase(java.util.Locale.ROOT));
-            NpcIdentity fixed = withName(identity, freshName);
+            NpcIdentity fixed = withFreshNameAndGender(identity, usedNames);
+            usedNames.add(fixed.name().toLowerCase(java.util.Locale.ROOT));
             NpcIdentityStore.put(fixed);
-            pushLiveDisplayName(level, identity.key(), freshName);
+            pushLiveDisplayName(level, fixed);
             corrected.add(fixed);
             repaired++;
         }
@@ -349,11 +349,10 @@ public final class DebugCommands {
             }
             for (int i = 1; i < group.size(); i++) {
                 NpcIdentity original = group.get(i);
-                String newName = freshName(usedNames);
-                usedNames.add(newName.toLowerCase(java.util.Locale.ROOT));
-                NpcIdentity renamedIdentity = withName(original, newName);
+                NpcIdentity renamedIdentity = withFreshNameAndGender(original, usedNames);
+                usedNames.add(renamedIdentity.name().toLowerCase(java.util.Locale.ROOT));
                 NpcIdentityStore.put(renamedIdentity);
-                pushLiveDisplayName(level, original.key(), newName);
+                pushLiveDisplayName(level, renamedIdentity);
                 renamed++;
             }
         }
@@ -362,40 +361,41 @@ public final class DebugCommands {
 
     /**
      * True if {@code name}'s given-name token (everything before the first space) isn't one of
-     * {@link NameBank#GIVEN_NAMES} -- which, by construction, means it's a leftover from the old
+     * {@link NameBank}'s own name pools -- which, by construction, means it's a leftover from the old
      * LLM-generated system (including anything carrying one of the old, since-retired mechanical
      * epithet suffixes -- the base name underneath one of those was never a NameBank name either, so
      * this one check subsumes that old separate check entirely).
      */
     private static boolean isLegacyName(String name) {
         String givenToken = name.split(" ", 2)[0];
-        for (String bankName : NameBank.GIVEN_NAMES) {
-            if (bankName.equalsIgnoreCase(givenToken)) {
-                return false;
-            }
-        }
-        return true;
+        return !NameBank.isKnownGivenName(givenToken);
     }
 
-    /** Draws a brand-new {@link NameBank} name guaranteed not to collide with anything in {@code usedNames} (retried a handful of times against the fixed-size pool's vanishingly rare exact clash before just accepting one). */
-    private static String freshName(java.util.Set<String> usedNames) {
+    /**
+     * Rolls a fresh {@link NpcGender} and a matching {@link NameBank} name guaranteed not to collide
+     * with anything in {@code usedNames} (retried a handful of times against the fixed-size pool's
+     * vanishingly rare exact clash before just accepting one), returning {@code identity} with both
+     * swapped in -- backstory/key facts/alive/death-context untouched, see this command's own doc for
+     * why.
+     */
+    private static NpcIdentity withFreshNameAndGender(NpcIdentity identity, java.util.Set<String> usedNames) {
+        NpcGender gender = NpcGender.roll();
         String candidate = null;
         for (int attempt = 0; attempt < 20; attempt++) {
-            String given = NameBank.pickGivenName(List.copyOf(usedNames));
+            String given = NameBank.pickGivenName(gender, List.copyOf(usedNames));
             candidate = NameBank.rollSurname() ? given + " " + NameBank.pickSurname() : given;
             if (!usedNames.contains(candidate.toLowerCase(java.util.Locale.ROOT))) {
                 break;
             }
         }
-        return candidate;
+        return new NpcIdentity(identity.key(), candidate, identity.backstory(), identity.keyFacts(), identity.alive(), identity.deathContext(), gender);
     }
 
-    private static NpcIdentity withName(NpcIdentity identity, String name) {
-        return new NpcIdentity(identity.key(), name, identity.backstory(), identity.keyFacts(), identity.alive(), identity.deathContext());
-    }
-
-    /** Force-pushes a renamed identity onto any currently-loaded live entity matching {@code key} -- see {@link #dedupNpcNames}'s own doc for why {@code syncDisplayName} itself can't be relied on to pick this up. */
-    private static void pushLiveDisplayName(ServerLevel level, NpcIdentityKey key, String name) {
+    /** Force-pushes a renamed/re-gendered identity onto any currently-loaded live entity matching its key -- see {@link #dedupNpcNames}'s own doc for why {@code syncDisplayName} itself can't be relied on to pick this up. */
+    private static void pushLiveDisplayName(ServerLevel level, NpcIdentity identity) {
+        NpcIdentityKey key = identity.key();
+        String name = identity.name();
+        boolean female = identity.gender() == NpcGender.FEMALE;
         AABB worldBounds = new AABB(-NEAREST_CORE_SEARCH_RADIUS, level.getMinY(), -NEAREST_CORE_SEARCH_RADIUS,
                 NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
         switch (key.role()) {
@@ -408,7 +408,10 @@ public final class DebugCommands {
             case RESIDENT -> level.getEntitiesOfClass(com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity.class, worldBounds,
                     e -> key.ownerId().equals(e.plotId())).forEach(e -> e.forceDisplayName(name));
             case GUARD -> level.getEntitiesOfClass(GuardEntity.class, worldBounds,
-                    e -> key.ownerId().equals(e.assignedStandId())).forEach(e -> e.forceDisplayName(name));
+                    e -> key.ownerId().equals(e.assignedStandId())).forEach(e -> {
+                        e.forceDisplayName(name);
+                        e.forceFemale(female);
+                    });
             case WANDERING -> {
                 // Not covered -- a Wandering Trader uses vanilla's own synced CustomName (see
                 // npc.WanderingIdentityListener), not this mod's DATA_DISPLAY_NAME mechanism, and

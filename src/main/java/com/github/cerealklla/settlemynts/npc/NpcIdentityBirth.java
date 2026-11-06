@@ -56,7 +56,11 @@ public final class NpcIdentityBirth {
         }
         String roleName = key.role().name();
         String displayRole = roleName.charAt(0) + roleName.substring(1).toLowerCase(Locale.ROOT);
-        NpcIdentity placeholder = new NpcIdentity(key, "Unnamed " + displayRole, "", List.of(), true, Optional.empty());
+        // Gender here is a throwaway placeholder value -- nothing ever reads it before the real
+        // generated identity (with its own freshly-rolled gender, see NpcIdentityPrompting) overwrites
+        // this record; a synced entity field only ever copies from a resolved REAL (non-"Unnamed ")
+        // identity in the first place (see e.g. GuardEntity#syncDisplayName's own guard).
+        NpcIdentity placeholder = new NpcIdentity(key, "Unnamed " + displayRole, "", List.of(), true, Optional.empty(), NpcGender.MALE);
         NpcIdentityStore.put(placeholder);
         Long settlementPlaceId = core != null ? core.getCartographyrEntityId() : null;
         LoreEntry lore = settlementPlaceId != null ? SettlementLoreStore.getOrAssign(settlementPlaceId) : GENERIC_LORE;

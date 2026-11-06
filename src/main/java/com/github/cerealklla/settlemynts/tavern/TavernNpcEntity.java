@@ -93,6 +93,16 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, c
      */
     public static final double MOUNTED_COMBAT_SPEED_MODIFIER = 2.5;
 
+    /**
+     * Whether this Tavern NPC is female -- added 2026-11-05, real user request to give NPCs a real
+     * gender. Tavern NPCs have no {@code npc.NpcIdentity}/name/voice system at all (unlike the other 5
+     * roles), so this is a plain coin-flip ({@code npc.NpcGender#roll()}) rolled once in {@link
+     * #setIdentity}, not resolved from any persisted identity. Read by {@code tavern.client.TavernNpcRenderer}
+     * to pick which real vanilla default skin (Steve vs. Alex) to render.
+     */
+    private static final net.minecraft.network.syncher.EntityDataAccessor<Boolean> DATA_FEMALE =
+            net.minecraft.network.syncher.SynchedEntityData.defineId(TavernNpcEntity.class, net.minecraft.network.syncher.EntityDataSerializers.BOOLEAN);
+
     private GlobalPos stoolPos;
     private UUID settlementCoreId;
     private UUID plotId;
@@ -105,12 +115,23 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, c
         this.reassessWeaponGoal();
     }
 
+    @Override
+    protected void defineSynchedData(net.minecraft.network.syncher.SynchedEntityData.Builder builder) {
+        super.defineSynchedData(builder);
+        builder.define(DATA_FEMALE, false);
+    }
+
+    public boolean isFemale() {
+        return entityData.get(DATA_FEMALE);
+    }
+
     public void setIdentity(GlobalPos stoolPos, UUID settlementCoreId, UUID plotId, int tier, HireRequirement hireRequirement) {
         this.stoolPos = stoolPos;
         this.settlementCoreId = settlementCoreId;
         this.plotId = plotId;
         this.tier = tier;
         this.hireRequirement = hireRequirement;
+        entityData.set(DATA_FEMALE, com.github.cerealklla.settlemynts.npc.NpcGender.roll() == com.github.cerealklla.settlemynts.npc.NpcGender.FEMALE);
     }
 
     public GlobalPos stoolPos() {
