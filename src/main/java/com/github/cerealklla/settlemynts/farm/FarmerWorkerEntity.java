@@ -100,7 +100,14 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
         entityData.set(DATA_DISPLAY_NAME, name);
     }
 
-    /** Keeps {@link #DATA_DISPLAY_NAME} in sync with this worker's real persisted identity -- stops re-checking once a real (non-placeholder) name is resolved, so this isn't an unbounded per-tick poll. */
+    /**
+     * Keeps {@link #DATA_DISPLAY_NAME} in sync with this worker's real persisted identity -- stops
+     * re-checking once a real (non-placeholder) name is resolved, so this isn't an unbounded per-tick
+     * poll. Also assigns {@code registration.ModVillagerTypes#FEMALE} the first time a resolved
+     * identity's gender comes back {@code FEMALE} -- added 2026-11-05, Phase B of the NPC gender
+     * feature (see that class's own doc). {@code VillagerData} is already real vanilla {@code
+     * SynchedEntityData} (via {@link #setVillagerData}), so this needs no new synced field of its own.
+     */
     private void syncDisplayName() {
         if (plotId == null) {
             return;
@@ -111,7 +118,12 @@ public class FarmerWorkerEntity extends Villager implements com.github.cerealkll
         }
         com.github.cerealklla.settlemynts.npc.NpcIdentityStore
                 .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(plotId, com.github.cerealklla.settlemynts.npc.NpcRole.FARMER))
-                .ifPresent(identity -> entityData.set(DATA_DISPLAY_NAME, identity.name()));
+                .ifPresent(identity -> {
+                    entityData.set(DATA_DISPLAY_NAME, identity.name());
+                    if (identity.gender() == com.github.cerealklla.settlemynts.npc.NpcGender.FEMALE) {
+                        setVillagerData(getVillagerData().withType(com.github.cerealklla.settlemynts.registration.ModVillagerTypes.FEMALE));
+                    }
+                });
     }
 
     /** Called once by {@link FarmerSpawnTicker} right after construction -- this worker's own spawn point (its Plot Config Sign's position), the rescue destination {@link #stuckWatchdog} teleports back to if this worker ever gets stuck. */

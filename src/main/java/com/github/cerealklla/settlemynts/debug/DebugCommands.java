@@ -400,13 +400,25 @@ public final class DebugCommands {
                 NEAREST_CORE_SEARCH_RADIUS, level.getMaxY(), NEAREST_CORE_SEARCH_RADIUS);
         switch (key.role()) {
             case FARMER -> level.getEntitiesOfClass(com.github.cerealklla.settlemynts.farm.FarmerWorkerEntity.class, worldBounds,
-                    e -> key.ownerId().equals(e.plotId())).forEach(e -> e.forceDisplayName(name));
+                    e -> key.ownerId().equals(e.plotId())).forEach(e -> {
+                        e.forceDisplayName(name);
+                        pushVillagerType(level, e, female);
+                    });
             case LUMBERJACK -> level.getEntitiesOfClass(com.github.cerealklla.settlemynts.lumberyard.LumberjackWorkerEntity.class, worldBounds,
-                    e -> key.ownerId().equals(e.plotId())).forEach(e -> e.forceDisplayName(name));
+                    e -> key.ownerId().equals(e.plotId())).forEach(e -> {
+                        e.forceDisplayName(name);
+                        pushVillagerType(level, e, female);
+                    });
             case MINER -> level.getEntitiesOfClass(com.github.cerealklla.settlemynts.mineshaft.MinerWorkerEntity.class, worldBounds,
-                    e -> key.ownerId().equals(e.plotId())).forEach(e -> e.forceDisplayName(name));
+                    e -> key.ownerId().equals(e.plotId())).forEach(e -> {
+                        e.forceDisplayName(name);
+                        pushVillagerType(level, e, female);
+                    });
             case RESIDENT -> level.getEntitiesOfClass(com.github.cerealklla.settlemynts.resident.ResidentVillagerEntity.class, worldBounds,
-                    e -> key.ownerId().equals(e.plotId())).forEach(e -> e.forceDisplayName(name));
+                    e -> key.ownerId().equals(e.plotId())).forEach(e -> {
+                        e.forceDisplayName(name);
+                        pushVillagerType(level, e, female);
+                    });
             case GUARD -> level.getEntitiesOfClass(GuardEntity.class, worldBounds,
                     e -> key.ownerId().equals(e.assignedStandId())).forEach(e -> {
                         e.forceDisplayName(name);
@@ -419,6 +431,19 @@ public final class DebugCommands {
                 // NpcSettlementNames#identitiesInSettlement), so this case can't actually be reached.
             }
         }
+    }
+
+    /**
+     * Force-pushes {@code female}'s matching {@code VillagerType} onto a live Farmer/Lumberjack/
+     * Miner/Resident -- added 2026-11-05, Phase B of the NPC gender feature. {@code VillagerData} is
+     * already real vanilla {@code SynchedEntityData}, so unlike Guard's own {@code forceFemale} this
+     * needs no new synced field on this mod's own entity classes, just a direct {@code
+     * Villager#setVillagerData} call.
+     */
+    private static void pushVillagerType(ServerLevel level, net.minecraft.world.entity.npc.villager.Villager entity, boolean female) {
+        entity.setVillagerData(female
+                ? entity.getVillagerData().withType(com.github.cerealklla.settlemynts.registration.ModVillagerTypes.FEMALE)
+                : entity.getVillagerData().withType(level.registryAccess(), net.minecraft.world.entity.npc.villager.VillagerType.PLAINS));
     }
 
     /**

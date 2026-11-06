@@ -95,7 +95,12 @@ public class MinerWorkerEntity extends Villager implements PlotNpc, com.github.c
         entityData.set(DATA_DISPLAY_NAME, name);
     }
 
-    /** Keeps {@link #DATA_DISPLAY_NAME} in sync with this worker's real persisted identity -- stops re-checking once a real (non-placeholder) name is resolved. */
+    /**
+     * Keeps {@link #DATA_DISPLAY_NAME} in sync with this worker's real persisted identity -- stops
+     * re-checking once a real (non-placeholder) name is resolved. Also assigns {@code
+     * registration.ModVillagerTypes#FEMALE} the first time a resolved identity's gender comes back
+     * {@code FEMALE} -- see {@code farm.FarmerWorkerEntity#syncDisplayName}'s own doc, same pattern.
+     */
     private void syncDisplayName() {
         if (plotId == null) {
             return;
@@ -106,7 +111,12 @@ public class MinerWorkerEntity extends Villager implements PlotNpc, com.github.c
         }
         com.github.cerealklla.settlemynts.npc.NpcIdentityStore
                 .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(plotId, com.github.cerealklla.settlemynts.npc.NpcRole.MINER))
-                .ifPresent(identity -> entityData.set(DATA_DISPLAY_NAME, identity.name()));
+                .ifPresent(identity -> {
+                    entityData.set(DATA_DISPLAY_NAME, identity.name());
+                    if (identity.gender() == com.github.cerealklla.settlemynts.npc.NpcGender.FEMALE) {
+                        setVillagerData(getVillagerData().withType(com.github.cerealklla.settlemynts.registration.ModVillagerTypes.FEMALE));
+                    }
+                });
     }
 
     /** Called once by {@link MineshaftSpawnTicker} right after construction -- this worker's own spawn point (its Plot Config Sign's position), the rescue destination {@link #stuckWatchdog} teleports back to if this worker ever gets stuck. */

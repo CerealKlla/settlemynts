@@ -143,6 +143,7 @@ public class SettlemyntsMod {
         ModBlockEntities.BLOCK_ENTITIES.register(modEventBus);
         com.github.cerealklla.settlemynts.registration.ModMenus.MENU_TYPES.register(modEventBus);
         com.github.cerealklla.settlemynts.registration.ModMobEffects.MOB_EFFECTS.register(modEventBus);
+        com.github.cerealklla.settlemynts.registration.ModVillagerTypes.VILLAGER_TYPES.register(modEventBus);
 
         Cartography.registerLayer(new Layer(ZONE_LAYER_ID, "Zone", -1));
         // 2026-10-06 fix (real report: a creeper destroyed part of a building) -- this layer never
@@ -224,6 +225,7 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.npc.SettlementLoreStore.loadOrGenerate(event.getServer());
         });
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.npc.WanderingIdentityListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.npc.VillagerIdentityListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.npc.WanderingDeathListener());
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.server.ServerStoppingEvent event) ->
                 com.github.cerealklla.settlemynts.npc.NpcIdentityPrompting.shutdown());

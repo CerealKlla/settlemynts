@@ -121,7 +121,12 @@ public class ResidentVillagerEntity extends Villager implements com.github.cerea
         entityData.set(DATA_DISPLAY_NAME, name);
     }
 
-    /** Keeps {@link #DATA_DISPLAY_NAME} in sync with this resident's real persisted identity -- stops re-checking once a real (non-placeholder) name is resolved. */
+    /**
+     * Keeps {@link #DATA_DISPLAY_NAME} in sync with this resident's real persisted identity -- stops
+     * re-checking once a real (non-placeholder) name is resolved. Also assigns {@code
+     * registration.ModVillagerTypes#FEMALE} the first time a resolved identity's gender comes back
+     * {@code FEMALE} -- see {@code farm.FarmerWorkerEntity#syncDisplayName}'s own doc, same pattern.
+     */
     private void syncDisplayName() {
         if (plotId == null) {
             return;
@@ -132,7 +137,12 @@ public class ResidentVillagerEntity extends Villager implements com.github.cerea
         }
         com.github.cerealklla.settlemynts.npc.NpcIdentityStore
                 .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(plotId, com.github.cerealklla.settlemynts.npc.NpcRole.RESIDENT))
-                .ifPresent(identity -> entityData.set(DATA_DISPLAY_NAME, identity.name()));
+                .ifPresent(identity -> {
+                    entityData.set(DATA_DISPLAY_NAME, identity.name());
+                    if (identity.gender() == com.github.cerealklla.settlemynts.npc.NpcGender.FEMALE) {
+                        setVillagerData(getVillagerData().withType(com.github.cerealklla.settlemynts.registration.ModVillagerTypes.FEMALE));
+                    }
+                });
     }
 
     /** Same resolution chain as {@code GuardEntity#resolvePatrolArea} -- see that method's own doc. */

@@ -113,7 +113,12 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         entityData.set(DATA_DISPLAY_NAME, name);
     }
 
-    /** Keeps {@link #DATA_DISPLAY_NAME} in sync with this worker's real persisted identity -- stops re-checking once a real (non-placeholder) name is resolved. */
+    /**
+     * Keeps {@link #DATA_DISPLAY_NAME} in sync with this worker's real persisted identity -- stops
+     * re-checking once a real (non-placeholder) name is resolved. Also assigns {@code
+     * registration.ModVillagerTypes#FEMALE} the first time a resolved identity's gender comes back
+     * {@code FEMALE} -- see {@code farm.FarmerWorkerEntity#syncDisplayName}'s own doc, same pattern.
+     */
     private void syncDisplayName() {
         if (plotId == null) {
             return;
@@ -124,7 +129,12 @@ public class LumberjackWorkerEntity extends Villager implements com.github.cerea
         }
         com.github.cerealklla.settlemynts.npc.NpcIdentityStore
                 .find(new com.github.cerealklla.settlemynts.npc.NpcIdentityKey(plotId, com.github.cerealklla.settlemynts.npc.NpcRole.LUMBERJACK))
-                .ifPresent(identity -> entityData.set(DATA_DISPLAY_NAME, identity.name()));
+                .ifPresent(identity -> {
+                    entityData.set(DATA_DISPLAY_NAME, identity.name());
+                    if (identity.gender() == com.github.cerealklla.settlemynts.npc.NpcGender.FEMALE) {
+                        setVillagerData(getVillagerData().withType(com.github.cerealklla.settlemynts.registration.ModVillagerTypes.FEMALE));
+                    }
+                });
     }
 
     /** Called once by {@link LumberjackSpawnTicker} right after construction -- this worker's own spawn point (its Plot Config Sign's position), the rescue destination {@link #stuckWatchdog} (and {@link LumberjackWorkGoal}'s own pathfinding-give-up rescue) teleport back to if this worker ever gets stuck. */
