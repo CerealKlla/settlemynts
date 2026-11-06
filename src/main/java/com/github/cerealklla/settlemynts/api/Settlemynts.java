@@ -1131,4 +1131,87 @@ public final class Settlemynts {
         RelationshipKey key = new RelationshipKey(new NpcIdentityKey(ownerId, NpcRole.valueOf(roleName)), playerId);
         PlayerRelationshipStore.put(new PlayerRelationship(key, newSummary, level.getGameTime()));
     }
+
+    // --- New-player starting-settlement support (Arryval), added 2026-11-06 -----------------------
+    // Forces the settlement core's own chunk to a plain synchronous load before every lookup below --
+    // deliberately the simple ServerLevel#getChunk(x, z) blocking call, not the async
+    // chunkload.ChunkClaims ticket system every OTHER force-load call site in this mod uses (that
+    // system's tickets take a tick or more to actually resolve, and these three methods need a
+    // synchronous answer right now). Acceptable here specifically because this only ever runs once
+    // per new player, at one specific moment (reaching the tutorial's exit portal) -- not a recurring
+    // per-tick cost like Murmur Tower's own proximity-wake reason for existing.
+    private static void forceLoadCoreChunk(ServerLevel level, GlobalPos corePos) {
+        if (corePos.dimension() != level.dimension()) {
+            return;
+        }
+        level.getChunk(corePos.pos().getX() >> 4, corePos.pos().getZ() >> 4);
+    }
+
+    /** The settlement's player-given name, or empty if {@code settlementCoreId} doesn't resolve to a real, currently-reachable core at all. */
+    public static Optional<String> getSettlementName(ServerLevel level, UUID settlementCoreId) {
+        SettlementCoreIndex.get(level.getServer()).get(settlementCoreId)
+                .ifPresent(pos -> forceLoadCoreChunk(level, pos));
+        return level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core
+                ? Optional.of(core.getSettlementName()) : Optional.empty();
+    }
+
+    /** A vacant plot found in {@code settlementCoreId}'s settlement, ready to assign -- see {@link #findVacantStartingPlot}. */
+    public record VacantPlotHandle(UUID plotId, BlockPos anchorPos) {
+    }
+
+    /**
+     * The first vacant (no player owner) plot in {@code settlementCoreId}'s settlement that has a
+     * real anchor position to teleport a new player to -- prefers a Private Residence-typed plot
+     * (checking both the canonical {@code blueprynts:private_residence} and legacy {@code
+     * settlemynts:private_residence} ids, same alias {@link ZoneTypeRegistry} itself resolves) if
+     * one qualifies, otherwise any other vacant plot. A plot with no {@code boxPos} (its Building
+     * Supply Box position -- set for virtually every finalized plot, since Finalize auto-places
+     * one) is skipped rather than resolving a polygon centroid -- a deliberate simplification, not
+     * a guaranteed anchor for every theoretically-possible plot shape.
+     */
+    public static Optional<VacantPlotHandle> findVacantStartingPlot(ServerLevel level, UUID settlementCoreId) {
+        SettlementCoreIndex.get(level.getServer()).get(settlementCoreId)
+                .ifPresent(pos -> forceLoadCoreChunk(level, pos));
+        if (!(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
+            return Optional.empty();
+        }
+        Identifier canonicalResidence = Identifier.fromNamespaceAndPath("blueprynts", "private_residence");
+        Identifier legacyResidence = Identifier.fromNamespaceAndPath("settlemynts", "private_residence");
+        List<PlotRecord> vacant = core.getPlots().stream()
+                .filter(p -> p.owner().isEmpty() && p.boxPos().isPresent())
+                .toList();
+        PlotRecord chosen = vacant.stream()
+                .filter(p -> p.zoneTypeId().equals(canonicalResidence) || p.zoneTypeId().equals(legacyResidence))
+                .findFirst()
+                .or(() -> vacant.stream().findFirst())
+                .orElse(null);
+        return chosen == null ? Optional.empty() : Optional.of(new VacantPlotHandle(chosen.plotId(), chosen.boxPos().orElseThrow()));
+    }
+
+    /**
+     * Assigns {@code playerId} as {@code plotId}'s real owner -- the same {@code
+     * core.updatePlot(plot.withOwner(...))} logic the admin-only, no-permission-gated {@code
+     * /settlemynts setplotowner} debug command already uses, but as a real public facade method for
+     * this one legitimate cross-mod use (a new player's starting-settlement pick). Unlike that debug
+     * command, this does not re-validate caller permission at all -- it's the caller's own
+     * responsibility to only call this for a choice a real player actually made (see Arryval's own
+     * picker-selection handler, which re-validates the choice against its own resolved candidate
+     * list before calling this).
+     *
+     * @return {@code true} if {@code plotId} resolved to a real vacant plot in {@code settlementCoreId}'s settlement and was assigned.
+     */
+    public static boolean assignPlotOwner(ServerLevel level, UUID settlementCoreId, UUID plotId, UUID playerId) {
+        SettlementCoreIndex.get(level.getServer()).get(settlementCoreId)
+                .ifPresent(pos -> forceLoadCoreChunk(level, pos));
+        if (!(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
+            return false;
+        }
+        for (PlotRecord plot : core.getPlots()) {
+            if (plot.plotId().equals(plotId)) {
+                core.updatePlot(plot.withOwner(Optional.of(playerId)));
+                return true;
+            }
+        }
+        return false;
+    }
 }
