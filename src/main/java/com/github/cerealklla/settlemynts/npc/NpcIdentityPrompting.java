@@ -8,14 +8,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
-import com.github.cerealklla.nuclyus.llm.OllamaClient;
+import com.github.cerealklla.nuclyus.api.Nuclyus;
 import com.github.cerealklla.nuclyus.llm.WorldLore;
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
 
 /**
  * Builds the one-shot "a brand-new NPC is born" prompt and parses the LLM's reply -- moved here from
  * Audyble's own {@code npc.NpcIdentityPrompting}, 2026-11-05 (see {@link NpcIdentityStore}'s own class
- * doc for the full ownership-move writeup). Now calls {@link OllamaClient}/{@link WorldLore} directly
+ * doc for the full ownership-move writeup). Now calls {@link Nuclyus}/{@link WorldLore} directly
  * (both moved to Nuclyus the same day, per explicit user direction that the LLM is a generic
  * capability, not TTS-specific) instead of Audyble's own now-deleted copies. Takes {@code usedNames}
  * as a precomputed list from the caller ({@link NpcIdentityBirth}) rather than resolving it itself --
@@ -80,7 +80,7 @@ public final class NpcIdentityPrompting {
         String givenName = NameBank.pickGivenName(gender, usedNamesIn);
         String name = NameBank.rollSurname() ? givenName + " " + NameBank.pickSurname() : givenName;
 
-        if (!OllamaClient.isConfigured()) {
+        if (!Nuclyus.isLlmConfigured()) {
             return; // Placeholder identity stays in place -- see this method's own doc.
         }
         EXECUTOR.submit(() -> {
@@ -106,7 +106,7 @@ public final class NpcIdentityPrompting {
                         + "FACT: <one short fact about them>\n"
                         + "FACT: <one short fact about them>";
 
-                String reply = OllamaClient.chat(systemPrompt, List.of(), userMessage);
+                String reply = Nuclyus.chat(systemPrompt, List.of(), userMessage);
                 NpcIdentity generated = parse(placeholder, name, gender, reply);
 
                 if (generated != null) {
