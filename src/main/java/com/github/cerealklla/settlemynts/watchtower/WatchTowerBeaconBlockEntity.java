@@ -279,6 +279,14 @@ public class WatchTowerBeaconBlockEntity extends BlockEntity implements MenuProv
      * automatically, dispatching up to 2x/sec per nearby player -- throttled here so standing near
      * a Beacon doesn't force a full grid recompute that often for no reason.
      */
+    /** This Beacon's own real trigger radius -- its currently-lit illumination radius (see {@link
+     *  #currentRadius}), since that's genuinely the distance a player approaching matters at. See
+     *  Nuclyus' own {@code ping.Pingable#radiusBlocks} doc for why this can't be any shared default. */
+    @Override
+    public double radiusBlocks() {
+        return level instanceof ServerLevel serverLevel ? currentRadius(serverLevel) : 1.0;
+    }
+
     @Override
     public void onPing(com.github.cerealklla.nuclyus.ping.PingPacket ping) {
         if (settlementCoreId == null || !(level instanceof ServerLevel serverLevel)) {

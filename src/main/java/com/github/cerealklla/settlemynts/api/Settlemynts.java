@@ -17,9 +17,11 @@ import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.founding.SettlementCoreIndex;
+import com.github.cerealklla.settlemynts.npc.NpcGender;
 import com.github.cerealklla.settlemynts.npc.NpcIdentity;
 import com.github.cerealklla.settlemynts.npc.NpcIdentityBirth;
 import com.github.cerealklla.settlemynts.npc.NpcIdentityKey;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityStore;
 import com.github.cerealklla.settlemynts.npc.NpcRole;
 import com.github.cerealklla.settlemynts.npc.PlayerRelationship;
 import com.github.cerealklla.settlemynts.npc.PlayerRelationshipStore;
@@ -703,6 +705,67 @@ public final class Settlemynts {
         return Optional.empty();
     }
 
+    /**
+     * {@code plotId -> settlementCoreId}, added 2026-11-08 for Terrytories/Arryval's quest-to-
+     * settlement reputation tracking -- a quest only ever carries the issuing {@code plotId} (see
+     * {@code api.Myssions#getIssuingPlotId}), never the settlement core directly. Same two-path
+     * resolution as {@link #findPlotAt} (a real founded settlement's own core, falling back to a
+     * natural village's synthetic id derived from its {@code SettlementKey}) -- see {@link
+     * #findNaturalPlotAt}'s own doc for why a natural village has no real core entity to report.
+     */
+    /**
+     * Lets an external mod (Terrytories) mark a player hostile to a specific settlement's Guards --
+     * see {@code guardhouse.GuardHostilityExtension}'s own doc for the full rationale. The predicate
+     * takes {@code (settlementCoreId, playerId)} and should answer whether that player is currently
+     * hostile-standing with that settlement.
+     */
+    public static void registerGuardHostilityExtension(java.util.function.BiPredicate<UUID, UUID> settlementCoreIdAndPlayerId) {
+        com.github.cerealklla.settlemynts.guardhouse.GuardHostilityExtension.register(settlementCoreIdAndPlayerId);
+    }
+
+    /**
+     * {@code entity -> plotId}, added 2026-11-08 for Terrytories' combat reputation listener (which
+     * plot/settlement did this NPC belong to?). Covers the same three real NPC shapes this mod's own
+     * internal code already branches on in several places (e.g. {@code SettlemyntsMod
+     * #resolveShopContext}) -- a {@link PlotNpc} worker, a {@link GuardEntity} (carries the identical
+     * field but doesn't formally implement {@link PlotNpc}), or a tagged natural-village {@link
+     * Villager} -- rather than asking a caller to know about all three itself. Feed the result into
+     * {@link #findSettlementCoreIdForPlot} to get the owning settlement.
+     */
+    public static Optional<UUID> findPlotIdForEntity(net.minecraft.world.entity.Entity entity) {
+        if (entity instanceof com.github.cerealklla.settlemynts.zone.PlotNpc npc) {
+            return Optional.of(npc.plotId());
+        }
+        if (entity instanceof com.github.cerealklla.settlemynts.guardhouse.GuardEntity guard) {
+            return Optional.ofNullable(guard.plotId());
+        }
+        if (entity instanceof net.minecraft.world.entity.npc.villager.Villager villager) {
+            return villager.getPersistentData().getIntArray(com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator.PLOT_ID_TAG)
+                    .map(net.minecraft.core.UUIDUtil::uuidFromIntArray);
+        }
+        return Optional.empty();
+    }
+
+    public static Optional<UUID> findSettlementCoreIdForPlot(ServerLevel level, UUID plotId) {
+        for (GhostTownHallCoreEntity core : finalizedCoresIn(level)) {
+            for (PlotRecord plot : core.getPlots()) {
+                if (plot.plotId().equals(plotId)) {
+                    return Optional.of(core.getUUID());
+                }
+            }
+        }
+        var store = com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore.get(level.getServer());
+        for (var entry : store.all().entrySet()) {
+            for (PlotRecord plot : entry.getValue()) {
+                if (plot.plotId().equals(plotId)) {
+                    com.github.cerealklla.settlemynts.zone.SettlementKey settlement = entry.getKey();
+                    return Optional.of(new UUID(settlement.worldSeed(), settlement.settlementEntityId()));
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
     /** The real current shortfall of each generic resource needed to raise a plot's Tier cap by one right now -- see {@link #getPlotUpgradeShortfall}'s own doc. */
     public record PlotUpgradeShortfall(int nextTier, int woodNeeded, int stoneNeeded) {
         public boolean anyShortfall() {
@@ -1132,6 +1195,29 @@ public final class Settlemynts {
         PlayerRelationshipStore.put(new PlayerRelationship(key, newSummary, level.getGameTime()));
     }
 
+    /**
+     * Pre-seeds a fixed, non-generated "wandering" identity for {@code entityId} -- {@code name}/
+     * {@code genderName} ("MALE"/"FEMALE") are used exactly as given, never LLM-authored, and never
+     * re-rolled. For a caller with its own deliberately scripted, consistent character (e.g. Arryval's
+     * tutorial guide) that must NOT go through {@link #resolveOrBeginNpcIdentity}'s normal "wandering"
+     * path -- that path always synchronously claims the key with a throwaway {@code NpcGender.MALE}
+     * placeholder first, then overwrites it moments later once its async name/backstory generation
+     * finishes with a freshly-rolled (possibly different) random gender. That's invisible for an
+     * ordinary Wandering Trader (nobody's mid-conversation with it in that window), but a real,
+     * confirmed live bug for an NPC that speaks scripted lines the instant a player meets it: the
+     * first line(s) use the placeholder's male voice, then the NPC audibly/visibly flips identity
+     * moments into the same conversation. Calling this once, before the entity's first conversation
+     * turn, means {@link #resolveOrBeginNpcIdentity}'s very first call already finds a real identity
+     * in the store and never creates the placeholder at all. Idempotent via {@link
+     * NpcIdentityStore#putIfAbsent} -- safe to call on every spawn/tick; a no-op once already seeded
+     * (including across restarts, since the store is persisted).
+     */
+    public static void seedFixedNpcIdentity(UUID entityId, String name, String genderName) {
+        NpcIdentityKey key = NpcIdentityKey.wandering(entityId);
+        NpcGender gender = NpcGender.valueOf(genderName.toUpperCase(java.util.Locale.ROOT));
+        NpcIdentityStore.putIfAbsent(new NpcIdentity(key, name, "", List.of(), true, Optional.empty(), gender));
+    }
+
     // --- New-player starting-settlement support (Arryval), added 2026-11-06 -----------------------
     // Forces the settlement core's own chunk to a plain synchronous load before every lookup below --
     // deliberately the simple ServerLevel#getChunk(x, z) blocking call, not the async
@@ -1147,12 +1233,53 @@ public final class Settlemynts {
         level.getChunk(corePos.pos().getX() >> 4, corePos.pos().getZ() >> 4);
     }
 
-    /** The settlement's player-given name, or empty if {@code settlementCoreId} doesn't resolve to a real, currently-reachable core at all. */
+    /** The settlement's player-given name, or empty if {@code settlementCoreId} doesn't resolve to a real, currently-reachable core at all. Player-founded settlements only -- a natural village has no real core entity to name at all, see {@link #getAnySettlementName} for a lookup that covers both. */
     public static Optional<String> getSettlementName(ServerLevel level, UUID settlementCoreId) {
         SettlementCoreIndex.get(level.getServer()).get(settlementCoreId)
                 .ifPresent(pos -> forceLoadCoreChunk(level, pos));
         return level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core
                 ? Optional.of(core.getSettlementName()) : Optional.empty();
+    }
+
+    /**
+     * {@code settlementCoreId}'s display name, covering BOTH real player-founded cores ({@link
+     * #getSettlementName}) and natural villages -- added 2026-11-08 for Terrytories' reputation UI
+     * and the mayor's-letter feature, both of which need a real name for a natural village's
+     * standing, not just player-founded ones (the common case for Arryval's own starting-town
+     * flow). A natural village's {@code settlementCoreId} is a synthetic id derived at creation as
+     * {@code new UUID(worldSeed, settlementEntityId)} (see {@link #findNaturalPlotAt}'s own doc) --
+     * reversed here back to the real Cartographyr {@code EntityId} via {@link
+     * UUID#getLeastSignificantBits()}, then asked for its own real name directly.
+     */
+    public static Optional<String> getAnySettlementName(ServerLevel level, UUID settlementCoreId) {
+        Optional<String> founded = getSettlementName(level, settlementCoreId);
+        if (founded.isPresent()) {
+            return founded;
+        }
+        long entityIdValue = settlementCoreId.getLeastSignificantBits();
+        return com.github.cerealklla.cartographyr.api.Cartography.getEntity(level, new com.github.cerealklla.cartographyr.geo.EntityId(entityIdValue))
+                .flatMap(com.github.cerealklla.cartographyr.geo.GeographicEntity::name);
+    }
+
+    /**
+     * Is {@code settlementCoreId} a natural (world-gen) village rather than a player-founded
+     * settlement -- added 2026-11-08 for Terrytories' "the first time a player achieves Friendly
+     * status with any NATURAL NPC settlement" letter trigger. Loaded-chunks-only, same accepted
+     * limitation {@link #getSettlementName} itself already has -- in practice always true when a
+     * caller is reacting to something that just happened to an online player standing right there.
+     */
+    public static boolean isNaturalSettlement(ServerLevel level, UUID settlementCoreId) {
+        return getSettlementName(level, settlementCoreId).isEmpty();
+    }
+
+    /**
+     * A fresh {@code founding.SettlementClaimFlagItem} stack -- the one item that lets a player
+     * found their own new settlement elsewhere. Added 2026-11-08 for Terrytories/Arryval's mayor's-
+     * letter feature; explicit user instruction not to create a new item for this -- the same real
+     * flag already granted via Kyt's "Dev" Kyt debug contribution.
+     */
+    public static net.minecraft.world.item.ItemStack settlementClaimFlagStack(int count) {
+        return new net.minecraft.world.item.ItemStack(com.github.cerealklla.settlemynts.registration.ModItems.SETTLEMENT_CLAIM_FLAG.get(), count);
     }
 
     /** A vacant plot found in {@code settlementCoreId}'s settlement, ready to assign -- see {@link #findVacantStartingPlot}. */
@@ -1186,6 +1313,76 @@ public final class Settlemynts {
                 .or(() -> vacant.stream().findFirst())
                 .orElse(null);
         return chosen == null ? Optional.empty() : Optional.of(new VacantPlotHandle(chosen.plotId(), chosen.boxPos().orElseThrow()));
+    }
+
+    /**
+     * A location to bind a new arrival's Recallcinite Totem to near {@code origin} -- never claims
+     * ownership of anything. Explicit user spec, 2026-11-06, correcting an earlier unconfirmed
+     * assumption that this flow should assign real plot ownership ("at what point did I ever say
+     * anything about 'assigning the player a plot'?"): "If the settlement has a Recallcinite Stone,
+     * bind the player to some spot in that plot, otherwise just pick any plot in the settlement."
+     * Prefers a plot zoned {@code blueprynts:recallcinite_stone} (the same zone type id {@code
+     * lyfe.recallcinite.RecallciniteListener} itself keys its cooldown-reduction bonus off);
+     * otherwise the first plot with a usable anchor, regardless of owner -- ownership is never read
+     * or changed here at all.
+     *
+     * <p><b>Position-based, not {@code settlementCoreId}-based, by design</b> -- an earlier version
+     * of this method took a {@code settlementCoreId} and only ever checked a real {@link
+     * GhostTownHallCoreEntity}, which a natural (seed-predicted/vanilla) village never has at all
+     * (see {@link #findPlotAt}'s own doc). That silently meant this could never resolve for any
+     * natural village no matter how long its real plots had already finished generating -- a real
+     * live bug (Arryval's starting-settlement picker, confirmed by direct log inspection: natural
+     * villages were correctly promoted to REALIZED with real plots enqueued, but the picker kept
+     * reporting no bind location regardless). This version checks both kinds directly from a
+     * position, same split {@link #findPlotAt} itself already does.
+     */
+    public static Optional<BlockPos> findStartingBindLocation(ServerLevel level, BlockPos origin, double radiusBlocks) {
+        Identifier recallciniteStone = Identifier.fromNamespaceAndPath("blueprynts", "recallcinite_stone");
+
+        AABB searchBox = new AABB(origin.getX() - radiusBlocks, level.getMinY(), origin.getZ() - radiusBlocks,
+                origin.getX() + radiusBlocks, level.getMaxY(), origin.getZ() + radiusBlocks);
+        GhostTownHallCoreEntity nearestCore = level.getEntities(ModEntities.GHOST_TOWN_HALL_CORE.get(), searchBox, GhostTownHallCoreEntity::isFinalized)
+                .stream()
+                .min(Comparator.comparingDouble(core -> core.distanceToSqr(origin.getX() + 0.5, core.getY(), origin.getZ() + 0.5)))
+                .orElse(null);
+        if (nearestCore != null) {
+            Optional<BlockPos> bindPos = pickBindLocation(nearestCore.getPlots(), recallciniteStone);
+            if (bindPos.isPresent()) {
+                return bindPos;
+            }
+        }
+
+        // Natural (NPC-generated) village plots are never attached to a real core at all -- see
+        // findPlotAt's own doc. Groups by settlement (SettlementKey) and finds the one with a plot
+        // nearest origin, same "whole-store scan, fine at this suite's scale" precedent
+        // findNaturalPlotAt already set.
+        var store = com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore.get(level.getServer());
+        double radiusSq = radiusBlocks * radiusBlocks;
+        List<PlotRecord> nearestSettlementPlots = null;
+        double bestDistSq = radiusSq;
+        for (List<PlotRecord> plots : store.all().values()) {
+            for (PlotRecord plot : plots) {
+                if (plot.boxPos().isEmpty()) {
+                    continue;
+                }
+                double distSq = plot.boxPos().get().distSqr(origin);
+                if (distSq <= bestDistSq) {
+                    bestDistSq = distSq;
+                    nearestSettlementPlots = plots;
+                }
+            }
+        }
+        return nearestSettlementPlots == null ? Optional.empty() : pickBindLocation(nearestSettlementPlots, recallciniteStone);
+    }
+
+    private static Optional<BlockPos> pickBindLocation(List<PlotRecord> plots, Identifier recallciniteStone) {
+        List<PlotRecord> withAnchor = plots.stream().filter(p -> p.boxPos().isPresent()).toList();
+        PlotRecord chosen = withAnchor.stream()
+                .filter(p -> p.zoneTypeId().equals(recallciniteStone))
+                .findFirst()
+                .or(() -> withAnchor.stream().findFirst())
+                .orElse(null);
+        return chosen == null ? Optional.empty() : chosen.boxPos();
     }
 
     /**

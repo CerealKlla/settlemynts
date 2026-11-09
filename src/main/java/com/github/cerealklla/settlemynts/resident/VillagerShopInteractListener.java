@@ -35,11 +35,16 @@ public final class VillagerShopInteractListener {
             return;
         }
         if (event.getTarget() instanceof PlotNpc npc && npc.plotId() != null) {
-            ShopAnchor.Npc anchor = new ShopAnchor.Npc(event.getTarget().getId());
-            if (SettlemyntsMod.npcMenuHasAnyOption(player, level, anchor)) {
-                event.setCanceled(true);
-                SettlemyntsMod.openNpcMenu(player, level, anchor);
-            }
+            // Real bug, found live 2026-11-07: this used to only cancel vanilla's own trade
+            // interaction when the menu had at least one real option -- for a fresh player with no
+            // deficits/quests (i.e. nearly every NPC, the common case), NOTHING qualified, the event
+            // was left uncancelled, and the click fell straight through to vanilla's default
+            // Villager trading screen instead (blank, titled with the generic fallback name). The
+            // menu itself already renders fine with zero buttons (just "Close") -- always cancel and
+            // always open it, matching this class's own doc ("Vanilla's own trade screen is still
+            // canceled so the two don't fight over the same click").
+            event.setCanceled(true);
+            SettlemyntsMod.openNpcMenu(player, level, new ShopAnchor.Npc(event.getTarget().getId()));
             return;
         }
         if (!(event.getTarget() instanceof Villager villager) || villager.getClass() != Villager.class) {
@@ -48,11 +53,7 @@ public final class VillagerShopInteractListener {
         if (!villager.getPersistentData().contains(NaturalVillagePlotGenerator.PLOT_ID_TAG)) {
             return;
         }
-        ShopAnchor.Npc anchor = new ShopAnchor.Npc(villager.getId());
-        if (!SettlemyntsMod.npcMenuHasAnyOption(player, level, anchor)) {
-            return;
-        }
         event.setCanceled(true);
-        SettlemyntsMod.openNpcMenu(player, level, anchor);
+        SettlemyntsMod.openNpcMenu(player, level, new ShopAnchor.Npc(villager.getId()));
     }
 }

@@ -1302,6 +1302,13 @@ public class SettlemyntsMod {
         double merchantBonusFraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()
                 ? com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player)
                 : 0.0;
+        // Friendly-reputation price bonus, summed on top of the Merchant-skill one above -- see
+        // bridge.TerrytoriesReputationBridge's own doc on why these two are kept additive, never
+        // applied independently to shop.ShopPricing's effective*-pair.
+        double reputationBonusFraction = com.github.cerealklla.settlemynts.bridge.TerrytoriesReputationBridge.isLoaded()
+                ? com.github.cerealklla.settlemynts.bridge.TerrytoriesReputationBridge.getPriceBonusFraction(player, (ServerLevel) player.level(), plot.plotId())
+                : 0.0;
+        double merchantAndReputationBonusFraction = merchantBonusFraction + reputationBonusFraction;
         return views.stream()
                 .map(l -> {
                     net.minecraft.resources.Identifier key = l.resource().tag().map(t -> t.location()).orElseGet(() -> l.resource().itemId().get());
@@ -1327,8 +1334,8 @@ public class SettlemyntsMod {
                             .map(v -> v.sample().get(net.minecraft.core.component.DataComponents.CUSTOM_MODEL_DATA))
                             .map(net.minecraft.world.item.component.CustomModelData::strings)
                             .orElse(java.util.List.of());
-                    int effectiveBuyPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveBuyCost(l.pricePerUnit(), merchantBonusFraction);
-                    int effectiveSellPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveSellPayout(l.pricePerUnit(), merchantBonusFraction);
+                    int effectiveBuyPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveBuyCost(l.pricePerUnit(), merchantAndReputationBonusFraction);
+                    int effectiveSellPrice = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveSellPayout(l.pricePerUnit(), merchantAndReputationBonusFraction);
                     // Planned Inventory gate (2026-10-20) -- matched by base resource identity only
                     // (ignoring quality/customName, same coarser identity PlannedInventoryTarget itself
                     // uses), and against the item's TOTAL stock across every quality, not just this
@@ -1546,11 +1553,16 @@ public class SettlemyntsMod {
         // effectiveSellPayout are a matched pair that guarantee the sell payout is always strictly
         // less than the buy cost for the same price/bonus, closing that loop by construction.
         int rebate = 0;
-        if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()) {
-            int pricePerUnit = result.nuggetsCharged() / filled;
-            double fraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player);
-            int effectiveCostPerUnit = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveBuyCost(pricePerUnit, fraction);
-            rebate = Math.max(0, result.nuggetsCharged() - effectiveCostPerUnit * filled);
+        {
+            double fraction = (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()
+                        ? com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player) : 0.0)
+                    + (com.github.cerealklla.settlemynts.bridge.TerrytoriesReputationBridge.isLoaded()
+                        ? com.github.cerealklla.settlemynts.bridge.TerrytoriesReputationBridge.getPriceBonusFraction(player, serverLevel, shopContext.plot().plotId()) : 0.0);
+            if (fraction > 0.0) {
+                int pricePerUnit = result.nuggetsCharged() / filled;
+                int effectiveCostPerUnit = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveBuyCost(pricePerUnit, fraction);
+                rebate = Math.max(0, result.nuggetsCharged() - effectiveCostPerUnit * filled);
+            }
         }
         if (rebate > 0) {
             net.minecraft.world.item.ItemStack reward = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.GOLD_NUGGET, rebate);
@@ -1746,8 +1758,11 @@ public class SettlemyntsMod {
         // would currently pay to buy this item back, closing a real zero-cost buy/sell XP loop a
         // naive flat-% bonus here would otherwise allow (see processBuyLine's own comment for the
         // exact rounding case found).
-        if (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()) {
-            double fraction = com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player);
+        {
+            double fraction = (com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.isLoaded()
+                        ? com.github.cerealklla.settlemynts.bridge.LyfeMerchantBridge.getPriceBonusFraction(player) : 0.0)
+                    + (com.github.cerealklla.settlemynts.bridge.TerrytoriesReputationBridge.isLoaded()
+                        ? com.github.cerealklla.settlemynts.bridge.TerrytoriesReputationBridge.getPriceBonusFraction(player, serverLevel, shopContext.plot().plotId()) : 0.0);
             int effectivePayoutPerUnit = com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge.effectiveSellPayout(result.sellPricePerUnit(), fraction);
             nuggetsOwed = effectivePayoutPerUnit * result.itemsSold();
         }
@@ -2716,7 +2731,15 @@ public class SettlemyntsMod {
             return;
         }
         NpcMenuOptions options = computeNpcMenuOptions(player, level, anchor);
-        String npcName = npc.getName().getString();
+        // Real bug, found live 2026-11-07: a plot worker's real identity (Farmer/Lumberjack/Miner/
+        // Resident) only ever lives in its own StatBarOwner#displayName() (Nuclyus's floating
+        // nameplate reads this directly) -- vanilla's own getName() was never set and always fell
+        // back to the generic translated entity name ("Villager"), so this menu's own title showed
+        // that instead of the NPC's real name. Prefer the real identity when the entity exposes one.
+        String npcName = npc instanceof com.github.cerealklla.nuclyus.statbar.StatBarOwner statBarOwner
+                && statBarOwner.displayName() != null
+                ? statBarOwner.displayName().getString()
+                : npc.getName().getString();
         PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenNpcMenuPayload(
                 anchor, npcName, options.canOpenStore(), options.canManageStore(), options.canChangeJob(), options.canFireNpc(), options.canTalk()));
     }

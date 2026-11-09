@@ -194,6 +194,11 @@ dependencies {
     // Kyt/Yconomics above. compileOnly only, same reasoning.
     compileOnly files("../Lyfe/build/libs/lyfe-${lyfe_version}.jar")
 
+    // Terrytories is an optional soft dependency (see neoforge.mods.toml) -- a Friendly-standing
+    // player gets a Settlement Shop price bonus (see bridge.TerrytoriesReputationBridge), same
+    // ModList.get().isLoaded("terrytories") isolation pattern as every other bridge above.
+    compileOnly files("../Terrytories/build/libs/terrytories-${terrytories_version}.jar")
+
     // Myssions is an optional soft dependency (see neoforge.mods.toml) -- surfaces quest-board
     // offers/turn-ins inside this mod's own "Press H" wishlist screen (see
     // bridge.MyssionsQuestBridge), gated behind ModList.get().isLoaded("myssions") at runtime,

@@ -5,6 +5,7 @@ import java.util.List;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -89,7 +90,7 @@ public class GuardSightGoal extends Goal {
     private LivingEntity findNearestVisibleHostile(ServerLevel level) {
         AABB searchBox = guard.getBoundingBox().inflate(MAX_SEARCH_RADIUS_BLOCKS);
         List<LivingEntity> candidates = level.getEntitiesOfClass(LivingEntity.class, searchBox,
-                e -> e.isAlive() && e instanceof Enemy && isActivelyHostile(e));
+                e -> e.isAlive() && isHostileCandidate(e));
         LivingEntity nearest = null;
         double nearestDistSq = Double.MAX_VALUE;
         for (LivingEntity candidate : candidates) {
@@ -125,6 +126,24 @@ public class GuardSightGoal extends Goal {
      */
     private static boolean isActivelyHostile(LivingEntity candidate) {
         return !(candidate instanceof NeutralMob neutral) || neutral.isAngry();
+    }
+
+    /**
+     * Widened 2026-11-08 for Terrytories' reputation system -- explicit user spec: a player
+     * sufficiently hostile-standing with this guard's own settlement is now also a valid target,
+     * alongside the pre-existing {@link Enemy} scan (which a plain {@link ServerPlayer} never
+     * matches on its own). {@link GuardHostilityExtension} is a one-shot external callback
+     * registration so this mod never needs to depend on Terrytories to ask the question -- see its
+     * own doc.
+     */
+    private boolean isHostileCandidate(LivingEntity candidate) {
+        if (candidate instanceof Enemy) {
+            return isActivelyHostile(candidate);
+        }
+        if (candidate instanceof ServerPlayer player) {
+            return GuardHostilityExtension.isHostile(guard.getSettlementCoreId(), player.getUUID());
+        }
+        return false;
     }
 
     private static double sightRangeFor(ServerLevel level, LivingEntity candidate) {

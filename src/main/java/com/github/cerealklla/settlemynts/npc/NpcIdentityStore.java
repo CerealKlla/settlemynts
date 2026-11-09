@@ -58,6 +58,23 @@ public final class NpcIdentityStore {
         return identity;
     }
 
+    /**
+     * Claims {@code identity}'s key only if nothing is stored there yet -- for a caller that wants a
+     * fixed, pre-authored identity (name/gender already decided, never LLM-generated) the very first
+     * time it's needed, instead of going through {@link NpcIdentityBirth}'s placeholder-then-async-
+     * overwrite flow (see {@code api.Settlemynts#seedFixedNpcIdentity}'s own doc for why that flow is
+     * wrong for a deliberately consistent, scripted character). A no-op, returning {@code false}, on
+     * every call after the first (including across restarts) -- safe to call unconditionally on every
+     * spawn/tick.
+     */
+    public static boolean putIfAbsent(NpcIdentity identity) {
+        if (STORE.get(identity.key()).isPresent()) {
+            return false;
+        }
+        STORE.put(identity.key(), identity);
+        return true;
+    }
+
     /** Every identity whose body has permanently died -- the "deceased characters registry," a plain filter over this one store rather than a separate store. */
     public static List<NpcIdentity> deceased() {
         return STORE.all().values().stream().filter(id -> !id.alive()).toList();

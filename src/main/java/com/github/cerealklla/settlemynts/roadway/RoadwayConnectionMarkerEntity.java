@@ -157,6 +157,15 @@ public class RoadwayConnectionMarkerEntity extends Display.BlockDisplay implemen
         }
     }
 
+    /** The wider of this marker's own two internal thresholds ({@link #TOOL_LIGHT_RANGE_BLOCKS}) --
+     *  see Nuclyus' own {@code ping.Pingable#radiusBlocks} doc for why this must be a real per-
+     *  feature value, not any shared default; {@link #onPing}'s own tighter {@link
+     *  #TRAVELER_PING_RANGE_BLOCKS} check is unaffected, still self-filtered inside the method body. */
+    @Override
+    public double radiusBlocks() {
+        return TOOL_LIGHT_RANGE_BLOCKS;
+    }
+
     @Override
     public void onPing(PingPacket ping) {
         if (!(level() instanceof ServerLevel level) || ownerCoreId == null) {

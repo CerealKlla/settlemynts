@@ -202,13 +202,27 @@ public final class PlotShopProximityTicker {
      * resolving for proximity detection -- no additional world scanning beyond that.
      */
     private static void updateWishlistNameplate(ServerLevel level, Villager npc, ShopAnchor.Npc anchor) {
+        // Known, flagged, unconfirmed gap left as-is (narrower than the real bug fixed below, and not
+        // yet reported): this still overwrites a named NPC's real identity name with just "?" while a
+        // wishlist is active, rather than appending to it -- that real name is lost for good once the
+        // wishlist clears (falls back to null/vanilla, see the branch below), since nothing here
+        // tracks what the name was before the marker replaced it. Not fixed now since it's a real,
+        // separate scope from the live report this method's other branch fixes.
         boolean hasWishlist = SettlemyntsMod.anchorHasWishlist(level, anchor);
         if (hasWishlist) {
             if (!WISHLIST_MARKER.equals(npc.getCustomName())) {
                 npc.setCustomName(WISHLIST_MARKER);
                 npc.setCustomNameVisible(true);
             }
-        } else if (npc.getCustomName() != null) {
+        } else if (WISHLIST_MARKER.equals(npc.getCustomName())) {
+            // Real bug, found live 2026-11-07: "Names still disappear on the NPCs when I walk up to
+            // them." This used to clear ANY non-null custom name once the NPC had no wishlist --
+            // but almost every NPC's custom name is its own real identity name (set once by
+            // npc.VillagerIdentityListener / npc.WanderingIdentityListener), not this marker. Since
+            // this method runs for every NPC resolved by a proximity scan (i.e. the instant a player
+            // walks up to one), it was wiping a freshly-named NPC's real name back to null on the
+            // very first approach, for every NPC with no active wishlist -- "every NPC in town."
+            // Only ever clear a name this method itself actually set.
             npc.setCustomName(null);
             npc.setCustomNameVisible(false);
         }
