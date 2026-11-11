@@ -3508,7 +3508,7 @@ public class SettlemyntsMod {
             return;
         }
         com.github.cerealklla.settlemynts.tunnel.TunnelFinalizer.finalizePair(stake, partner);
-        player.sendSystemMessage(Component.literal("Tunnel finalized -- both doors are now live."));
+        player.sendSystemMessage(Component.literal("Tunnel finalized -- both trapdoors are now live."));
     }
 
     /** "Remove" on {@code client.TunnelStakeScreen}. */
