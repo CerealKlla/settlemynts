@@ -40,13 +40,31 @@ import com.github.cerealklla.settlemynts.SettlemyntsMod;
  */
 public final class NpcIdentityPrompting {
 
-    private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(
-            r -> new Thread(r, "settlemynts-npc-birth"));
+    private static volatile ExecutorService EXECUTOR = newExecutor();
+
+    private static ExecutorService newExecutor() {
+        return Executors.newSingleThreadExecutor(r -> new Thread(r, "settlemynts-npc-birth"));
+    }
 
     private NpcIdentityPrompting() {
     }
 
-    /** Called from wherever this mod shuts its executors down on server stop -- interrupts any in-flight HTTP call immediately rather than waiting for it to finish or time out on its own. */
+    /**
+     * Real live crash, 2026-11-09, same bug Audyble's own {@code npc.NpcConversationEngine
+     * #onServerStarting} already found and fixed for its own identically-shaped executor on
+     * 2026-11-06, one day after this class moved here from Audyble -- the matching "recreate on
+     * every server start" half of that fix never came along with the move. {@link #shutdown()} fires
+     * on every integrated-server stop, not once per JVM; loading one singleplayer world, quitting to
+     * title, then creating another in the same client session permanently terminated this executor
+     * after the first stop, so the next world's very first Villager-identity birth threw a real,
+     * uncaught {@code RejectedExecutionException} straight out of {@code onJoinLevel}, crashing the
+     * client. Call this from {@code ServerStartingEvent}, mirroring Audyble's own fix exactly.
+     */
+    public static void restart() {
+        EXECUTOR = newExecutor();
+    }
+
+    /** Called from wherever this mod shuts its executors down on server stop -- interrupts any in-flight HTTP call immediately rather than waiting for it to finish or time out on its own. See {@link #restart()}'s own doc for why this is now paired with a matching recreation rather than being one-shot. */
     public static void shutdown() {
         EXECUTOR.shutdownNow();
     }

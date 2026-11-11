@@ -724,6 +724,16 @@ public final class Settlemynts {
     }
 
     /**
+     * Fires whenever a player's NPC Menu actually opens for a real NPC, regardless of which of the
+     * two real trigger paths opened it (a plain right-click, or the "G" key) -- see {@code
+     * plotsign.NpcTalkedToHooks}' own doc for the real bug this exists to fix ("pressing 'G' doesn't
+     * count as 'talking to a villager'").
+     */
+    public static void registerNpcTalkedToHook(java.util.function.BiConsumer<net.minecraft.server.level.ServerPlayer, net.minecraft.world.entity.LivingEntity> hook) {
+        com.github.cerealklla.settlemynts.plotsign.NpcTalkedToHooks.register(hook);
+    }
+
+    /**
      * {@code entity -> plotId}, added 2026-11-08 for Terrytories' combat reputation listener (which
      * plot/settlement did this NPC belong to?). Covers the same three real NPC shapes this mod's own
      * internal code already branches on in several places (e.g. {@code SettlemyntsMod
