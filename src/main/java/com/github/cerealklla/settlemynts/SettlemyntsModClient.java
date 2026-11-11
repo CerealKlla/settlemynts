@@ -131,6 +131,13 @@ public class SettlemyntsModClient {
         // Lyfe StoolBlock (no Settlemynts entity/renderer needed). TavernNpcEntity renders as a
         // humanoid (see tavern.client.TavernNpcRenderer's own doc), not a Villager.
         event.registerEntityRenderer(ModEntities.TAVERN_NPC.get(), com.github.cerealklla.settlemynts.tavern.client.TavernNpcRenderer::new);
+        // Tunnel Stakes (added 2026-11-11) -- same shared Display.BlockDisplay renderer as every
+        // other ghost marker above. Missing registration here crashed the client outright the
+        // instant a TunnelStakeEntity was placed/rendered (NPE: EntityRenderDispatcher.shouldRender
+        // -- "renderer is null") -- the exact same bug class the ROADWAY_STAKE comment above already
+        // warns about, repeated and confirmed again live via the real client crash report.
+        event.registerEntityRenderer(ModEntities.TUNNEL_STAKE.get(), GhostBlockDisplayRenderer::new);
+        event.registerEntityRenderer(ModEntities.TUNNEL_CONNECTION_MARKER.get(), GhostBlockDisplayRenderer::new);
     }
 
     @SubscribeEvent
