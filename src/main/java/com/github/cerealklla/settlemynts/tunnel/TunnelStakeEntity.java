@@ -124,7 +124,7 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
     private void unpair() {
         UUID partnerId = getPartnerId();
         if (partnerId != null && level() instanceof ServerLevel serverLevel) {
-            TunnelConnectionMarkerEntity.removeTrail(serverLevel, tunnelId);
+            TunnelConnectionMarkerEntity.removeTrail(serverLevel, blockPosition(), tunnelId);
             if (serverLevel.getEntity(partnerId) instanceof TunnelStakeEntity partner) {
                 partner.entityData.set(DATA_PARTNER_ID, "");
                 partner.tunnelId = UUID.randomUUID();

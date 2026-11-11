@@ -9,6 +9,7 @@ import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.util.GroundHeightFinder;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -70,11 +71,26 @@ public class TunnelConnectionMarkerEntity extends Display.BlockDisplay {
         }
     }
 
-    static void removeTrail(ServerLevel level, UUID tunnelId) {
-        AABB wholeLevel = new AABB(Double.NEGATIVE_INFINITY, level.getMinY(), Double.NEGATIVE_INFINITY,
-                Double.POSITIVE_INFINITY, level.getMaxY(), Double.POSITIVE_INFINITY);
+    /**
+     * Real, bounded fix for a confirmed live crash, 2026-11-11: this used to search a literal
+     * {@code Double.NEGATIVE_INFINITY}/{@code POSITIVE_INFINITY} AABB, which {@code
+     * EntitySectionStorage}'s internal packed-long chunk-section range query can't handle --
+     * confirmed via the real server log stack trace ({@code IllegalArgumentException: Start element
+     * ... is larger than end element ...} from {@code LongAVLTreeSet$Subset}), not assumed. Thrown
+     * from inside {@link TunnelFinalizer#finalizePair}, right after both real doors were already
+     * placed but before either stake's own {@code discardAfterFinalize()} ran -- so Finalize left
+     * two fully-working doors behind while leaving both stakes and the whole marker trail in place
+     * forever. Same bounded-search convention every other stake type in this mod already uses
+     * correctly (see {@code roadway.RoadwayConnectionMarkerEntity#findByOwnerCore}) -- centered on
+     * {@code near} (whichever stake position the caller already has on hand) with this class's own
+     * existing {@link #SEARCH_RADIUS_BLOCKS}, generous enough for any real in-settlement Tunnel.
+     */
+    static void removeTrail(ServerLevel level, BlockPos near, UUID tunnelId) {
+        AABB searchBox = new AABB(
+                near.getX() - SEARCH_RADIUS_BLOCKS, level.getMinY(), near.getZ() - SEARCH_RADIUS_BLOCKS,
+                near.getX() + SEARCH_RADIUS_BLOCKS, level.getMaxY(), near.getZ() + SEARCH_RADIUS_BLOCKS);
         for (TunnelConnectionMarkerEntity marker : level.getEntities(ModEntities.TUNNEL_CONNECTION_MARKER.get(),
-                wholeLevel, m -> tunnelId.equals(m.tunnelId))) {
+                searchBox, m -> tunnelId.equals(m.tunnelId))) {
             marker.discard();
         }
     }

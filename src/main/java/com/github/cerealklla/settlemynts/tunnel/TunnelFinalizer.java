@@ -47,7 +47,7 @@ public final class TunnelFinalizer {
         TinyWyrldsTunnelBridge.ensureNoLootTunnelRecipeExists(recipeName, roomCount);
         TinyWyrldsTunnelBridge.placePublicTunnelDoorPair(levelA, posA, facingA, levelB, posB, facingB, recipeName);
 
-        TunnelConnectionMarkerEntity.removeTrail(levelA, a.getTunnelId());
+        TunnelConnectionMarkerEntity.removeTrail(levelA, posA, a.getTunnelId());
         a.discardAfterFinalize();
         b.discardAfterFinalize();
     }
