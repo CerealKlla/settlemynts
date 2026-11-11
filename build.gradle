@@ -212,6 +212,12 @@ dependencies {
     // Blueprynts/Protectyons/Kyt/Yconomics/Lyfe/Myssions above. compileOnly only, same reasoning.
     compileOnly files("../Audyble/build/libs/audyble-${audyble_version}.jar")
 
+    // TinyWyrlds is an optional soft dependency (see neoforge.mods.toml) -- a natural settlement's
+    // generation completion places a public Tunnel door pair between two of its own plots (see
+    // zone.NaturalSettlementTunnelPlacer), gated behind ModList.get().isLoaded("tinywyrlds") at
+    // runtime, same isolation pattern as every other optional sibling-mod dependency above.
+    compileOnly files("../TinyWyrlds/build/libs/tinywyrlds-${tinywyrlds_version}.jar")
+
     // Plain JUnit 5 for pure Codec round-trip tests (no live server/registry needed, so
     // ModDevGradle's neoForge { unitTest {} } FML-bootstrap machinery isn't required here).
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'

@@ -223,6 +223,10 @@ public class SettlemyntsMod {
             com.github.cerealklla.settlemynts.npc.NpcIdentityStore.loadOrGenerate(event.getServer());
             com.github.cerealklla.settlemynts.npc.PlayerRelationshipStore.loadOrGenerate(event.getServer());
             com.github.cerealklla.settlemynts.npc.SettlementLoreStore.loadOrGenerate(event.getServer());
+            // Real live crash, 2026-11-09 -- see NpcIdentityPrompting#restart's own doc. Must pair
+            // with the ServerStoppingEvent shutdown() call below for every server lifetime, not just
+            // run once.
+            com.github.cerealklla.settlemynts.npc.NpcIdentityPrompting.restart();
         });
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.npc.WanderingIdentityListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.npc.VillagerIdentityListener());
@@ -483,6 +487,23 @@ public class SettlemyntsMod {
         registrar.playToServer(com.github.cerealklla.settlemynts.roadway.SetShowRoadwayStakesPayload.TYPE,
                 com.github.cerealklla.settlemynts.roadway.SetShowRoadwayStakesPayload.STREAM_CODEC,
                 (payload, context) -> setShowRoadwayStakes(payload, context));
+
+        // Tunnel Stakes (added 2026-11-11) -- TinyWyrlds integration.
+        registrar.playToServer(com.github.cerealklla.settlemynts.tunnel.RequestTunnelStakePayload.TYPE,
+                com.github.cerealklla.settlemynts.tunnel.RequestTunnelStakePayload.STREAM_CODEC,
+                (payload, context) -> requestTunnelStake(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.tunnel.OpenTunnelStakeScreenPayload.TYPE,
+                com.github.cerealklla.settlemynts.tunnel.OpenTunnelStakeScreenPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.founding.ClientFoundingRequests.requestTunnelStakeScreen(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.tunnel.FinalizeTunnelStakePayload.TYPE,
+                com.github.cerealklla.settlemynts.tunnel.FinalizeTunnelStakePayload.STREAM_CODEC,
+                (payload, context) -> finalizeTunnelStake(payload, context));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.tunnel.RemoveTunnelStakePayload.TYPE,
+                com.github.cerealklla.settlemynts.tunnel.RemoveTunnelStakePayload.STREAM_CODEC,
+                (payload, context) -> removeTunnelStake(payload, context));
 
         registrar.playToServer(com.github.cerealklla.settlemynts.founding.RepositionTownHallCorePayload.TYPE,
                 com.github.cerealklla.settlemynts.founding.RepositionTownHallCorePayload.STREAM_CODEC,
@@ -2730,6 +2751,7 @@ public class SettlemyntsMod {
         if (!(level.getEntity(anchor.entityId()) instanceof net.minecraft.world.entity.LivingEntity npc)) {
             return;
         }
+        com.github.cerealklla.settlemynts.plotsign.NpcTalkedToHooks.fire(player, npc);
         NpcMenuOptions options = computeNpcMenuOptions(player, level, anchor);
         // Real bug, found live 2026-11-07: a plot worker's real identity (Farmer/Lumberjack/Miner/
         // Resident) only ever lives in its own StatBarOwner#displayName() (Nuclyus's floating
@@ -3448,6 +3470,60 @@ public class SettlemyntsMod {
         if (!player.getInventory().add(stake)) {
             player.drop(stake, false);
         }
+    }
+
+    /** "Get Tunnel Stakes" -- mirrors {@link #requestRoadwayStake}, gated behind TinyWyrlds actually being loaded (no point handing out a tool this settlement can't use). */
+    private static void requestTunnelStake(com.github.cerealklla.settlemynts.tunnel.RequestTunnelStakePayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)
+                || !(player.level() instanceof ServerLevel serverLevel)
+                || !(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)
+                || !core.isTownPlanner(player.getUUID())) {
+            return;
+        }
+        if (!com.github.cerealklla.settlemynts.bridge.TinyWyrldsTunnelBridge.isLoaded()) {
+            player.sendSystemMessage(Component.literal("Tunnels require the TinyWyrlds mod, which isn't loaded on this server."));
+            return;
+        }
+        ItemStack stake = new ItemStack(ModItems.TUNNEL_STAKE.get());
+        stake.set(ModItems.TUNNEL_STAKE_OWNER_CORE_ID, core.getUUID());
+        if (!player.getInventory().add(stake)) {
+            player.drop(stake, false);
+        }
+    }
+
+    /** "Finalize" on {@code client.TunnelStakeScreen} -- converts a paired Tunnel Stake pair into a real Tunnel door pair. */
+    private static void finalizeTunnelStake(com.github.cerealklla.settlemynts.tunnel.FinalizeTunnelStakePayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)
+                || !(player.level() instanceof ServerLevel serverLevel)
+                || !(serverLevel.getEntity(payload.stakeEntityId()) instanceof com.github.cerealklla.settlemynts.tunnel.TunnelStakeEntity stake)) {
+            return;
+        }
+        if (!(serverLevel.getEntity(stake.getOwnerCoreId()) instanceof GhostTownHallCoreEntity core) || !core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
+            return;
+        }
+        UUID partnerId = stake.getPartnerId();
+        if (partnerId == null || !(serverLevel.getEntity(partnerId) instanceof com.github.cerealklla.settlemynts.tunnel.TunnelStakeEntity partner)) {
+            player.sendSystemMessage(Component.literal("This Tunnel Stake isn't paired with another one anymore."));
+            return;
+        }
+        com.github.cerealklla.settlemynts.tunnel.TunnelFinalizer.finalizePair(stake, partner);
+        player.sendSystemMessage(Component.literal("Tunnel finalized -- both doors are now live."));
+    }
+
+    /** "Remove" on {@code client.TunnelStakeScreen}. */
+    private static void removeTunnelStake(com.github.cerealklla.settlemynts.tunnel.RemoveTunnelStakePayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player)
+                || !(player.level() instanceof ServerLevel serverLevel)
+                || !(serverLevel.getEntity(payload.stakeEntityId()) instanceof com.github.cerealklla.settlemynts.tunnel.TunnelStakeEntity stake)) {
+            return;
+        }
+        if (!(serverLevel.getEntity(stake.getOwnerCoreId()) instanceof GhostTownHallCoreEntity core) || !core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
+            return;
+        }
+        stake.remove();
+        player.sendSystemMessage(Component.literal("Tunnel Stake removed."));
     }
 
     /** "Show Roadway Stakes" toggle (Roadways Milestone 1) -- mirrors {@link #setShowPlotPerimeters}, but no wall regeneration needed: the stake entities themselves persist permanently, this only flips {@code broadcastToPlayer} visibility. */
@@ -4333,6 +4409,15 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.roadway.HighwayStakeLeash.clearGhostAnchor(player.getUUID());
             }
 
+            // Tunnel Stakes (added 2026-11-11) -- same hand-switch anchor reset as Plot/Roadway/
+            // Highway Stakes above, for the identical reason: without it, switching away and back
+            // could silently resume a stale anchor and pair two stakes that were never meant to go
+            // together. No physical leash pull here -- a Tunnel's two ends are deliberately meant to
+            // be far apart ("shortcuts across town"), unlike a road that needs to be built up close.
+            if (!player.getMainHandItem().is(ModItems.TUNNEL_STAKE.get())) {
+                com.github.cerealklla.settlemynts.tunnel.TunnelStakeLeash.clearGhostAnchor(player.getUUID());
+            }
+
             // Road Access Flag rework (2026-09-30, mirrors Plot Stakes above): the flag has no rope,
             // so this is just the CurrentPlotID reset -- independent of whether Plot Stakes is also
             // being held, since they're two separate items a planner can carry at once.
@@ -4347,6 +4432,7 @@ public class SettlemyntsMod {
             if (player.tickCount % 20 == 0) {
                 removeStalePlotItemsOutsideSettlement(player, serverLevel);
                 removeStaleGuardKitStandsOutsidePlot(player, serverLevel);
+                removeStaleTunnelStakesOutsideSettlement(player, serverLevel);
             }
         }
     }
@@ -4389,6 +4475,44 @@ public class SettlemyntsMod {
         if (removedAny) {
             RopeFenceLeash.clearGhostAnchor(player.getUUID());
             player.sendSystemMessage(Component.literal("You left the settlement -- your Plot Stakes/Road Access Flag have been removed."));
+        }
+    }
+
+    /**
+     * Sweeps every Tunnel Stake item in {@code player}'s inventory (any slot, same "carrying it
+     * while outside, not holding it" rule as {@link #removeStalePlotItemsOutsideSettlement}) and
+     * removes any whose granting settlement's real founded perimeter no longer contains the
+     * player's position.
+     */
+    private static void removeStaleTunnelStakesOutsideSettlement(ServerPlayer player, ServerLevel serverLevel) {
+        var inventory = player.getInventory();
+        BlockPos pos = player.blockPosition();
+        boolean removedAny = false;
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.is(ModItems.TUNNEL_STAKE.get())) {
+                continue;
+            }
+            UUID coreId = stack.get(ModItems.TUNNEL_STAKE_OWNER_CORE_ID);
+            if (coreId == null || !(serverLevel.getEntity(coreId) instanceof GhostTownHallCoreEntity core)) {
+                continue;
+            }
+            Long coreEntityId = core.getCartographyrCoreEntityId();
+            if (coreEntityId == null) {
+                continue;
+            }
+            Optional<GeographicEntity> registered = Cartography.getEntity(serverLevel, new EntityId(coreEntityId));
+            if (registered.isEmpty() || !(registered.get().geometry() instanceof Geometry.Polygon corePolygon)) {
+                continue;
+            }
+            if (!corePolygon.contains(pos.getX(), pos.getZ())) {
+                inventory.setItem(slot, ItemStack.EMPTY);
+                removedAny = true;
+            }
+        }
+        if (removedAny) {
+            com.github.cerealklla.settlemynts.tunnel.TunnelStakeLeash.clearGhostAnchor(player.getUUID());
+            player.sendSystemMessage(Component.literal("You left the settlement -- your Tunnel Stakes have been removed."));
         }
     }
 

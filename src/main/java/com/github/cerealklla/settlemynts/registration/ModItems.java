@@ -108,6 +108,14 @@ public final class ModItems {
                     .stacksTo(1)
                     .setId(ResourceKey.create(Registries.ITEM, id))));
 
+    // Tunnel Stakes (added 2026-11-11) -- the Mayor/Town-Planner placement tool for an in-settlement
+    // Tunnel shortcut (TinyWyrlds integration); same shape as ROADWAY_STAKE above.
+    public static final DeferredItem<com.github.cerealklla.settlemynts.tunnel.TunnelStakeItem> TUNNEL_STAKE = ITEMS.register(
+            "tunnel_stake",
+            id -> new com.github.cerealklla.settlemynts.tunnel.TunnelStakeItem(new Item.Properties()
+                    .stacksTo(1)
+                    .setId(ResourceKey.create(Registries.ITEM, id))));
+
     public static final DeferredRegister.DataComponents DATA_COMPONENTS =
             DeferredRegister.createDataComponents(Registries.DATA_COMPONENT_TYPE, SettlemyntsMod.MODID);
 
@@ -196,4 +204,11 @@ public final class ModItems {
             DATA_COMPONENTS.registerComponentType("tavern_stool_data", builder -> builder
                     .persistent(com.github.cerealklla.settlemynts.tavern.TavernStoolData.CODEC)
                     .networkSynchronized(com.github.cerealklla.settlemynts.tavern.TavernStoolData.STREAM_CODEC));
+
+    // Tunnel Stakes (added 2026-11-11) -- the settlement that granted a Tunnel Stake item, permanent
+    // for its lifetime, same shape as ROADWAY_STAKE_OWNER_CORE_ID above.
+    public static final DeferredHolder<DataComponentType<?>, DataComponentType<UUID>> TUNNEL_STAKE_OWNER_CORE_ID =
+            DATA_COMPONENTS.registerComponentType("tunnel_stake_owner_core_id", builder -> builder
+                    .persistent(UUIDUtil.CODEC)
+                    .networkSynchronized(UUIDUtil.STREAM_CODEC));
 }

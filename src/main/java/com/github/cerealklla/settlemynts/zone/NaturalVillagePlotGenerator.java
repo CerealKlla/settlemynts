@@ -98,6 +98,7 @@ public final class NaturalVillagePlotGenerator {
         if (allDone) {
             NaturalVillagePlotPending.remove(entry.settlement());
             SettlemyntsMod.LOGGER.info("Natural village plot generation: finished settlement {}", entry.settlement());
+            NaturalSettlementTunnelPlacer.maybePlaceTunnel(level, entry);
         }
     }
 
@@ -120,7 +121,10 @@ public final class NaturalVillagePlotGenerator {
     // accidentally exclude a real house whose name happens to share a path segment with one of these.
     private static final String[] NON_BUILDING_HOUSE_TEMPLATE_KEYWORDS = {"accessory", "meeting_point", "animal_pen", "stable"};
 
-    private static boolean isLikelyBuildingFootprint(StructurePiece piece, BoundingBox box) {
+    /** Package-private (not {@code private}) since 2026-11-11 so {@link NaturalSettlementTunnelPlacer}
+     *  can reuse the exact same "is this piece actually a building" filter to pick real plot
+     *  anchors for its own Tunnel door placement, rather than duplicating this logic. */
+    static boolean isLikelyBuildingFootprint(StructurePiece piece, BoundingBox box) {
         if (piece instanceof PoolElementStructurePiece poolPiece
                 && poolPiece.getElement() instanceof net.minecraft.world.level.levelgen.structure.pools.SinglePoolElement single) {
             try {

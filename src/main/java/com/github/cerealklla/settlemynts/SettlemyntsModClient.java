@@ -173,6 +173,11 @@ public class SettlemyntsModClient {
                 Minecraft.getInstance().setScreen(new PlotStakeScreen(request));
             }
         });
+        ClientFoundingRequests.takePendingTunnelStakeScreen().ifPresent(request -> {
+            if (Minecraft.getInstance().screen == null) {
+                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.tunnel.client.TunnelStakeScreen(request));
+            }
+        });
         // Plot Config Sign opens via a real PlotConfigMenu now, 2026-10-24 -- vanilla's own
         // container-open flow handles this automatically (see onRegisterMenuScreens), no polling
         // needed here anymore.

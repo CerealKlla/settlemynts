@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.founding.client;
 
 import com.github.cerealklla.settlemynts.roadway.RequestRoadwayStakePayload;
 import com.github.cerealklla.settlemynts.roadway.SetShowRoadwayStakesPayload;
+import com.github.cerealklla.settlemynts.tunnel.RequestTunnelStakePayload;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -44,12 +45,24 @@ public final class RoadwayManagementScreen extends Screen {
                 .bounds(centerX - 100, y, 245, 20).build());
         y += 30;
 
+        // Tunnel Stakes (added 2026-11-11) -- an in-settlement shortcut between two of this
+        // settlement's own plots, via TinyWyrlds. No "requires TinyWyrlds" gating client-side here
+        // (the server already refuses the request and messages the player if it's not loaded) --
+        // same posture as every other optional-dependency-gated button in this mod.
+        addRenderableWidget(Button.builder(Component.literal("Get Tunnel Stakes"), b -> getTunnelStake())
+                .bounds(centerX - 100, y, 245, 20).build());
+        y += 30;
+
         addRenderableWidget(Button.builder(Component.literal("Back"), b -> Minecraft.getInstance().setScreen(parent))
                 .bounds(centerX - 50, height - 30, 100, 20).build());
     }
 
     private void getRoadwayStake() {
         send(new RequestRoadwayStakePayload(coreEntityId));
+    }
+
+    private void getTunnelStake() {
+        send(new RequestTunnelStakePayload(coreEntityId));
     }
 
     private void toggleRoadwayStakes() {

@@ -216,4 +216,18 @@ public final class ModEntities {
             com.github.cerealklla.settlemynts.tavern.TavernNpcEntity::new,
             MobCategory.MISC,
             builder -> builder.sized(0.6f, 1.95f).clientTrackingRange(10));
+
+    // Tunnel Stakes (added 2026-11-11) -- the Mayor/Town-Planner placement tool for an in-settlement
+    // Tunnel shortcut; see tunnel.TunnelStakeEntity's own doc. Same hitbox/shape as ROADWAY_STAKE.
+    public static final DeferredHolder<EntityType<?>, EntityType<com.github.cerealklla.settlemynts.tunnel.TunnelStakeEntity>> TUNNEL_STAKE = ENTITIES.registerEntityType(
+            "tunnel_stake",
+            com.github.cerealklla.settlemynts.tunnel.TunnelStakeEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(1.0f, 1.0f));
+
+    public static final DeferredHolder<EntityType<?>, EntityType<com.github.cerealklla.settlemynts.tunnel.TunnelConnectionMarkerEntity>> TUNNEL_CONNECTION_MARKER = ENTITIES.registerEntityType(
+            "tunnel_connection_marker",
+            com.github.cerealklla.settlemynts.tunnel.TunnelConnectionMarkerEntity::new,
+            MobCategory.MISC,
+            builder -> builder.sized(0.5f, 1.0f));
 }

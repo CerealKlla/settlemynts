@@ -3,6 +3,7 @@ package com.github.cerealklla.settlemynts.founding;
 import java.util.Optional;
 
 import com.github.cerealklla.nuclyus.request.ClientRequestSlot;
+import com.github.cerealklla.settlemynts.tunnel.OpenTunnelStakeScreenPayload;
 import com.github.cerealklla.settlemynts.zone.OpenPlotStakeScreenPayload;
 
 /**
@@ -20,6 +21,7 @@ public final class ClientFoundingRequests {
     private static final ClientRequestSlot<OpenStakeScreenPayload> STAKE = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenPlotStakeScreenPayload> PLOT_STAKE = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenDefenseSpendingMenuPayload> DEFENSE_SPENDING = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenTunnelStakeScreenPayload> TUNNEL_STAKE = new ClientRequestSlot<>();
 
     private ClientFoundingRequests() {
     }
@@ -54,5 +56,13 @@ public final class ClientFoundingRequests {
 
     public static Optional<OpenDefenseSpendingMenuPayload> takePendingDefenseSpendingScreen() {
         return DEFENSE_SPENDING.takePending();
+    }
+
+    public static void requestTunnelStakeScreen(OpenTunnelStakeScreenPayload payload) {
+        TUNNEL_STAKE.request(payload);
+    }
+
+    public static Optional<OpenTunnelStakeScreenPayload> takePendingTunnelStakeScreen() {
+        return TUNNEL_STAKE.takePending();
     }
 }

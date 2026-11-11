@@ -193,6 +193,17 @@ taxation/rent, on top of Cartographyr's geographic entity model.
     ordering="NONE"
     side="BOTH"
 
+# Optional soft dependency (2026-11-11) -- a natural settlement's generation completion places a
+# public Tunnel door pair between two of its own plots, if TinyWyrlds happens to be loaded (see
+# zone.NaturalSettlementTunnelPlacer). Same "ordering=NONE, no versionRange" reasoning as the other
+# optional dependencies above.
+[[dependencies.${mod_id}]]
+    modId="tinywyrlds"
+    type="optional"
+    reason="Places a public Tunnel door pair between two plots once a natural settlement finishes generating."
+    ordering="NONE"
+    side="BOTH"
+
 # Features are specific properties of the game environment, that you may want to declare you require. This example declares
 # that your mod requires GL version 3.2 or higher. Other features will be added. They are side aware so declaring this won't
 # stop your mod loading on the server for example.
