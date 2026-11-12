@@ -9,6 +9,7 @@ import com.github.cerealklla.settlemynts.bridge.TinyWyrldsTunnelBridge;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.StructurePiece;
 
@@ -23,19 +24,23 @@ import net.minecraft.world.level.levelgen.structure.StructurePiece;
  * behind {@link TinyWyrldsTunnelBridge#isLoaded()} -- a server without TinyWyrlds loaded just never
  * gets this shortcut, no error, same isolation convention as every other optional bridge here.
  *
- * <p>Picks its anchor points (up to {@link #MAX_DOORS}) by re-scanning this same settlement's own
- * real generated building pieces (the exact {@link NaturalVillagePlotGenerator
- * #isLikelyBuildingFootprint} filter the plot generator itself just used, reused directly rather
- * than re-deriving from {@link PlotRecord}, which has no real floor-position field for a
- * natural-village plot to begin with) -- the first ones that pass become the group's doors. A
- * piece's own {@code BoundingBox#minY()} is used as the floor -- simpler and more reliable than a
- * surface heightmap scan here specifically, since a heightmap lookup inside a roofed building
- * would find the roof, not the interior floor. A village with fewer than 2 real building pieces (a
- * very small one) simply gets no Tunnel -- not an error, just nothing to connect. Widened from a
- * fixed "first two" cap to up to {@value #MAX_DOORS} doors, 2026-11-12, per explicit user spec:
- * "certain settlements could have multiple entrances to the same underground sewer system" -- a
- * village with more qualifying buildings than that is capped rather than wiring every single house
- * into one sprawling tunnel.
+ * <p>Picks its anchor points by re-scanning this same settlement's own real generated building
+ * pieces (the exact {@link NaturalVillagePlotGenerator#isLikelyBuildingFootprint} filter the plot
+ * generator itself just used, reused directly rather than re-deriving from {@link PlotRecord},
+ * which has no real floor-position field for a natural-village plot to begin with). A piece's own
+ * {@code BoundingBox#minY()} is used as the floor -- simpler and more reliable than a surface
+ * heightmap scan here specifically, since a heightmap lookup inside a roofed building would find
+ * the roof, not the interior floor. A village with fewer than 2 real building pieces (a very small
+ * one) simply gets no Tunnel -- not an error, just nothing to connect.
+ *
+ * <p><b>Door count is randomized based on how many qualifying buildings the village actually
+ * has</b> -- explicit user correction, 2026-11-12, after an initial fixed cap of 4 was flagged as
+ * an arbitrary, unrequested number: "it should be randomized based on the number of buildings
+ * present, not an arbitrary limit." Every qualifying building becomes a candidate (no early-exit
+ * cap at all); a uniformly random count between 2 and that candidate pool's own size (inclusive)
+ * is drawn, then that many candidates are picked via a Fisher-Yates shuffle (so a small village's
+ * own real building count is the only ceiling, and a large village doesn't deterministically
+ * always wire in the same handful of buildings every time).
  *
  * <p>Each door's own facing points toward the group's own centroid (every door included) -- for
  * exactly 2 doors this is identical to the original "face the other door" rule (the centroid of 2
@@ -51,7 +56,6 @@ public final class NaturalSettlementTunnelPlacer {
 
     private static final String RECIPE_NAME = "NaturalSettlementShortcut";
     private static final int ROOM_COUNT = 1;
-    private static final int MAX_DOORS = 4;
 
     private NaturalSettlementTunnelPlacer() {
     }
@@ -66,13 +70,20 @@ public final class NaturalSettlementTunnelPlacer {
             if (NaturalVillagePlotGenerator.isLikelyBuildingFootprint(piece, box)) {
                 buildingBoxes.add(box);
             }
-            if (buildingBoxes.size() >= MAX_DOORS) {
-                break;
-            }
         }
         if (buildingBoxes.size() < 2) {
             return;
         }
+
+        RandomSource random = level.getRandom();
+        for (int i = buildingBoxes.size() - 1; i > 0; i--) {
+            int j = random.nextInt(i + 1);
+            BoundingBox swap = buildingBoxes.get(i);
+            buildingBoxes.set(i, buildingBoxes.get(j));
+            buildingBoxes.set(j, swap);
+        }
+        int doorCount = buildingBoxes.size() == 2 ? 2 : 2 + random.nextInt(buildingBoxes.size() - 1);
+        buildingBoxes = buildingBoxes.subList(0, doorCount);
 
         TinyWyrldsTunnelBridge.ensureNoLootTunnelRecipeExists(RECIPE_NAME, ROOM_COUNT);
 
