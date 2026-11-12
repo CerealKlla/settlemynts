@@ -1,7 +1,11 @@
 package com.github.cerealklla.settlemynts.tunnel;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.founding.GhostBlockDisplays;
@@ -153,13 +157,47 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
     /** Joins {@code newcomer} into {@code existing}'s group (adopting {@code existing}'s own {@link
      *  #tunnelId}) and spawns the connecting marker trail for this one new edge. Unlike the
      *  original pair-only version, {@code existing} may already have any number of other
-     *  connections -- joining never removes or replaces them. */
+     *  connections -- joining never removes or replaces them.
+     *
+     *  <p>{@code newcomer} may *also* already belong to its own multi-stake group (a Mayor can
+     *  anchor onto any stake in a chain, not just a lone one) -- a plain {@code newcomer.tunnelId
+     *  = existing.tunnelId} would silently strand the rest of that group under the old, now-
+     *  orphaned id, leaving it structurally connected (via {@code DATA_CONNECTIONS}) to stakes
+     *  that no longer share its {@code tunnelId}. Real bug, caught in review before ever being
+     *  live-tested. Fixed by flood-filling {@code existing}'s {@code tunnelId} across every stake
+     *  reachable from {@code newcomer} first, so joining two existing groups properly merges both
+     *  into one. */
     public static void join(TunnelStakeEntity existing, TunnelStakeEntity newcomer) {
-        newcomer.tunnelId = existing.tunnelId;
+        if (existing.level() instanceof ServerLevel serverLevel) {
+            propagateTunnelId(serverLevel, newcomer, existing.tunnelId);
+        } else {
+            newcomer.tunnelId = existing.tunnelId;
+        }
         existing.addConnectionId(newcomer.getUUID());
         newcomer.addConnectionId(existing.getUUID());
         if (existing.level() instanceof ServerLevel serverLevel) {
             TunnelConnectionMarkerEntity.spawnTrail(serverLevel, existing, newcomer, existing.tunnelId);
+        }
+    }
+
+    /** Sets {@code newTunnelId} on {@code start} and every stake transitively reachable from it
+     *  through the real connection graph ({@code DATA_CONNECTIONS}), not just {@code start} itself
+     *  -- see {@link #join}'s own doc for why this matters. A visited set guards against the
+     *  connection graph containing a cycle (explicitly allowed elsewhere in this mod's own stake
+     *  graphs, see Roadway Stakes' decisions.md entry on loops). */
+    private static void propagateTunnelId(ServerLevel level, TunnelStakeEntity start, UUID newTunnelId) {
+        Deque<TunnelStakeEntity> queue = new ArrayDeque<>();
+        Set<UUID> visited = new HashSet<>();
+        queue.add(start);
+        visited.add(start.getUUID());
+        while (!queue.isEmpty()) {
+            TunnelStakeEntity current = queue.poll();
+            current.tunnelId = newTunnelId;
+            for (UUID otherId : current.getConnectionIds()) {
+                if (visited.add(otherId) && level.getEntity(otherId) instanceof TunnelStakeEntity other) {
+                    queue.add(other);
+                }
+            }
         }
     }
 
