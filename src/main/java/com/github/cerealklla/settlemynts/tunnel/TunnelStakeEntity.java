@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.tunnel;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -33,20 +34,24 @@ import net.neoforged.neoforge.network.PacketDistributor;
 /**
  * A Tunnel Stake -- the Mayor/Town-Planner-placed mechanism for a settlement's own in-town
  * shortcut (the 3rd use case from the Tunnel design conversation, explicitly scoped as future work
- * at the time, now built on explicit follow-up request). Unlike {@code roadway.RoadwayStakeEntity}'s
- * open, unbounded connection graph, a Tunnel Stake can only ever have ONE partner -- a Tunnel is
- * always exactly a pair of real-world doors, never a hub.
+ * at the time, now built on explicit follow-up request). Originally capped at exactly ONE partner
+ * ("a Tunnel is always exactly a pair of real-world doors, never a hub") -- widened 2026-11-12 to
+ * an open connection graph, mirroring {@code roadway.RoadwayStakeEntity}'s own shape, per explicit
+ * user spec: "certain settlements could have multiple entrances to the same underground sewer
+ * system... multiple entrances to, say, a mountain mineshaft themed tunnel." A stake's own {@link
+ * #tunnelId} is still the group's shared identity (unchanged); {@link #getConnectionIds()} replaces
+ * the old single {@code getPartnerId()}/{@code hasPartner()} pair.
  *
- * <p><b>Right-click convention deliberately mirrors {@code zone.GhostPlotStakeEntity}'s, not {@code
+ * <p>Right-click convention deliberately mirrors {@code zone.GhostPlotStakeEntity}'s, not {@code
  * roadway.RoadwayStakeEntity}'s</b> (explicit user request) -- holding a bound Tunnel Stake item and
- * right-clicking an existing, still-unpaired stake of the same settlement unconditionally adopts it
- * as the player's current anchor ("go back to a Fence Post which does not have 2 ropes on it," Plot
- * Stakes' own quote -- here, "does not have 2 ropes" maps to "isn't paired yet"), and right-clicking
- * WITHOUT the item opens a management screen (Finalize/Remove) rather than acting immediately the
- * way a bare Roadway Stake right-click does.
+ * right-clicking an existing stake of the same settlement unconditionally adopts it as the player's
+ * current anchor, joining it to whatever chain is currently being built; right-clicking WITHOUT the
+ * item opens a management screen (Finalize/Remove) rather than acting immediately the way a bare
+ * Roadway Stake right-click does. Unlike the original pair-only version, a stake already belonging
+ * to a group can still accept further joiners -- there's no "already paired" ceiling anymore.
  *
  * <p>No real vanilla {@code Leashable} rope rendering -- unlike Plot/Perimeter Stakes (a small,
- * single-settlement-sized boundary), a Tunnel's two ends are explicitly meant to be far apart
+ * single-settlement-sized boundary), a Tunnel's stakes are explicitly meant to be far apart
  * ("shortcuts across town"), the same long-range problem Roadway/Highway Stakes already solved by
  * abandoning Leashable for a ghost-marker trail instead of trying to stretch a rope indefinitely --
  * {@link TunnelConnectionMarkerEntity} is this mechanic's own deliberately lightweight version of
@@ -56,18 +61,21 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
 
     private static final double SEARCH_RADIUS_BLOCKS = 500.0;
 
-    private static final EntityDataAccessor<String> DATA_PARTNER_ID =
+    /** Comma-joined UUIDs of every OTHER stake this one has a direct edge to -- mirrors {@code
+     *  roadway.RoadwayStakeEntity#DATA_CONNECTIONS}' own shape exactly. Replaces the old
+     *  single-value {@code DATA_PARTNER_ID}. */
+    private static final EntityDataAccessor<String> DATA_CONNECTIONS =
             SynchedEntityData.defineId(TunnelStakeEntity.class, EntityDataSerializers.STRING);
 
     private UUID ownerCoreId;
-    // Assigned fresh the moment a stake is placed, NOT at pairing time -- explicit user spec,
+    // Assigned fresh the moment a stake is placed, NOT at joining time -- explicit user spec,
     // 2026-11-11: "First stake placed gets a settlement UUID + tunnel UUID, that's the name of the
     // recipe. That way two tunnels of the same length in the same settlement can be different." See
     // TunnelFinalizer -- the recipe name is {@code ownerCoreId + "_" + tunnelId}, so every tunnel
-    // gets its own independent recipe regardless of room count, rather than two differently-placed
-    // but equally-long tunnels silently sharing (and fighting over) one recipe. Whichever stake is
-    // placed/anchored FIRST in a pairing keeps its own id; the one it pairs WITH adopts it (see
-    // {@link #pair}) -- a stake placed solo and never paired just keeps its own, unused id.
+    // group gets its own independent recipe regardless of room count, rather than two differently-
+    // placed but equally-long tunnels silently sharing (and fighting over) one recipe. Whichever
+    // stake is placed/anchored FIRST in a chain keeps its own id; every stake that joins it (see
+    // {@link #join}) adopts it -- a stake placed solo and never joined just keeps its own, unused id.
     private UUID tunnelId;
 
     public TunnelStakeEntity(EntityType<? extends TunnelStakeEntity> type, Level level) {
@@ -77,7 +85,7 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
-        builder.define(DATA_PARTNER_ID, "");
+        builder.define(DATA_CONNECTIONS, "");
     }
 
     public static TunnelStakeEntity create(ServerLevel level, int x, int y, int z, UUID ownerCoreId) {
@@ -97,40 +105,86 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
         return ownerCoreId;
     }
 
-    public UUID getPartnerId() {
-        String value = entityData.get(DATA_PARTNER_ID);
-        return value.isEmpty() ? null : UUID.fromString(value);
+    public List<UUID> getConnectionIds() {
+        String raw = entityData.get(DATA_CONNECTIONS);
+        if (raw.isEmpty()) {
+            return List.of();
+        }
+        List<UUID> ids = new ArrayList<>();
+        for (String part : raw.split(",")) {
+            ids.add(UUID.fromString(part));
+        }
+        return ids;
     }
 
-    public boolean hasPartner() {
-        return getPartnerId() != null;
+    private void addConnectionId(UUID otherId) {
+        List<UUID> current = new ArrayList<>(getConnectionIds());
+        if (!current.contains(otherId)) {
+            current.add(otherId);
+        }
+        entityData.set(DATA_CONNECTIONS, joinIds(current));
+    }
+
+    private void removeConnectionId(UUID otherId) {
+        List<UUID> current = new ArrayList<>(getConnectionIds());
+        current.remove(otherId);
+        entityData.set(DATA_CONNECTIONS, joinIds(current));
+    }
+
+    private static String joinIds(List<UUID> ids) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) {
+                builder.append(',');
+            }
+            builder.append(ids.get(i));
+        }
+        return builder.toString();
+    }
+
+    public boolean isConnected() {
+        return !getConnectionIds().isEmpty();
     }
 
     public UUID getTunnelId() {
         return tunnelId;
     }
 
-    /** Pairs two still-unpaired stakes together and spawns their connecting marker trail. {@code a} is treated as whichever one was placed/anchored first -- its own {@link #tunnelId} becomes the pairing's shared one, overwriting {@code b}'s. Callers must check {@link #hasPartner()} on both first. */
-    public static void pair(TunnelStakeEntity a, TunnelStakeEntity b) {
-        b.tunnelId = a.tunnelId;
-        a.entityData.set(DATA_PARTNER_ID, b.getUUID().toString());
-        b.entityData.set(DATA_PARTNER_ID, a.getUUID().toString());
-        if (a.level() instanceof ServerLevel serverLevel) {
-            TunnelConnectionMarkerEntity.spawnTrail(serverLevel, a, b, a.tunnelId);
+    /** Joins {@code newcomer} into {@code existing}'s group (adopting {@code existing}'s own {@link
+     *  #tunnelId}) and spawns the connecting marker trail for this one new edge. Unlike the
+     *  original pair-only version, {@code existing} may already have any number of other
+     *  connections -- joining never removes or replaces them. */
+    public static void join(TunnelStakeEntity existing, TunnelStakeEntity newcomer) {
+        newcomer.tunnelId = existing.tunnelId;
+        existing.addConnectionId(newcomer.getUUID());
+        newcomer.addConnectionId(existing.getUUID());
+        if (existing.level() instanceof ServerLevel serverLevel) {
+            TunnelConnectionMarkerEntity.spawnTrail(serverLevel, existing, newcomer, existing.tunnelId);
         }
     }
 
-    /** Breaks this stake's own pairing (if any), discarding the marker trail and clearing the partner's own pointer -- used by Remove before the stake itself is discarded. Both stakes get a fresh, independent {@link #tunnelId} afterward, so a later re-pairing never silently inherits a now-broken pairing's old identity. */
-    private void unpair() {
-        UUID partnerId = getPartnerId();
-        if (partnerId != null && level() instanceof ServerLevel serverLevel) {
-            TunnelConnectionMarkerEntity.removeTrail(serverLevel, blockPosition(), tunnelId);
-            if (serverLevel.getEntity(partnerId) instanceof TunnelStakeEntity partner) {
-                partner.entityData.set(DATA_PARTNER_ID, "");
-                partner.tunnelId = UUID.randomUUID();
+    /** Breaks every one of this stake's own edges, discarding each edge's marker trail and
+     *  updating the other side's own connection list -- used by Remove before the stake itself is
+     *  discarded. Any other stake left with zero connections afterward gets a fresh, independent
+     *  {@link #tunnelId} too (it's now solo again); a stake that still has other connections keeps
+     *  its current {@code tunnelId} unchanged -- the rest of the group's identity doesn't depend on
+     *  this one stake. */
+    private void unlinkAll() {
+        if (!(level() instanceof ServerLevel serverLevel)) {
+            entityData.set(DATA_CONNECTIONS, "");
+            tunnelId = UUID.randomUUID();
+            return;
+        }
+        for (UUID otherId : List.copyOf(getConnectionIds())) {
+            TunnelConnectionMarkerEntity.removeTrail(serverLevel, blockPosition(), tunnelId, getUUID(), otherId);
+            if (serverLevel.getEntity(otherId) instanceof TunnelStakeEntity other) {
+                other.removeConnectionId(getUUID());
+                if (!other.isConnected()) {
+                    other.tunnelId = UUID.randomUUID();
+                }
             }
         }
-        entityData.set(DATA_PARTNER_ID, "");
+        entityData.set(DATA_CONNECTIONS, "");
         tunnelId = UUID.randomUUID();
     }
 
@@ -143,6 +197,15 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
                 core.getX() - SEARCH_RADIUS_BLOCKS, level.getMinY(), core.getZ() - SEARCH_RADIUS_BLOCKS,
                 core.getX() + SEARCH_RADIUS_BLOCKS, level.getMaxY(), core.getZ() + SEARCH_RADIUS_BLOCKS);
         return level.getEntities(ModEntities.TUNNEL_STAKE.get(), searchBox, stake -> coreId.equals(stake.getOwnerCoreId()));
+    }
+
+    /** Every stake sharing this one's current {@link #tunnelId}, including itself -- i.e. this
+     *  stake's whole Tunnel group, regardless of its connection graph's exact shape. */
+    public List<TunnelStakeEntity> groupMembers() {
+        if (!(level() instanceof ServerLevel serverLevel) || ownerCoreId == null) {
+            return List.of(this);
+        }
+        return findByOwnerCore(serverLevel, ownerCoreId).stream().filter(s -> tunnelId.equals(s.getTunnelId())).toList();
     }
 
     private GhostTownHallCoreEntity findOwnerCore() {
@@ -180,23 +243,21 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
                 player.sendSystemMessage(Component.literal("This Tunnel Stake belongs to a different settlement."));
                 return InteractionResult.SUCCESS;
             }
-            if (hasPartner()) {
-                player.sendSystemMessage(Component.literal("This Tunnel Stake is already paired."));
-                return InteractionResult.SUCCESS;
-            }
             TunnelStakeEntity anchor = TunnelStakeLeash.resolveGhostAnchor(serverLevel, player.getUUID());
             if (anchor == null || anchor == this) {
                 TunnelStakeLeash.setGhostAnchor(serverPlayer, this);
                 player.sendSystemMessage(Component.literal(
-                        "Anchored -- place or right-click a second Tunnel Stake to pair it with this one."));
+                        "Anchored -- place or right-click another Tunnel Stake to join it to this one."));
                 return InteractionResult.SUCCESS;
             }
-            pair(anchor, this);
-            // Unlike Roadway Stakes' open chain, a pair is always exactly 2 -- nothing left to extend,
-            // so the anchor is cleared immediately instead of moving to this stake.
-            TunnelStakeLeash.clearGhostAnchor(player.getUUID());
+            join(anchor, this);
+            // Unlike a Plot Fence Post chain, the anchor advances to the stake just joined --
+            // mirrors roadway.RoadwayStakeItem's own open-chain shape, so a Mayor can keep
+            // right-clicking/placing further stakes to grow the same group past 2.
+            TunnelStakeLeash.setGhostAnchor(serverPlayer, this);
             player.sendSystemMessage(Component.literal(
-                    "Paired -- right-click either stake (without a Tunnel Stake in hand) to finalize it into a real Tunnel, or to remove it."));
+                    "Joined -- place or right-click another stake to add it to this group too, "
+                            + "or right-click any stake in the group (without a Tunnel Stake in hand) to finalize it into a real Tunnel, or to remove it."));
             return InteractionResult.SUCCESS;
         }
 
@@ -207,7 +268,7 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
             player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
             return InteractionResult.SUCCESS;
         }
-        PacketDistributor.sendToPlayer(serverPlayer, new OpenTunnelStakeScreenPayload(getId(), hasPartner()));
+        PacketDistributor.sendToPlayer(serverPlayer, new OpenTunnelStakeScreenPayload(getId(), isConnected()));
         return InteractionResult.SUCCESS;
     }
 
@@ -216,15 +277,15 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
         return Component.literal("Tunnel Stake");
     }
 
-    /** Snaps this stake's own pairing (if any) and discards it -- no item handed back, same reasoning as every other ghost stake in this mod. */
+    /** Unlinks every edge this stake has and discards it -- no item handed back, same reasoning as every other ghost stake in this mod. */
     public void remove() {
-        unpair();
+        unlinkAll();
         discard();
     }
 
-    /** Discards THIS stake only, after its own pairing has already been handled by the caller (see {@code TunnelFinalizer}) -- used so Finalize can clear both stakes' pairing/markers exactly once before discarding each. */
+    /** Discards THIS stake only, after its own edges have already been handed by the caller (see {@code TunnelFinalizer}) -- used so Finalize can clear every stake's edges exactly once before discarding each. */
     void discardAfterFinalize() {
-        entityData.set(DATA_PARTNER_ID, "");
+        entityData.set(DATA_CONNECTIONS, "");
         discard();
     }
 
@@ -232,7 +293,13 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
     protected void readAdditionalSaveData(ValueInput input) {
         super.readAdditionalSaveData(input);
         ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
-        entityData.set(DATA_PARTNER_ID, input.getStringOr("PartnerId", ""));
+        String connections = input.getStringOr("Connections", "");
+        if (connections.isEmpty()) {
+            // Pre-generalization save (a single PartnerId) -- migrate it into the new list field.
+            String legacyPartner = input.getStringOr("PartnerId", "");
+            connections = legacyPartner;
+        }
+        entityData.set(DATA_CONNECTIONS, connections);
         tunnelId = input.read("TunnelId", UUIDUtil.CODEC).orElse(UUID.randomUUID());
     }
 
@@ -240,7 +307,7 @@ public class TunnelStakeEntity extends Display.BlockDisplay {
     protected void addAdditionalSaveData(ValueOutput output) {
         super.addAdditionalSaveData(output);
         output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
-        output.putString("PartnerId", entityData.get(DATA_PARTNER_ID));
+        output.putString("Connections", entityData.get(DATA_CONNECTIONS));
         output.storeNullable("TunnelId", UUIDUtil.CODEC, tunnelId);
     }
 }

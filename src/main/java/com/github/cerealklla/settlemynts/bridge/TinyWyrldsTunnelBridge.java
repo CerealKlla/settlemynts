@@ -1,5 +1,7 @@
 package com.github.cerealklla.settlemynts.bridge;
 
+import java.util.List;
+
 import com.github.cerealklla.tinywyrlds.api.TinyWyrlds;
 import com.github.cerealklla.tinywyrlds.instance.WyrldLifecycle;
 
@@ -19,6 +21,11 @@ public final class TinyWyrldsTunnelBridge {
     private TinyWyrldsTunnelBridge() {
     }
 
+    /** One real-world door to place as part of a Tunnel group -- this mod's own mirror of {@code
+     *  api.TinyWyrlds.TunnelDoorSpec}, so no TinyWyrlds type ever leaks out of this bridge. */
+    public record DoorPlacement(ServerLevel level, BlockPos pos, Direction facing) {
+    }
+
     public static boolean isLoaded() {
         return ModList.get().isLoaded("tinywyrlds");
     }
@@ -28,10 +35,14 @@ public final class TinyWyrldsTunnelBridge {
         TinyWyrlds.ensureTunnelRecipeExists(recipeName, roomCount);
     }
 
-    /** See {@code api.TinyWyrlds#createTunnelDoorPair}. Always {@code PUBLIC} here -- explicit
-     *  user spec: "a town placing stakes might always be no loot, no mobs, public." */
-    public static void placePublicTunnelDoorPair(ServerLevel levelA, BlockPos posA, Direction facingA,
-                                                   ServerLevel levelB, BlockPos posB, Direction facingB, String recipeName) {
-        TinyWyrlds.createTunnelDoorPair(levelA, posA, facingA, levelB, posB, facingB, recipeName, WyrldLifecycle.PUBLIC);
+    /** See {@code api.TinyWyrlds#createTunnelDoorGroup}. Always {@code PUBLIC} here -- explicit
+     *  user spec: "a town placing stakes might always be no loot, no mobs, public." Widened from a
+     *  fixed two-door pair to an arbitrary-length {@code doors} list, 2026-11-12, matching the
+     *  TinyWyrlds-side generalization -- requires at least 2 doors. */
+    public static void placePublicTunnelDoorGroup(List<DoorPlacement> doors, String recipeName) {
+        List<TinyWyrlds.TunnelDoorSpec> specs = doors.stream()
+                .map(d -> new TinyWyrlds.TunnelDoorSpec(d.level(), d.pos(), d.facing()))
+                .toList();
+        TinyWyrlds.createTunnelDoorGroup(specs, recipeName, WyrldLifecycle.PUBLIC);
     }
 }

@@ -3502,13 +3502,13 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
             return;
         }
-        UUID partnerId = stake.getPartnerId();
-        if (partnerId == null || !(serverLevel.getEntity(partnerId) instanceof com.github.cerealklla.settlemynts.tunnel.TunnelStakeEntity partner)) {
-            player.sendSystemMessage(Component.literal("This Tunnel Stake isn't paired with another one anymore."));
+        java.util.List<com.github.cerealklla.settlemynts.tunnel.TunnelStakeEntity> group = stake.groupMembers();
+        if (group.size() < 2) {
+            player.sendSystemMessage(Component.literal("This Tunnel Stake isn't joined with another one anymore."));
             return;
         }
-        com.github.cerealklla.settlemynts.tunnel.TunnelFinalizer.finalizePair(stake, partner);
-        player.sendSystemMessage(Component.literal("Tunnel finalized -- both trapdoors are now live."));
+        com.github.cerealklla.settlemynts.tunnel.TunnelFinalizer.finalizeGroup(group);
+        player.sendSystemMessage(Component.literal("Tunnel finalized -- " + group.size() + " trapdoors are now live."));
     }
 
     /** "Remove" on {@code client.TunnelStakeScreen}. */

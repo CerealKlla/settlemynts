@@ -18,11 +18,13 @@ import net.minecraft.world.level.Level;
 
 /**
  * "Tunnel Stakes" -- the Mayor/Town-Planner placement tool for an in-settlement Tunnel shortcut.
- * Placing while anchored to a still-unpaired stake pairs the two immediately (see {@code
- * TunnelStakeEntity#pair}); placing on bare ground with no anchor just starts a fresh, unpaired
- * stake and becomes the new anchor -- same shape as {@code roadway.RoadwayStakeItem#useOn}, minus
- * the paving/slope/plot-crossing checks that mechanic needs and this one doesn't (a Tunnel Stake
- * pair never touches real terrain).
+ * Placing while anchored to an existing stake joins the two immediately (see {@code
+ * TunnelStakeEntity#join}) and the anchor advances to the new stake, so further placements keep
+ * extending the same group past 2 (widened 2026-11-12 from the original pair-only shape, per
+ * explicit user spec -- see {@code TunnelStakeEntity}'s own doc); placing on bare ground with no
+ * anchor just starts a fresh, unjoined stake and becomes the new anchor -- same open-chain shape as
+ * {@code roadway.RoadwayStakeItem#useOn}, minus the paving/slope/plot-crossing checks that
+ * mechanic needs and this one doesn't (a Tunnel group never touches real terrain).
  *
  * <p>Not consumed on placement, same reasoning as every other stake item in this mod.
  */
@@ -59,15 +61,17 @@ public class TunnelStakeItem extends Item {
 
         TunnelStakeEntity newStake = TunnelStakeEntity.create(serverLevel, placePos.getX(), placePos.getY(), placePos.getZ(), ownerCoreId);
         if (anchor != null) {
-            TunnelStakeEntity.pair(anchor, newStake);
-            // Unlike Roadway Stakes' open chain, a pair is always exactly 2 -- nothing left to extend.
-            TunnelStakeLeash.clearGhostAnchor(player.getUUID());
+            TunnelStakeEntity.join(anchor, newStake);
+            // Anchor advances to the new stake -- mirrors roadway.RoadwayStakeItem's own open-chain
+            // shape, so placing keeps extending the same group past 2.
+            TunnelStakeLeash.setGhostAnchor(serverPlayer, newStake);
             player.sendSystemMessage(Component.literal(
-                    "Paired -- right-click either stake (without a Tunnel Stake in hand) to finalize it into a real Tunnel, or to remove it."));
+                    "Joined -- place or right-click another stake to add it to this group too, "
+                            + "or right-click any stake in the group (without a Tunnel Stake in hand) to finalize it into a real Tunnel, or to remove it."));
         } else {
             TunnelStakeLeash.setGhostAnchor(serverPlayer, newStake);
             player.sendSystemMessage(Component.literal(
-                    "Anchored -- place or right-click a second Tunnel Stake to pair it with this one."));
+                    "Anchored -- place or right-click another Tunnel Stake to join it to this one."));
         }
         return InteractionResult.SUCCESS_SERVER;
     }

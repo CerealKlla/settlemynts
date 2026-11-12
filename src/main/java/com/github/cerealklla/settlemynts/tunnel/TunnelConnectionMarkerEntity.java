@@ -30,8 +30,15 @@ import net.minecraft.world.phys.AABB;
  * can legitimately be far apart) and NOT {@code roadway.RoadwayConnectionMarkerEntity} reused
  * directly either -- that one is a {@code Pingable} with traveler-buff/tool-lighting machinery this
  * mechanic has no use for. Visible only to the owning settlement's Town Planners, same rule as the
- * stakes themselves; discarded outright the moment its pairing breaks (Remove or Finalize), never
- * regenerated/recomputed otherwise.
+ * stakes themselves; discarded outright the moment the specific edge it belongs to breaks (Remove
+ * or Finalize), never regenerated/recomputed otherwise.
+ *
+ * <p>Each marker also remembers the two stake UUIDs its own edge connects ({@code endpointA}/
+ * {@code endpointB}), added 2026-11-12 alongside Tunnel Stakes' pair -> N-way-group rework -- a
+ * group can now have more than one edge sharing the same {@code tunnelId} (a chain/star of 3+
+ * stakes), so {@link #removeTrail} has to target one specific edge's own markers rather than
+ * wiping every marker in the whole group, the way it safely could when a group was always exactly
+ * one edge.
  */
 public class TunnelConnectionMarkerEntity extends Display.BlockDisplay {
 
@@ -40,16 +47,21 @@ public class TunnelConnectionMarkerEntity extends Display.BlockDisplay {
 
     private UUID ownerCoreId;
     private UUID tunnelId;
+    private UUID endpointA;
+    private UUID endpointB;
 
     public TunnelConnectionMarkerEntity(EntityType<? extends TunnelConnectionMarkerEntity> type, Level level) {
         super(type, level);
     }
 
-    private static TunnelConnectionMarkerEntity create(ServerLevel level, int x, int y, int z, UUID ownerCoreId, UUID tunnelId) {
+    private static TunnelConnectionMarkerEntity create(ServerLevel level, int x, int y, int z, UUID ownerCoreId,
+                                                          UUID tunnelId, UUID endpointA, UUID endpointB) {
         TunnelConnectionMarkerEntity marker = new TunnelConnectionMarkerEntity(ModEntities.TUNNEL_CONNECTION_MARKER.get(), level);
         marker.setPos(x, y, z);
         marker.ownerCoreId = ownerCoreId;
         marker.tunnelId = tunnelId;
+        marker.endpointA = endpointA;
+        marker.endpointB = endpointB;
         marker.setInvulnerable(true);
         GhostBlockDisplays.setBlockState(marker, Blocks.SOUL_TORCH.defaultBlockState());
         level.addFreshEntity(marker);
@@ -67,7 +79,7 @@ public class TunnelConnectionMarkerEntity extends Display.BlockDisplay {
         for (int i = 0; i < line.size(); i += MARKER_SPACING_BLOCKS) {
             Geometry.Polygon.Vertex cell = line.get(i);
             int markerY = GroundHeightFinder.findNear(level, cell.x(), cell.z(), referenceY);
-            create(level, cell.x(), markerY, cell.z(), a.getOwnerCoreId(), tunnelId);
+            create(level, cell.x(), markerY, cell.z(), a.getOwnerCoreId(), tunnelId, a.getUUID(), b.getUUID());
         }
     }
 
@@ -77,22 +89,30 @@ public class TunnelConnectionMarkerEntity extends Display.BlockDisplay {
      * EntitySectionStorage}'s internal packed-long chunk-section range query can't handle --
      * confirmed via the real server log stack trace ({@code IllegalArgumentException: Start element
      * ... is larger than end element ...} from {@code LongAVLTreeSet$Subset}), not assumed. Thrown
-     * from inside {@link TunnelFinalizer#finalizePair}, right after both real doors were already
-     * placed but before either stake's own {@code discardAfterFinalize()} ran -- so Finalize left
-     * two fully-working doors behind while leaving both stakes and the whole marker trail in place
-     * forever. Same bounded-search convention every other stake type in this mod already uses
-     * correctly (see {@code roadway.RoadwayConnectionMarkerEntity#findByOwnerCore}) -- centered on
-     * {@code near} (whichever stake position the caller already has on hand) with this class's own
-     * existing {@link #SEARCH_RADIUS_BLOCKS}, generous enough for any real in-settlement Tunnel.
+     * from inside {@code TunnelFinalizer#finalizeGroup}, right after every real door was already
+     * placed but before any stake's own {@code discardAfterFinalize()} ran -- so Finalize left
+     * fully-working doors behind while leaving stakes and the whole marker trail in place forever.
+     * Same bounded-search convention every other stake type in this mod already uses correctly (see
+     * {@code roadway.RoadwayConnectionMarkerEntity#findByOwnerCore}) -- centered on {@code near}
+     * (whichever stake position the caller already has on hand) with this class's own existing
+     * {@link #SEARCH_RADIUS_BLOCKS}, generous enough for any real in-settlement Tunnel.
+     *
+     * <p>Only removes the one edge between {@code stakeA}/{@code stakeB} (order doesn't matter) --
+     * see this class's own doc for why a blanket {@code tunnelId}-only wipe is no longer correct
+     * once a group can have more than one edge.
      */
-    static void removeTrail(ServerLevel level, BlockPos near, UUID tunnelId) {
+    static void removeTrail(ServerLevel level, BlockPos near, UUID tunnelId, UUID stakeA, UUID stakeB) {
         AABB searchBox = new AABB(
                 near.getX() - SEARCH_RADIUS_BLOCKS, level.getMinY(), near.getZ() - SEARCH_RADIUS_BLOCKS,
                 near.getX() + SEARCH_RADIUS_BLOCKS, level.getMaxY(), near.getZ() + SEARCH_RADIUS_BLOCKS);
         for (TunnelConnectionMarkerEntity marker : level.getEntities(ModEntities.TUNNEL_CONNECTION_MARKER.get(),
-                searchBox, m -> tunnelId.equals(m.tunnelId))) {
+                searchBox, m -> tunnelId.equals(m.tunnelId) && m.isEdge(stakeA, stakeB))) {
             marker.discard();
         }
+    }
+
+    private boolean isEdge(UUID stakeA, UUID stakeB) {
+        return (stakeA.equals(endpointA) && stakeB.equals(endpointB)) || (stakeA.equals(endpointB) && stakeB.equals(endpointA));
     }
 
     private GhostTownHallCoreEntity findOwnerCore() {
@@ -123,6 +143,8 @@ public class TunnelConnectionMarkerEntity extends Display.BlockDisplay {
         super.readAdditionalSaveData(input);
         ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
         tunnelId = input.read("TunnelId", UUIDUtil.CODEC).orElse(null);
+        endpointA = input.read("EndpointA", UUIDUtil.CODEC).orElse(null);
+        endpointB = input.read("EndpointB", UUIDUtil.CODEC).orElse(null);
     }
 
     @Override
@@ -130,5 +152,7 @@ public class TunnelConnectionMarkerEntity extends Display.BlockDisplay {
         super.addAdditionalSaveData(output);
         output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
         output.storeNullable("TunnelId", UUIDUtil.CODEC, tunnelId);
+        output.storeNullable("EndpointA", UUIDUtil.CODEC, endpointA);
+        output.storeNullable("EndpointB", UUIDUtil.CODEC, endpointB);
     }
 }
