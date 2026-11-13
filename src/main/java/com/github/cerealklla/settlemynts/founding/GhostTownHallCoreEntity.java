@@ -18,6 +18,8 @@ import com.github.cerealklla.settlemynts.zone.RequiredTags;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.resources.Identifier;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -65,6 +67,16 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
     // with findTownHallPlot below, added 2026-09-30 for "Reposition Town Hall Core" -- a single named
     // constant instead of two independent copies of the same string.
     public static final Identifier TOWN_HALL_ZONE_TYPE_ID = Identifier.fromNamespaceAndPath(SettlemyntsMod.MODID, "town_hall");
+
+    // Capital City (backlog item 9, added 2026-11-13) -- set once at creation (founding.CapitalCityFlagItem
+    // vs. the plain SettlementClaimFlagItem, same class parameterized by a constructor-time flag, see
+    // SettlementClaimFlagItem's own doc), never changed afterward. Real synced data (not just a plain
+    // persisted field) -- unlike every other field on this class, this one genuinely needs to be
+    // client-visible: zone.client.PlotValidityOverlay runs entirely client-side and needs to know
+    // whether a plot's owning settlement requires the 50x50 (Large) minimum instead of 15x15 (Small)
+    // to show the correct live warning text, with no server round-trip.
+    private static final EntityDataAccessor<Boolean> DATA_CAPITAL_CITY =
+            SynchedEntityData.defineId(GhostTownHallCoreEntity.class, EntityDataSerializers.BOOLEAN);
 
     private UUID founderId;
     private String settlementName = "";
@@ -145,14 +157,24 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
     }
 
     public static GhostTownHallCoreEntity create(ServerLevel level, double x, double y, double z, UUID founderId) {
+        return create(level, x, y, z, founderId, false);
+    }
+
+    /** @param capitalCity see {@link #DATA_CAPITAL_CITY}'s own field doc -- backlog item 9, {@code founding.SettlementClaimFlagItem}'s Capital City Flag variant. */
+    public static GhostTownHallCoreEntity create(ServerLevel level, double x, double y, double z, UUID founderId, boolean capitalCity) {
         GhostTownHallCoreEntity core = new GhostTownHallCoreEntity(ModEntities.GHOST_TOWN_HALL_CORE.get(), level);
         core.setPos(x, y, z);
         core.founderId = founderId;
         core.townPlanners.add(founderId); // The founder is always a Town Planner (design doc Section 6).
+        core.entityData.set(DATA_CAPITAL_CITY, capitalCity);
         level.addFreshEntity(core);
         core.spawnBellMarker(level);
         SettlementCoreIndex.get(level.getServer()).put(core.getUUID(), net.minecraft.core.GlobalPos.of(level.dimension(), core.blockPosition()));
         return core;
+    }
+
+    public boolean isCapitalCity() {
+        return entityData.get(DATA_CAPITAL_CITY);
     }
 
     /**
@@ -468,8 +490,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
 
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
-        // No synced data needed -- visibility is entirely server-side (broadcastToPlayer), and
-        // nothing about this entity's appearance depends on client-visible state yet.
+        builder.define(DATA_CAPITAL_CITY, false);
     }
 
     @Override
@@ -490,6 +511,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         requiredTags.addAll(input.read("RequiredTags", Codec.STRING.listOf()).orElse(List.of()));
         settlementColor = input.read("SettlementColor", DyeColor.CODEC).orElse(null);
         settlementBannerPatterns = input.read("SettlementBannerPatterns", BannerPatternLayers.CODEC).orElse(BannerPatternLayers.EMPTY);
+        entityData.set(DATA_CAPITAL_CITY, input.getBooleanOr("CapitalCity", false));
         plots.clear();
         plots.addAll(input.read("Plots", Codec.list(PlotRecord.CODEC)).orElse(List.of()));
     }
@@ -510,6 +532,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         output.store("RequiredTags", Codec.STRING.listOf(), List.copyOf(requiredTags));
         output.storeNullable("SettlementColor", DyeColor.CODEC, settlementColor);
         output.store("SettlementBannerPatterns", BannerPatternLayers.CODEC, settlementBannerPatterns);
+        output.putBoolean("CapitalCity", isCapitalCity());
         output.store("Plots", Codec.list(PlotRecord.CODEC), List.copyOf(plots));
     }
 }

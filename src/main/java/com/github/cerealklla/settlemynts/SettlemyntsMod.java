@@ -3614,14 +3614,18 @@ public class SettlemyntsMod {
         }
         Geometry.Polygon plotPolygon = PlotGeometry.polygonFromStakes(ordered);
 
-        // Hard-blocked, not just a warning -- a plot that can never fit a 15x15 Blueprynts
-        // Construction Site can never receive the auto-placed Construction Box below, so there's no
-        // valid state for it to finalize into. The live actionbar warning (see
-        // sendPlotValidityFeedback, called on every stake add/remove) is meant to mean a Planner
+        // Hard-blocked, not just a warning -- a plot that can never fit a 15x15 (or, inside a
+        // Capital City, 50x50 -- backlog item 9, added 2026-11-13: "uses the Large plot size
+        // minimums") Blueprynts Construction Site can never receive the auto-placed Construction Box
+        // below, so there's no valid state for it to finalize into. The live HUD warning
+        // (zone.client.PlotValidityOverlay) mirrors this same Capital-City-aware check so a Planner
         // never has to discover this by walking over and trying anyway.
-        if (!PlotValidity.hasValidArea(plotPolygon)) {
+        boolean largePlotsRequired = core.isCapitalCity();
+        boolean hasEnoughArea = largePlotsRequired ? PlotValidity.hasLargeArea(plotPolygon) : PlotValidity.hasValidArea(plotPolygon);
+        if (!hasEnoughArea) {
+            int requiredSize = largePlotsRequired ? PlotValidity.LARGE_SIZE : PlotValidity.SMALL_SIZE;
             player.sendSystemMessage(Component.literal(
-                    "This plot doesn't have a clear 15x15 area anywhere inside it yet -- add or adjust stakes before finalizing."));
+                    "This plot doesn't have a clear " + requiredSize + "x" + requiredSize + " area anywhere inside it yet -- add or adjust stakes before finalizing."));
             return;
         }
 
@@ -4079,8 +4083,15 @@ public class SettlemyntsMod {
             return;
         }
 
+        // Capital City (backlog item 9, added 2026-11-13): "twice the area of a normal Settlement."
+        // DEFAULT_MAX_FIT_RADIUS_BLOCKS (2000) is already a deliberately generous "essentially never
+        // binds" search bound (see its own doc) that was never tied to the placement radius in the
+        // first place, so doubling the target area needs no change there -- the fit already scales
+        // every non-absolute stake outward from wherever it was actually placed, same as it always
+        // has, just converging on a bigger target.
+        double targetArea = core.isCapitalCity() ? PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS * 2 : PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS;
         PerimeterFit.FitResult result = PerimeterFit.fit(
-                coreCornerX, coreCornerZ, inputs, PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS, PerimeterFit.DEFAULT_MAX_FIT_RADIUS_BLOCKS);
+                coreCornerX, coreCornerZ, inputs, targetArea, PerimeterFit.DEFAULT_MAX_FIT_RADIUS_BLOCKS);
 
         for (int i = 0; i < stakes.size(); i++) {
             PerimeterFit.StakeInput fitted = result.fittedStakes().get(i);
@@ -4106,7 +4117,7 @@ public class SettlemyntsMod {
 
         player.sendSystemMessage(Component.literal(
                 "Perimeter fitted to " + Math.round(result.achievedArea()) + " blocks^2 (target "
-                        + Math.round(PerimeterFit.DEFAULT_TARGET_AREA_BLOCKS) + "). Registered with Cartographyr"
+                        + Math.round(targetArea) + "). Registered with Cartographyr"
                         + (stakesCleared > 0 ? " -- cleared " + stakesCleared + " leftover Perimeter Stake item(s)." : ".")
                         + " Solidifying the core/stakes and enabling protection isn't implemented yet."));
     }

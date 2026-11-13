@@ -42,11 +42,33 @@ import net.minecraft.world.level.Level;
  * persistent regardless of chunk-load state, so registering here (not just at finalization)
  * closes that gap entirely -- {@code SettlemyntsMod#registerWithCartographyr} then updates this
  * same entity in place at finalization rather than creating a duplicate.
+ *
+ * <p><b>Capital City Flag (backlog item 9, added 2026-11-13)</b> -- registered as a second item
+ * from this exact same class ({@code capitalCity = true}, see {@code registration.ModItems}), made
+ * by combining 9 Settlement Claim Flags (see {@code data/settlemynts/recipe/capital_city_flag.json}).
+ * Founding/distance-check/construction-site-clearing behavior is otherwise identical -- the only
+ * real difference is the {@code capitalCity} flag passed through to {@code
+ * GhostTownHallCoreEntity#create}, which doubles the settlement's own perimeter-fit target area
+ * ({@code SettlemyntsMod#finalizeSettlement}) and switches its plots' minimum-buildable-area
+ * requirement from 15x15 to 50x50 (Large) at Finalize (see {@code
+ * com.github.cerealklla.cartographyr.geo.PlotValidity#hasLargeArea}'s own existing,
+ * previously-unused-for-this check).
  */
 public class SettlementClaimFlagItem extends Item {
 
+    // Capital City Flag (backlog item 9, added 2026-11-13) -- same class, parameterized by a
+    // constructor-time flag rather than a duplicated sibling class, since the only real difference
+    // is which boolean GhostTownHallCoreEntity.create ends up getting -- see registration.ModItems
+    // for both registrations.
+    private final boolean capitalCity;
+
     public SettlementClaimFlagItem(Properties properties) {
+        this(properties, false);
+    }
+
+    public SettlementClaimFlagItem(Properties properties, boolean capitalCity) {
         super(properties);
+        this.capitalCity = capitalCity;
     }
 
     @Override
@@ -78,7 +100,7 @@ public class SettlementClaimFlagItem extends Item {
 
         SettlementFounding.clearConstructionSite(serverLevel, sitePos);
         GhostTownHallCoreEntity core = GhostTownHallCoreEntity.create(
-                serverLevel, sitePos.getX() + 0.5, sitePos.getY(), sitePos.getZ() + 0.5, player.getUUID());
+                serverLevel, sitePos.getX() + 0.5, sitePos.getY(), sitePos.getZ() + 0.5, player.getUUID(), capitalCity);
 
         GeographicEntity registered = Cartography.createEntity(serverLevel, new EntityDefinition(
                 serverLevel.dimension(),

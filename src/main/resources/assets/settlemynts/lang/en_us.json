@@ -1,6 +1,7 @@
 {
   "effect.settlemynts.traveler": "Traveler",
   "item.settlemynts.settlement_claim_flag": "Settlement Claim Flag",
+  "item.settlemynts.capital_city_flag": "Capital City Flag",
   "item.settlemynts.planned_perimeter_stake": "Planned Perimeter Stake",
   "item.settlemynts.plot_placement_stake": "Plot Stakes",
   "item.settlemynts.road_access_flag": "Road Access Flag",

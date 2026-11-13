@@ -57,7 +57,8 @@ import net.neoforged.neoforge.network.PacketDistributor;
  * consumer first needed these fields ({@code zone.client.PlotValidityOverlay}'s live validity
  * check) -- every stake read back {@code null}/{@code 0} client-side, so the overlay always saw zero
  * matching stakes and never showed "valid" no matter how the plot was actually shaped. {@code
- * ownerCoreId} stays a plain, unsynced field -- nothing client-side needs it yet.
+ * ownerCoreId} is now synced too (backlog item 9, added 2026-11-13) -- see {@code
+ * DATA_OWNER_CORE_ID}'s own doc for why "nothing client-side needs it yet" stopped being true.
  *
  * <p><b>{@code plotSessionId} syncs as a plain {@code String}, not a custom {@code
  * Optional<UUID>} serializer (corrected same day)</b> -- a first attempt built a custom {@code
@@ -90,8 +91,14 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay implements Leasha
             SynchedEntityData.defineId(GhostPlotStakeEntity.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<String> DATA_LINK_B =
             SynchedEntityData.defineId(GhostPlotStakeEntity.class, EntityDataSerializers.STRING);
+    // Now synced too (backlog item 9, added 2026-11-13) -- client.PlotValidityOverlay needs to
+    // resolve this stake's owning settlement core to know whether it's a Capital City (and so
+    // requires the Large/50x50 minimum instead of Small/15x15); this class's own doc previously
+    // noted "nothing client-side needs it yet," which is no longer true. Same stringified-UUID
+    // technique as DATA_PLOT_SESSION_ID, for the identical reason (see this class's own doc).
+    private static final EntityDataAccessor<String> DATA_OWNER_CORE_ID =
+            SynchedEntityData.defineId(GhostPlotStakeEntity.class, EntityDataSerializers.STRING);
 
-    private UUID ownerCoreId;
     private LeashData leashData;
 
     public GhostPlotStakeEntity(EntityType<? extends GhostPlotStakeEntity> type, Level level) {
@@ -136,6 +143,7 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay implements Leasha
         builder.define(DATA_PLACEMENT_INDEX, 0);
         builder.define(DATA_LINK_A, "");
         builder.define(DATA_LINK_B, "");
+        builder.define(DATA_OWNER_CORE_ID, "");
     }
 
     /**
@@ -156,7 +164,7 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay implements Leasha
         // only the entity's own (always X/Z-centered) interaction hitbox is now correctly aligned to
         // it instead of covering just its near quarter.
         stake.setPos(x + 0.5, y, z + 0.5);
-        stake.ownerCoreId = ownerCoreId;
+        stake.entityData.set(DATA_OWNER_CORE_ID, ownerCoreId == null ? "" : ownerCoreId.toString());
         stake.entityData.set(DATA_PLOT_SESSION_ID, plotSessionId == null ? "" : plotSessionId.toString());
         stake.entityData.set(DATA_PLACEMENT_INDEX, placementIndex);
         // Rope Fence Post's own default state, not Blocks.LANTERN (2026-09-29 rework) -- ghost plot
@@ -168,7 +176,8 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay implements Leasha
     }
 
     public UUID getOwnerCoreId() {
-        return ownerCoreId;
+        String value = entityData.get(DATA_OWNER_CORE_ID);
+        return value.isEmpty() ? null : UUID.fromString(value);
     }
 
     public UUID getPlotSessionId() {
@@ -236,11 +245,18 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay implements Leasha
         return stakes;
     }
 
-    private GhostTownHallCoreEntity findOwnerCore() {
-        if (!(level() instanceof ServerLevel serverLevel) || ownerCoreId == null) {
+    /**
+     * Works on either side (loosened from a {@code ServerLevel}-only guard and from {@code private},
+     * backlog item 9, added 2026-11-13) -- {@code zone.client.PlotValidityOverlay} needs this too,
+     * now that {@link #getOwnerCoreId} is real client-side data (see this class's own doc). {@code
+     * null} if the owning core isn't currently loaded/tracked on whichever side is asking.
+     */
+    public GhostTownHallCoreEntity findOwnerCore() {
+        UUID ownerCoreId = getOwnerCoreId();
+        if (ownerCoreId == null) {
             return null;
         }
-        return serverLevel.getEntity(ownerCoreId) instanceof GhostTownHallCoreEntity core ? core : null;
+        return level().getEntity(ownerCoreId) instanceof GhostTownHallCoreEntity core ? core : null;
     }
 
     /** Visible only to the owning settlement's current Town Planners -- see class doc. */
@@ -309,17 +325,24 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay implements Leasha
             }
         }
 
+        UUID ownerCoreId = getOwnerCoreId();
         UUID plotSessionId = getPlotSessionId();
         List<GhostPlotStakeEntity> stakes = ownerCoreId != null && plotSessionId != null
                 ? findBySessionInPlacementOrder(serverLevel, ownerCoreId, plotSessionId)
                 : List.of();
+        GhostTownHallCoreEntity core = findOwnerCore();
         boolean valid = false;
         if (stakes.size() >= 3) {
             List<PlotGeometry.StakePoint> ordered = new ArrayList<>(stakes.size());
             for (GhostPlotStakeEntity s : stakes) {
                 ordered.add(new PlotGeometry.StakePoint(s.getX(), s.getZ()));
             }
-            valid = com.github.cerealklla.cartographyr.geo.PlotValidity.hasValidArea(PlotGeometry.polygonFromStakes(ordered));
+            // Capital City plots need the Large (50x50) minimum instead of Small (15x15) -- backlog
+            // item 9, added 2026-11-13, see SettlemyntsMod#finalizeSettlement's own identical check.
+            com.github.cerealklla.cartographyr.geo.Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(ordered);
+            valid = core != null && core.isCapitalCity()
+                    ? com.github.cerealklla.cartographyr.geo.PlotValidity.hasLargeArea(polygon)
+                    : com.github.cerealklla.cartographyr.geo.PlotValidity.hasValidArea(polygon);
         }
         boolean hasRoadAccessFlag = ownerCoreId != null && plotSessionId != null
                 && GhostRoadAccessFlagEntity.findBySession(serverLevel, ownerCoreId, plotSessionId) != null;
@@ -329,7 +352,6 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay implements Leasha
         // what this settlement can actually establish right now (Town Hall Tier + Mayor level, see
         // ZoneTypeUnlocks#isAllowed), so client.PlotStakeScreen never even offers an ineligible type.
         List<String> allowedZoneTypeIds = new ArrayList<>();
-        GhostTownHallCoreEntity core = findOwnerCore();
         if (core != null) {
             for (ZoneType type : ZoneTypeRegistry.all()) {
                 if (ZoneTypeUnlocks.isAllowed(serverLevel, core, type.id())) {
@@ -354,10 +376,11 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay implements Leasha
     @Override
     protected void readAdditionalSaveData(ValueInput input) {
         super.readAdditionalSaveData(input);
-        ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
         // Pushed into synched data too (not just the plain fields above) -- a world reload doesn't
         // re-run create(), so without this a reloaded stake would sync as session-less/index-0 to any
         // freshly-connecting client even though its NBT is fine. See class doc for the full bug.
+        UUID ownerCoreId = input.read("OwnerCoreId", UUIDUtil.CODEC).orElse(null);
+        entityData.set(DATA_OWNER_CORE_ID, ownerCoreId == null ? "" : ownerCoreId.toString());
         UUID plotSessionId = input.read("PlotSessionId", UUIDUtil.CODEC).orElse(null);
         entityData.set(DATA_PLOT_SESSION_ID, plotSessionId == null ? "" : plotSessionId.toString());
         entityData.set(DATA_PLACEMENT_INDEX, input.getIntOr("PlacementIndex", 0));
@@ -369,7 +392,7 @@ public class GhostPlotStakeEntity extends Display.BlockDisplay implements Leasha
     @Override
     protected void addAdditionalSaveData(ValueOutput output) {
         super.addAdditionalSaveData(output);
-        output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, ownerCoreId);
+        output.storeNullable("OwnerCoreId", UUIDUtil.CODEC, getOwnerCoreId());
         output.storeNullable("PlotSessionId", UUIDUtil.CODEC, getPlotSessionId());
         output.putInt("PlacementIndex", getPlacementIndex());
         output.putString("LinkA", entityData.get(DATA_LINK_A));

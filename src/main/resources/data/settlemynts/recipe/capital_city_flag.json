@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "settlemynts:settlement_claim_flag",
+    "settlemynts:settlement_claim_flag",
+    "settlemynts:settlement_claim_flag",
+    "settlemynts:settlement_claim_flag",
+    "settlemynts:settlement_claim_flag",
+    "settlemynts:settlement_claim_flag",
+    "settlemynts:settlement_claim_flag",
+    "settlemynts:settlement_claim_flag",
+    "settlemynts:settlement_claim_flag"
+  ],
+  "result": {
+    "id": "settlemynts:capital_city_flag"
+  }
+}

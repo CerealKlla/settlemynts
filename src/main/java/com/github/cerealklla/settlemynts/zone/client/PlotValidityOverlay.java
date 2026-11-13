@@ -67,13 +67,21 @@ public final class PlotValidityOverlay implements GuiLayer {
         }
         stakes.sort(Comparator.comparingInt(GhostPlotStakeEntity::getPlacementIndex));
 
+        // Capital City plots need the Large (50x50) minimum instead of Small (15x15) -- backlog
+        // item 9, added 2026-11-13, mirrors SettlemyntsMod#finalizeSettlement's own identical check
+        // (and GhostPlotStakeEntity's server-side screen-open validity flag) so this live HUD never
+        // disagrees with what Finalize will actually enforce.
+        com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity ownerCore =
+                stakes.isEmpty() ? null : stakes.get(0).findOwnerCore();
+        boolean largePlotsRequired = ownerCore != null && ownerCore.isCapitalCity();
         boolean validArea = false;
         if (stakes.size() >= 3) {
             List<PlotGeometry.StakePoint> ordered = new ArrayList<>(stakes.size());
             for (GhostPlotStakeEntity stake : stakes) {
                 ordered.add(new PlotGeometry.StakePoint(stake.getX(), stake.getZ()));
             }
-            validArea = PlotValidity.hasValidArea(PlotGeometry.polygonFromStakes(ordered));
+            com.github.cerealklla.cartographyr.geo.Geometry.Polygon polygon = PlotGeometry.polygonFromStakes(ordered);
+            validArea = largePlotsRequired ? PlotValidity.hasLargeArea(polygon) : PlotValidity.hasValidArea(polygon);
         }
 
         boolean hasRoadAccessFlag = false;
@@ -87,7 +95,10 @@ public final class PlotValidityOverlay implements GuiLayer {
         boolean valid = validArea && hasRoadAccessFlag;
         String text;
         if (!validArea) {
-            text = "⚠ No 15x15 buildable area yet";
+            int requiredSize = largePlotsRequired
+                    ? com.github.cerealklla.cartographyr.geo.PlotValidity.LARGE_SIZE
+                    : com.github.cerealklla.cartographyr.geo.PlotValidity.SMALL_SIZE;
+            text = "⚠ No " + requiredSize + "x" + requiredSize + " buildable area yet";
         } else if (!hasRoadAccessFlag) {
             text = "⚠ Place the Road Access Flag on the perimeter";
         } else {

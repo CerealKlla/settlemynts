@@ -39,6 +39,16 @@ public final class ModItems {
                     .setId(ResourceKey.create(Registries.ITEM, id))
                     .component(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true)));
 
+    // Capital City Flag (backlog item 9, added 2026-11-13) -- same item class as above, parameterized
+    // (see SettlementClaimFlagItem's own doc), crafted from 9 Settlement Claim Flags
+    // (data/settlemynts/recipe/capital_city_flag.json). Same glow/stacksTo(1) treatment.
+    public static final DeferredItem<SettlementClaimFlagItem> CAPITAL_CITY_FLAG = ITEMS.register(
+            "capital_city_flag",
+            id -> new SettlementClaimFlagItem(new Item.Properties()
+                    .stacksTo(1)
+                    .setId(ResourceKey.create(Registries.ITEM, id))
+                    .component(DataComponents.ENCHANTMENT_GLINT_OVERRIDE, true), true));
+
     // Design doc Section 6: obtained from a settlement's Ghost Town Hall Core, not crafted --
     // stacksTo(1) since each placement is a distinct, individually-manageable perimeter marker.
     public static final DeferredItem<PlannedPerimeterStakeItem> PLANNED_PERIMETER_STAKE = ITEMS.register(
