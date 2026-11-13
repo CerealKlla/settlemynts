@@ -23,10 +23,10 @@ import net.minecraft.world.level.block.entity.BannerPatternLayers;
 /**
  * A from-scratch banner pattern designer (backlog item 10, added 2026-11-13, explicit user
  * choice: a real custom UI replicating vanilla's Loom layering, rather than requiring a real
- * Loom/banner item to be brought to the Keep). Reusable for either banner field ({@code
- * CapitalCityKeepScreen}'s two "Design ... Banner..." buttons) -- {@code commitFactory}
- * constructs whichever payload actually writes the finished design back
- * ({@code SetCapitalCityBannerPayload}/{@code SetKingdomBannerPayload}).
+ * Loom/banner item to be brought to the Keep). Reusable for any of {@code
+ * ColorAndBannerScreen}'s "Design ... Banner..." buttons (Settlement, Capital City, or Kingdom --
+ * backlog items 10/11) -- {@code commitFactory} constructs whichever payload actually writes the
+ * finished design back ({@code SetSettlementBannerPayload}/{@code SetKingdomBannerPayload}).
  *
  * <p>The draft layer list lives purely client-side until "Save" -- same "client builds, server only
  * sees the final committed state" shape as every other free-form editor in this suite (no per-layer
@@ -41,7 +41,7 @@ import net.minecraft.world.level.block.entity.BannerPatternLayers;
  */
 public final class BannerDesignerScreen extends Screen {
 
-    /** Constructs whichever payload actually commits the finished design -- {@code SetCapitalCityBannerPayload::new}/{@code SetKingdomBannerPayload::new}. */
+    /** Constructs whichever payload actually commits the finished design -- {@code SetSettlementBannerPayload::new}/{@code SetKingdomBannerPayload::new}. */
     public interface CommitFactory {
         CustomPacketPayload create(int coreEntityId, BannerPatternLayers patterns);
     }

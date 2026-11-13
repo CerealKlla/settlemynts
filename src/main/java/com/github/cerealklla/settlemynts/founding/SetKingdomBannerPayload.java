@@ -11,9 +11,10 @@ import net.minecraft.world.level.block.entity.BannerPatternLayers;
 
 /**
  * Client-to-server: commits a freshly-designed Kingdom Banner (backlog item 10, added 2026-11-13)
- * -- same shape as {@link SetCapitalCityBannerPayload}, a separate payload only because it writes
- * to a different field ({@code GhostTownHallCoreEntity#kingdomBannerPatterns}) and is gated Tier
- * 3+ instead of Tier 2+.
+ * -- Capital-City-only (there's no equivalent for a regular settlement, backlog item 11). Same
+ * shape as {@link SetSettlementBannerPayload}, a separate payload only because it writes to a
+ * different field ({@code GhostTownHallCoreEntity#kingdomBannerPatterns}) and is always gated
+ * Tier 3+.
  */
 public record SetKingdomBannerPayload(int coreEntityId, BannerPatternLayers patterns) implements CustomPacketPayload {
 

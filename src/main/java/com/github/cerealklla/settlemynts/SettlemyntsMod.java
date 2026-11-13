@@ -751,23 +751,24 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.founding.SetDefenseSpendingPayload.STREAM_CODEC,
                 (payload, context) -> setDefenseSpending(payload, context));
 
-        // Capital City Keep (backlog item 10, added 2026-11-13) -- same "button on FoundingScreen,
-        // request+open a sub-screen" shape as Defense Spending above.
-        registrar.playToServer(com.github.cerealklla.settlemynts.founding.RequestCapitalCityKeepScreenPayload.TYPE,
-                com.github.cerealklla.settlemynts.founding.RequestCapitalCityKeepScreenPayload.STREAM_CODEC,
-                (payload, context) -> requestCapitalCityKeepScreen(payload, context));
+        // Color/Banner menu (backlog item 10, added 2026-11-13 as Capital-City-only; widened the
+        // same day for backlog item 11's regular-settlement equivalent) -- same "button on
+        // FoundingScreen, request+open a sub-screen" shape as Defense Spending above.
+        registrar.playToServer(com.github.cerealklla.settlemynts.founding.RequestColorAndBannerScreenPayload.TYPE,
+                com.github.cerealklla.settlemynts.founding.RequestColorAndBannerScreenPayload.STREAM_CODEC,
+                (payload, context) -> requestColorAndBannerScreen(payload, context));
 
-        registrar.playToClient(com.github.cerealklla.settlemynts.founding.OpenCapitalCityKeepScreenPayload.TYPE,
-                com.github.cerealklla.settlemynts.founding.OpenCapitalCityKeepScreenPayload.STREAM_CODEC,
-                (payload, context) -> com.github.cerealklla.settlemynts.founding.ClientFoundingRequests.requestCapitalCityKeepScreen(payload));
+        registrar.playToClient(com.github.cerealklla.settlemynts.founding.OpenColorAndBannerScreenPayload.TYPE,
+                com.github.cerealklla.settlemynts.founding.OpenColorAndBannerScreenPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.founding.ClientFoundingRequests.requestColorAndBannerScreen(payload));
 
-        registrar.playToServer(com.github.cerealklla.settlemynts.founding.SetCapitalCityColorPayload.TYPE,
-                com.github.cerealklla.settlemynts.founding.SetCapitalCityColorPayload.STREAM_CODEC,
-                (payload, context) -> setCapitalCityColor(payload, context));
+        registrar.playToServer(com.github.cerealklla.settlemynts.founding.SetSettlementColorPayload.TYPE,
+                com.github.cerealklla.settlemynts.founding.SetSettlementColorPayload.STREAM_CODEC,
+                (payload, context) -> setSettlementColor(payload, context));
 
-        registrar.playToServer(com.github.cerealklla.settlemynts.founding.SetCapitalCityBannerPayload.TYPE,
-                com.github.cerealklla.settlemynts.founding.SetCapitalCityBannerPayload.STREAM_CODEC,
-                (payload, context) -> setCapitalCityBanner(payload, context));
+        registrar.playToServer(com.github.cerealklla.settlemynts.founding.SetSettlementBannerPayload.TYPE,
+                com.github.cerealklla.settlemynts.founding.SetSettlementBannerPayload.STREAM_CODEC,
+                (payload, context) -> setSettlementBanner(payload, context));
 
         registrar.playToServer(com.github.cerealklla.settlemynts.founding.SetKingdomBannerPayload.TYPE,
                 com.github.cerealklla.settlemynts.founding.SetKingdomBannerPayload.STREAM_CODEC,
@@ -2954,8 +2955,15 @@ public class SettlemyntsMod {
                 .ifPresent(recipient -> recipient.setDefenseSpendingAllocation(payload.allocation()));
     }
 
-    /** "Capital City Keep..." button click on {@code client.FoundingScreen} -- backlog item 10, added 2026-11-13. Same resolve/validate shape as {@link #requestDefenseSpending}. */
-    private static void requestCapitalCityKeepScreen(com.github.cerealklla.settlemynts.founding.RequestCapitalCityKeepScreenPayload payload, IPayloadContext context) {
+    /**
+     * "Capital City Keep..."/"Settlement Hall..." button click on {@code client.FoundingScreen} --
+     * backlog item 10 (added 2026-11-13, Capital-City-only), widened the same day for backlog item
+     * 11's regular-settlement equivalent. Same resolve/validate shape as {@link
+     * #requestDefenseSpending}, minus item 10's original "must be a Capital City" gate -- every
+     * finalized settlement gets this menu now, just with different Tier thresholds inside it (see
+     * {@code client.ColorAndBannerScreen}'s own doc).
+     */
+    private static void requestColorAndBannerScreen(com.github.cerealklla.settlemynts.founding.RequestColorAndBannerScreenPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
@@ -2968,53 +2976,63 @@ public class SettlemyntsMod {
             player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
             return;
         }
-        if (!core.isCapitalCity()) {
-            player.sendSystemMessage(Component.literal("This settlement isn't a Capital City."));
-            return;
-        }
         int townHallTier = core.townHallPlot().map(PlotRecord::tier).orElse(1);
-        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.founding.OpenCapitalCityKeepScreenPayload(
-                payload.coreEntityId(), townHallTier,
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.founding.OpenColorAndBannerScreenPayload(
+                payload.coreEntityId(), core.isCapitalCity(), townHallTier,
                 core.settlementColor() == null ? "" : core.settlementColor().getName(),
                 core.settlementBannerPatterns(), core.kingdomBannerPatterns()));
     }
 
-    /** Color cycle button click on {@code client.CapitalCityKeepScreen} -- backlog item 10, no Tier gate (available the moment a settlement is a Capital City, "when a Capital City Keep is made"). */
-    private static void setCapitalCityColor(com.github.cerealklla.settlemynts.founding.SetCapitalCityColorPayload payload, IPayloadContext context) {
+    /**
+     * Color cycle button click on {@code client.ColorAndBannerScreen} -- backlog item 10/11. No
+     * Tier gate for a Capital City ("when a Capital City Keep is made"); Tier 2+ for a regular
+     * settlement (backlog item 11's own wording).
+     */
+    private static void setSettlementColor(com.github.cerealklla.settlemynts.founding.SetSettlementColorPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        if (!(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core) || !core.isCapitalCity()) {
+        if (!(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
             return;
         }
         if (!core.isTownPlanner(player.getUUID())) {
             player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
+            return;
+        }
+        int required = core.isCapitalCity() ? 1 : 2;
+        if (core.townHallPlot().map(PlotRecord::tier).orElse(1) < required) {
+            player.sendSystemMessage(Component.literal("The Town Hall needs to be Tier " + required + "+ to set a Settlement Color."));
             return;
         }
         net.minecraft.world.item.DyeColor color = net.minecraft.world.item.DyeColor.byName(payload.colorName(), null);
         core.setSettlementColor(serverLevel, color);
     }
 
-    /** "Save" button click on {@code client.BannerDesignerScreen} when designing the Capital City Banner -- backlog item 10, Tier 2+. */
-    private static void setCapitalCityBanner(com.github.cerealklla.settlemynts.founding.SetCapitalCityBannerPayload payload, IPayloadContext context) {
+    /**
+     * "Save" button click on {@code client.BannerDesignerScreen} when designing the Settlement/
+     * Capital City Banner -- backlog item 10/11. Tier 2+ for a Capital City, Tier 3+ for a regular
+     * settlement.
+     */
+    private static void setSettlementBanner(com.github.cerealklla.settlemynts.founding.SetSettlementBannerPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;
         }
-        if (!(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core) || !core.isCapitalCity()) {
+        if (!(serverLevel.getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core)) {
             return;
         }
         if (!core.isTownPlanner(player.getUUID())) {
             player.sendSystemMessage(Component.literal("You're not a Town Planner of this settlement."));
             return;
         }
-        if (core.townHallPlot().map(PlotRecord::tier).orElse(1) < 2) {
-            player.sendSystemMessage(Component.literal("The Town Hall needs to be Tier 2+ to design the Capital City Banner."));
+        int required = core.isCapitalCity() ? 2 : 3;
+        if (core.townHallPlot().map(PlotRecord::tier).orElse(1) < required) {
+            player.sendSystemMessage(Component.literal("The Town Hall needs to be Tier " + required + "+ to design the Settlement Banner."));
             return;
         }
         core.setSettlementBannerPatterns(serverLevel, payload.patterns());
     }
 
-    /** "Save" button click on {@code client.BannerDesignerScreen} when designing the Kingdom Banner -- backlog item 10, Tier 3+. */
+    /** "Save" button click on {@code client.BannerDesignerScreen} when designing the Kingdom Banner -- backlog item 10, Capital City only, Tier 3+. */
     private static void setKingdomBanner(com.github.cerealklla.settlemynts.founding.SetKingdomBannerPayload payload, IPayloadContext context) {
         if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
             return;

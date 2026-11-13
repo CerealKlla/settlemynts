@@ -22,7 +22,7 @@ public final class ClientFoundingRequests {
     private static final ClientRequestSlot<OpenPlotStakeScreenPayload> PLOT_STAKE = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenDefenseSpendingMenuPayload> DEFENSE_SPENDING = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenTunnelStakeScreenPayload> TUNNEL_STAKE = new ClientRequestSlot<>();
-    private static final ClientRequestSlot<OpenCapitalCityKeepScreenPayload> CAPITAL_CITY_KEEP = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenColorAndBannerScreenPayload> COLOR_AND_BANNER = new ClientRequestSlot<>();
 
     private ClientFoundingRequests() {
     }
@@ -67,11 +67,11 @@ public final class ClientFoundingRequests {
         return TUNNEL_STAKE.takePending();
     }
 
-    public static void requestCapitalCityKeepScreen(OpenCapitalCityKeepScreenPayload payload) {
-        CAPITAL_CITY_KEEP.request(payload);
+    public static void requestColorAndBannerScreen(OpenColorAndBannerScreenPayload payload) {
+        COLOR_AND_BANNER.request(payload);
     }
 
-    public static Optional<OpenCapitalCityKeepScreenPayload> takePendingCapitalCityKeepScreen() {
-        return CAPITAL_CITY_KEEP.takePending();
+    public static Optional<OpenColorAndBannerScreenPayload> takePendingColorAndBannerScreen() {
+        return COLOR_AND_BANNER.takePending();
     }
 }

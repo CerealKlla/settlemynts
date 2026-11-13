@@ -119,14 +119,14 @@ public final class FoundingScreen extends Screen {
                     .bounds(centerX - 100, y, 245, 20).build());
             y += 30;
 
-            // Capital City Keep (backlog item 10, added 2026-11-13) -- "same Town Hall structure,
-            // just relabeled" per explicit user decision, so this is purely a menu entry, not a
-            // different structure/plot type. Same request+open shape as Defense Spending above.
-            if (isCapitalCity) {
-                addRenderableWidget(Button.builder(Component.literal("Capital City Keep..."), b -> openCapitalCityKeep())
-                        .bounds(centerX - 100, y, 245, 20).build());
-                y += 30;
-            }
+            // Color/Banner menu (backlog item 10, added 2026-11-13 for Capital Cities -- "same Town
+            // Hall structure, just relabeled" per explicit user decision, so this is purely a menu
+            // entry, not a different structure/plot type; widened the same day for backlog item
+            // 11's regular-settlement equivalent, so this button now shows for every finalized
+            // settlement, just labeled differently). Same request+open shape as Defense Spending.
+            addRenderableWidget(Button.builder(Component.literal(isCapitalCity ? "Capital City Keep..." : "Settlement Hall..."),
+                    b -> openColorAndBannerScreen()).bounds(centerX - 100, y, 245, 20).build());
+            y += 30;
 
             // Settlement sales tax (explicit user spec, 2026-10-17: "Taxes are applied any time an
             // item is sold within the settlement... paid by the Seller... a flat amount, defaulted
@@ -241,8 +241,8 @@ public final class FoundingScreen extends Screen {
         onClose();
     }
 
-    private void openCapitalCityKeep() {
-        send(new com.github.cerealklla.settlemynts.founding.RequestCapitalCityKeepScreenPayload(coreEntityId));
+    private void openColorAndBannerScreen() {
+        send(new com.github.cerealklla.settlemynts.founding.RequestColorAndBannerScreenPayload(coreEntityId));
         onClose();
     }
 

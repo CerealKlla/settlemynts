@@ -193,9 +193,9 @@ public class SettlemyntsModClient {
                 Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.founding.client.DefenseSpendingScreen(request));
             }
         });
-        ClientFoundingRequests.takePendingCapitalCityKeepScreen().ifPresent(request -> {
+        ClientFoundingRequests.takePendingColorAndBannerScreen().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.founding.client.CapitalCityKeepScreen(request));
+                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.founding.client.ColorAndBannerScreen(request));
             }
         });
         ClientGuardhouseRequests.takePendingMenu().ifPresent(request -> {
