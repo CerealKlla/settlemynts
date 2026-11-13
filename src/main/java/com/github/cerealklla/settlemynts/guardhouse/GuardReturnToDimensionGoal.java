@@ -63,9 +63,15 @@ import net.minecraft.world.phys.Vec3;
  * to the portal instead of crossing. Fixed by snapping a guard directly onto the portal block
  * ({@link #SNAP_TRIGGER_DISTANCE_BLOCKS}, 2 blocks out, well short of melee/spell engagement range)
  * once navigation has closed most of the distance, rather than requiring it to physically walk the
- * last stretch in — vanilla's own in-portal/dimension-crossing logic (unchanged, see this class's
- * own "deliberately not portal-blocking/immune" note above) still does the actual crossing from
- * there, this just removes the crowding that was preventing it from ever starting.
+ * last stretch in.
+ *
+ * <p><b>Updated 2026-11-13</b> -- vanilla's own automatic in-portal crossing is now disabled by
+ * default (see Nuclyus's own CLAUDE.md "Plans for future" entry), specifically so a guard can no
+ * longer wander into a portal and cross entirely on its own with nothing tracking it (which is
+ * exactly how a guard went "missing forever" chasing a target through one). Snapping onto the
+ * portal block alone would now just leave the guard standing there, so {@link #tick()} calls
+ * {@code nuclyus.api.Nuclyus#attemptPortalCrossing} directly once snapped, instead of relying on
+ * vanilla's (now-disabled) detection to finish the job.
  */
 public final class GuardReturnToDimensionGoal extends Goal {
 
@@ -147,8 +153,9 @@ public final class GuardReturnToDimensionGoal extends Goal {
             return;
         }
         Vec3 portalCenter = Vec3.atCenterOf(portalTarget);
-        if (guard.position().closerThan(portalCenter, SNAP_TRIGGER_DISTANCE_BLOCKS)) {
+        if (guard.position().closerThan(portalCenter, SNAP_TRIGGER_DISTANCE_BLOCKS) && guard.level() instanceof ServerLevel level) {
             guard.teleportTo(portalCenter.x, portalTarget.getY(), portalCenter.z);
+            com.github.cerealklla.nuclyus.api.Nuclyus.attemptPortalCrossing(level, guard, portalTarget);
         }
     }
 
