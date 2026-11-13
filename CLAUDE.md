@@ -592,6 +592,17 @@ required tag (ALL semantics, not ANY -- ANY would make one incidental tag satisf
 unrelated list). `./gradlew build`/`test` green in both repos, whole-suite (17 mods) rebuild +
 `runServer` boot-smoke-test clean. **Not yet live-tested.**
 
+**Local-variant details passed to Blueprynts, 2026-11-13 -- backlog item 7** (see
+[context/decisions.md](context/decisions.md),
+[context/classes/GhostTownHallCoreEntity.md](context/classes/GhostTownHallCoreEntity.md)) -- Town
+Hall Core gained `settlementColor`/`settlementBannerPatterns` (no Mayor UI yet -- items 11/12) with
+setters that push a refresh to every plot's Construction Box; new `zone.LocalWoodResolver` maps a
+plot's biome to its native wood species; new `api.Settlemynts#getLocalVariantContext` bundles all
+three for Blueprynts to pull. Kingdom banner explicitly out of scope (no Kingdom concept exists --
+items 9/10). Hit and resolved a real circular-new-API bootstrap problem building both mods' sides
+together. `./gradlew build`/`test` green in both repos, whole-suite (17 mods) rebuild + `runServer`
+boot-smoke-test clean. **Not yet live-tested.**
+
 **Tavern Plot Type built as a full vertical slice, 2026-10-31** (see
 [context/decisions.md](context/decisions.md),
 [context/classes/TavernPlotType.md](context/classes/TavernPlotType.md), design doc Section 17) --
