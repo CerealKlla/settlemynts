@@ -603,6 +603,16 @@ items 9/10). Hit and resolved a real circular-new-API bootstrap problem building
 together. `./gradlew build`/`test` green in both repos, whole-suite (17 mods) rebuild + `runServer`
 boot-smoke-test clean. **Not yet live-tested.**
 
+**Capital City founding implemented, 2026-11-13 -- backlog item 9** (see
+[context/decisions.md](context/decisions.md), [context/classes/CapitalCity.md](context/classes/CapitalCity.md))
+-- combining 9 Settlement Claim Flags crafts a Capital City Flag; founding with it flags the
+`GhostTownHallCoreEntity` with a real synced `isCapitalCity` boolean, which doubles the perimeter
+target area at Finalize and requires every one of its plots to meet the Large (50x50) buildable-area
+minimum instead of Small (15x15) -- enforced at Finalize and mirrored in the live HUD warning/Plot
+Stake screen validity flag. Also synced `GhostPlotStakeEntity#ownerCoreId` (previously server-only)
+since the client-side overlay needed it. `./gradlew build`/`test` green, whole-suite (17 mods)
+rebuild + `runClient` boot-smoke-test clean. **Not live-tested at all yet.**
+
 **Tavern Plot Type built as a full vertical slice, 2026-10-31** (see
 [context/decisions.md](context/decisions.md),
 [context/classes/TavernPlotType.md](context/classes/TavernPlotType.md), design doc Section 17) --
