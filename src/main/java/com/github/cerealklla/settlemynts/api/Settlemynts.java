@@ -1252,6 +1252,21 @@ public final class Settlemynts {
     }
 
     /**
+     * {@code settlementCoreId}'s Mayor-set required Blueprint tags (backlog item 5, added
+     * 2026-11-13) -- empty if the settlement has none set, isn't a real player-founded core at all
+     * (e.g. a natural village, which has no Mayor to set anything), or doesn't currently resolve
+     * (chunk not loaded, same accepted limitation {@link #getSettlementName} already has). The
+     * intended call site is Blueprynts' own Construction Box Blueprint picker, via a dedicated
+     * bridge class on that side -- see Blueprynts' own {@code bridge.SettlemyntsPlotBoxBridge}.
+     */
+    public static java.util.Set<String> getRequiredTags(ServerLevel level, UUID settlementCoreId) {
+        com.github.cerealklla.settlemynts.founding.SettlementCoreIndex.get(level.getServer()).get(settlementCoreId)
+                .ifPresent(pos -> forceLoadCoreChunk(level, pos));
+        return level.getEntity(settlementCoreId) instanceof com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity core
+                ? core.requiredTags() : java.util.Set.of();
+    }
+
+    /**
      * {@code settlementCoreId}'s display name, covering BOTH real player-founded cores ({@link
      * #getSettlementName}) and natural villages -- added 2026-11-08 for Terrytories' reputation UI
      * and the mayor's-letter feature, both of which need a real name for a natural village's

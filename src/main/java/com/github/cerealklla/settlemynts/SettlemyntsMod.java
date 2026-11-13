@@ -40,6 +40,7 @@ import com.github.cerealklla.settlemynts.founding.PerimeterFit;
 import com.github.cerealklla.settlemynts.founding.RemoveStakePayload;
 import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
 import com.github.cerealklla.settlemynts.founding.SetBoundaryVisiblePayload;
+import com.github.cerealklla.settlemynts.founding.SetRequiredTagsPayload;
 import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
 import com.github.cerealklla.settlemynts.founding.SetTaxRatePayload;
 import com.github.cerealklla.settlemynts.founding.SetStakeAbsolutePayload;
@@ -320,6 +321,15 @@ public class SettlemyntsMod {
                             && player.level().getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core
                             && core.isTownPlanner(player.getUUID())) {
                         core.setTaxPerItem(payload.taxPerItem());
+                    }
+                });
+
+        registrar.playToServer(SetRequiredTagsPayload.TYPE, SetRequiredTagsPayload.STREAM_CODEC,
+                (payload, context) -> {
+                    if (context.player() instanceof ServerPlayer player
+                            && player.level().getEntity(payload.coreEntityId()) instanceof GhostTownHallCoreEntity core
+                            && core.isFounder(player.getUUID())) {
+                        core.setRequiredTags(com.github.cerealklla.settlemynts.zone.RequiredTags.parse(payload.tags()));
                     }
                 });
 

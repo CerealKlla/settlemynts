@@ -13,6 +13,7 @@ import com.github.cerealklla.settlemynts.SettlemyntsMod;
 import com.github.cerealklla.settlemynts.registration.ModEntities;
 import com.github.cerealklla.settlemynts.zone.PlotGeometry;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
+import com.github.cerealklla.settlemynts.zone.RequiredTags;
 
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.resources.Identifier;
@@ -118,6 +119,14 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
     // Kept as "TaxPerTransaction" in persisted NBT (below) so already-placed settlements don't lose
     // their configured rate across this rename.
     private int taxPerItem = 1;
+
+    // Required Blueprint tags (backlog item 5, added 2026-11-13) -- a Mayor-set list a plot's
+    // Blueprint choices must all carry (ALL semantics, not ANY -- see decisions.md for why), read
+    // cross-mod by Blueprynts' own Construction Box picker via api.Settlemynts#getRequiredTags.
+    // Settlemynts itself never validates these against Blueprynts' own tag vocabulary -- it's just
+    // free-form text storage here, same "trust the author" shape as every other open-ended tag/name
+    // field in this suite.
+    private final Set<String> requiredTags = new HashSet<>();
 
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
@@ -282,6 +291,16 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         this.taxPerItem = Math.max(0, taxPerItem);
     }
 
+    /** Immutable snapshot -- see {@link #requiredTags} field doc. */
+    public Set<String> requiredTags() {
+        return Set.copyOf(requiredTags);
+    }
+
+    public void setRequiredTags(Set<String> tags) {
+        requiredTags.clear();
+        requiredTags.addAll(tags);
+    }
+
     public boolean isFounder(UUID playerId) {
         return founderId != null && founderId.equals(playerId);
     }
@@ -385,7 +404,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         }
         if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer && level() instanceof ServerLevel serverLevel) {
             PacketDistributor.sendToPlayer(serverPlayer, new OpenFoundingScreenPayload(
-                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters, finalized && findTownHallPlot(serverLevel).isPresent(), showRoadwayStakes, taxPerItem));
+                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters, finalized && findTownHallPlot(serverLevel).isPresent(), showRoadwayStakes, taxPerItem, RequiredTags.format(requiredTags)));
         }
         return InteractionResult.SUCCESS;
     }
@@ -420,6 +439,8 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         showPlotPerimeters = input.getBooleanOr("ShowPlotPerimeters", false);
         showRoadwayStakes = input.getBooleanOr("ShowRoadwayStakes", false);
         taxPerItem = Math.max(0, input.getIntOr("TaxPerTransaction", 1));
+        requiredTags.clear();
+        requiredTags.addAll(input.read("RequiredTags", Codec.STRING.listOf()).orElse(List.of()));
         plots.clear();
         plots.addAll(input.read("Plots", Codec.list(PlotRecord.CODEC)).orElse(List.of()));
     }
@@ -437,6 +458,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         output.putBoolean("ShowPlotPerimeters", showPlotPerimeters);
         output.putBoolean("ShowRoadwayStakes", showRoadwayStakes);
         output.putInt("TaxPerTransaction", taxPerItem);
+        output.store("RequiredTags", Codec.STRING.listOf(), List.copyOf(requiredTags));
         output.store("Plots", Codec.list(PlotRecord.CODEC), List.copyOf(plots));
     }
 }

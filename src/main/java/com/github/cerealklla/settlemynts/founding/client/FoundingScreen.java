@@ -7,6 +7,7 @@ import com.github.cerealklla.settlemynts.founding.GrantTownPlannerPayload;
 import com.github.cerealklla.settlemynts.founding.OpenFoundingScreenPayload;
 import com.github.cerealklla.settlemynts.founding.RequestPerimeterStakePayload;
 import com.github.cerealklla.settlemynts.founding.SetBoundaryVisiblePayload;
+import com.github.cerealklla.settlemynts.founding.SetRequiredTagsPayload;
 import com.github.cerealklla.settlemynts.founding.SetSettlementNamePayload;
 import com.github.cerealklla.settlemynts.founding.SetTaxRatePayload;
 
@@ -46,10 +47,12 @@ public final class FoundingScreen extends Screen {
     private boolean showRoadwayStakes;
     private boolean boundaryVisible;
     private final int initialTaxPerItem;
+    private final String initialRequiredTags;
 
     private EditBox nameBox;
     private EditBox grantBox;
     private EditBox taxBox;
+    private EditBox requiredTagsBox;
     private Button boundaryToggleButton;
     private int plannerListY;
 
@@ -65,6 +68,7 @@ public final class FoundingScreen extends Screen {
         this.hasTownHallPlot = payload.hasTownHallPlot();
         this.showRoadwayStakes = payload.showRoadwayStakes();
         this.initialTaxPerItem = payload.taxPerItem();
+        this.initialRequiredTags = payload.requiredTags();
     }
 
     @Override
@@ -125,6 +129,19 @@ public final class FoundingScreen extends Screen {
             addRenderableWidget(Button.builder(Component.literal("Set Tax"), b -> setTax())
                     .bounds(centerX + 55, y, 90, 20).build());
             y += 30;
+
+            // Required Blueprint tags (backlog item 5, added 2026-11-13) -- explicitly "the Mayor"
+            // in the backlog's own wording, so this is Mayor-only unlike every other control in this
+            // finalized block above, which any Town Planner may use.
+            if (viewerIsFounder) {
+                requiredTagsBox = addRenderableWidget(new EditBox(font, centerX - 100, y, 150, 20, Component.literal("Required tags")));
+                requiredTagsBox.setMaxLength(256);
+                requiredTagsBox.setValue(initialRequiredTags);
+                requiredTagsBox.setHint(Component.literal("tags, comma, separated"));
+                addRenderableWidget(Button.builder(Component.literal("Set Tags"), b -> setRequiredTags())
+                        .bounds(centerX + 55, y, 90, 20).build());
+                y += 30;
+            }
         }
 
         if (viewerIsFounder) {
@@ -171,6 +188,12 @@ public final class FoundingScreen extends Screen {
         } catch (NumberFormatException ignored) {
             // Non-numeric input -- same silent-ignore shape as grantPlanner's blank-check, server
             // never receives an invalid value since nothing is sent at all.
+        }
+    }
+
+    private void setRequiredTags() {
+        if (requiredTagsBox != null) {
+            send(new SetRequiredTagsPayload(coreEntityId, requiredTagsBox.getValue()));
         }
     }
 
