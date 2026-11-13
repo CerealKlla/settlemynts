@@ -193,6 +193,11 @@ public class SettlemyntsModClient {
                 Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.founding.client.DefenseSpendingScreen(request));
             }
         });
+        ClientFoundingRequests.takePendingCapitalCityKeepScreen().ifPresent(request -> {
+            if (Minecraft.getInstance().screen == null) {
+                Minecraft.getInstance().setScreen(new com.github.cerealklla.settlemynts.founding.client.CapitalCityKeepScreen(request));
+            }
+        });
         ClientGuardhouseRequests.takePendingMenu().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
                 Minecraft.getInstance().setScreen(new GuardKitStandScreen(request));

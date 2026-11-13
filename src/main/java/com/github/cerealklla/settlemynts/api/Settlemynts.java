@@ -1274,24 +1274,28 @@ public final class Settlemynts {
      * chunk-not-loaded core). Kingdom color/banner are **not** included here -- there is no "Kingdom"
      * concept anywhere in this suite yet (backlog items 9/10, not built), so this intentionally only
      * ever covers the Settlement level. The intended call site is Blueprynts' own Construction Box
-     * (via {@code bridge.SettlemyntsPlotBoxBridge#getLocalVariantContext}), for the not-yet-built
-     * backlog item 8 (actually substituting LocalWood/SettlementTorch/etc. placeholder blocks).
+     * (via {@code bridge.SettlemyntsPlotBoxBridge#getLocalVariantContext}), for backlog item 8
+     * (substituting LocalWood/SettlementTorch/etc. placeholder blocks). {@code kingdomBannerPatterns}
+     * added 2026-11-13 alongside backlog item 10 -- Kingdom Banner reuses {@code settlementColor} as
+     * its own base color too (item 10 only ever has the Mayor pick one color), just a second,
+     * independent pattern layer set.
      */
     public record LocalVariantContext(Identifier woodPlanksId, Optional<net.minecraft.world.item.DyeColor> settlementColor,
-                                       net.minecraft.world.level.block.entity.BannerPatternLayers settlementBannerPatterns) {
+                                       net.minecraft.world.level.block.entity.BannerPatternLayers settlementBannerPatterns,
+                                       net.minecraft.world.level.block.entity.BannerPatternLayers kingdomBannerPatterns) {
     }
 
     public static LocalVariantContext getLocalVariantContext(ServerLevel level, UUID settlementCoreId, BlockPos posForBiome) {
         Identifier woodPlanksId = com.github.cerealklla.settlemynts.zone.LocalWoodResolver.resolve(level, posForBiome);
         if (settlementCoreId == null) {
-            return new LocalVariantContext(woodPlanksId, Optional.empty(), net.minecraft.world.level.block.entity.BannerPatternLayers.EMPTY);
+            return new LocalVariantContext(woodPlanksId, Optional.empty(), net.minecraft.world.level.block.entity.BannerPatternLayers.EMPTY, net.minecraft.world.level.block.entity.BannerPatternLayers.EMPTY);
         }
         com.github.cerealklla.settlemynts.founding.SettlementCoreIndex.get(level.getServer()).get(settlementCoreId)
                 .ifPresent(pos -> forceLoadCoreChunk(level, pos));
         if (!(level.getEntity(settlementCoreId) instanceof com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity core)) {
-            return new LocalVariantContext(woodPlanksId, Optional.empty(), net.minecraft.world.level.block.entity.BannerPatternLayers.EMPTY);
+            return new LocalVariantContext(woodPlanksId, Optional.empty(), net.minecraft.world.level.block.entity.BannerPatternLayers.EMPTY, net.minecraft.world.level.block.entity.BannerPatternLayers.EMPTY);
         }
-        return new LocalVariantContext(woodPlanksId, Optional.ofNullable(core.settlementColor()), core.settlementBannerPatterns());
+        return new LocalVariantContext(woodPlanksId, Optional.ofNullable(core.settlementColor()), core.settlementBannerPatterns(), core.kingdomBannerPatterns());
     }
 
     /**

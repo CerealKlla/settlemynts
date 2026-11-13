@@ -150,6 +150,13 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
     // "not set yet," handled as a sensible default on the Blueprynts side (no tint / a blank banner).
     private DyeColor settlementColor;
     private BannerPatternLayers settlementBannerPatterns = BannerPatternLayers.EMPTY;
+    // Kingdom Banner (backlog item 10, added 2026-11-13) -- Capital-City-only, a second pattern
+    // layer set on this exact same Core entity rather than any separate "Kingdom" entity, which
+    // doesn't exist anywhere in this suite (confirmed with the user: a Capital City Keep is the
+    // same Town Hall structure/plot, just relabeled when isCapitalCity -- not its own Zone Type).
+    // Reuses settlementColor as its own base color too -- item 10 only ever has the Mayor pick one
+    // color (the Capital City color), never a second one for this banner specifically.
+    private BannerPatternLayers kingdomBannerPatterns = BannerPatternLayers.EMPTY;
 
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
@@ -354,6 +361,16 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         notifyLocalVariantChanged(level);
     }
 
+    /** {@link BannerPatternLayers#EMPTY} ("blank banner") if the Mayor hasn't designed one yet -- Capital City only, see {@link #kingdomBannerPatterns} field doc. */
+    public BannerPatternLayers kingdomBannerPatterns() {
+        return kingdomBannerPatterns;
+    }
+
+    public void setKingdomBannerPatterns(ServerLevel level, BannerPatternLayers patterns) {
+        this.kingdomBannerPatterns = patterns == null ? BannerPatternLayers.EMPTY : patterns;
+        notifyLocalVariantChanged(level);
+    }
+
     /**
      * Pushes a refreshed local-variant context out to every one of this settlement's plots' own
      * Construction Boxes -- per explicit user spec, "it needs to be updated any time the town hall
@@ -473,7 +490,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         }
         if (!level().isClientSide() && player instanceof ServerPlayer serverPlayer && level() instanceof ServerLevel serverLevel) {
             PacketDistributor.sendToPlayer(serverPlayer, new OpenFoundingScreenPayload(
-                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters, finalized && findTownHallPlot(serverLevel).isPresent(), showRoadwayStakes, taxPerItem, RequiredTags.format(requiredTags)));
+                    getId(), settlementName, getTownPlannerNames(serverPlayer.level().getServer()), isFounder(serverPlayer.getUUID()), boundaryVisible, finalized, showPlotPerimeters, finalized && findTownHallPlot(serverLevel).isPresent(), showRoadwayStakes, taxPerItem, RequiredTags.format(requiredTags), isCapitalCity()));
         }
         return InteractionResult.SUCCESS;
     }
@@ -511,6 +528,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         requiredTags.addAll(input.read("RequiredTags", Codec.STRING.listOf()).orElse(List.of()));
         settlementColor = input.read("SettlementColor", DyeColor.CODEC).orElse(null);
         settlementBannerPatterns = input.read("SettlementBannerPatterns", BannerPatternLayers.CODEC).orElse(BannerPatternLayers.EMPTY);
+        kingdomBannerPatterns = input.read("KingdomBannerPatterns", BannerPatternLayers.CODEC).orElse(BannerPatternLayers.EMPTY);
         entityData.set(DATA_CAPITAL_CITY, input.getBooleanOr("CapitalCity", false));
         plots.clear();
         plots.addAll(input.read("Plots", Codec.list(PlotRecord.CODEC)).orElse(List.of()));
@@ -532,6 +550,7 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         output.store("RequiredTags", Codec.STRING.listOf(), List.copyOf(requiredTags));
         output.storeNullable("SettlementColor", DyeColor.CODEC, settlementColor);
         output.store("SettlementBannerPatterns", BannerPatternLayers.CODEC, settlementBannerPatterns);
+        output.store("KingdomBannerPatterns", BannerPatternLayers.CODEC, kingdomBannerPatterns);
         output.putBoolean("CapitalCity", isCapitalCity());
         output.store("Plots", Codec.list(PlotRecord.CODEC), List.copyOf(plots));
     }

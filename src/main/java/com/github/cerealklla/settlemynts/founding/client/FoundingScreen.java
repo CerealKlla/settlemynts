@@ -48,6 +48,7 @@ public final class FoundingScreen extends Screen {
     private boolean boundaryVisible;
     private final int initialTaxPerItem;
     private final String initialRequiredTags;
+    private final boolean isCapitalCity;
 
     private EditBox nameBox;
     private EditBox grantBox;
@@ -69,6 +70,7 @@ public final class FoundingScreen extends Screen {
         this.showRoadwayStakes = payload.showRoadwayStakes();
         this.initialTaxPerItem = payload.taxPerItem();
         this.initialRequiredTags = payload.requiredTags();
+        this.isCapitalCity = payload.isCapitalCity();
     }
 
     @Override
@@ -116,6 +118,15 @@ public final class FoundingScreen extends Screen {
             addRenderableWidget(Button.builder(Component.literal("Defense Spending..."), b -> openDefenseSpending())
                     .bounds(centerX - 100, y, 245, 20).build());
             y += 30;
+
+            // Capital City Keep (backlog item 10, added 2026-11-13) -- "same Town Hall structure,
+            // just relabeled" per explicit user decision, so this is purely a menu entry, not a
+            // different structure/plot type. Same request+open shape as Defense Spending above.
+            if (isCapitalCity) {
+                addRenderableWidget(Button.builder(Component.literal("Capital City Keep..."), b -> openCapitalCityKeep())
+                        .bounds(centerX - 100, y, 245, 20).build());
+                y += 30;
+            }
 
             // Settlement sales tax (explicit user spec, 2026-10-17: "Taxes are applied any time an
             // item is sold within the settlement... paid by the Seller... a flat amount, defaulted
@@ -227,6 +238,11 @@ public final class FoundingScreen extends Screen {
 
     private void openDefenseSpending() {
         send(new com.github.cerealklla.settlemynts.founding.RequestDefenseSpendingPayload(coreEntityId));
+        onClose();
+    }
+
+    private void openCapitalCityKeep() {
+        send(new com.github.cerealklla.settlemynts.founding.RequestCapitalCityKeepScreenPayload(coreEntityId));
         onClose();
     }
 
