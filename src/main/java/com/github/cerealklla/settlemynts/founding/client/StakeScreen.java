@@ -68,6 +68,12 @@ public final class StakeScreen extends Screen {
         Minecraft.getInstance().getConnection().send(new ServerboundCustomPayloadPacket(payload));
     }
 
+    /** Matches every other Town Hall Core screen's dark backdrop -- see BannerDesignerScreen's own doc, 2026-11-13. */
+    @Override
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        graphics.fill(0, 0, width, height, 0xC0101010);
+    }
+
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);

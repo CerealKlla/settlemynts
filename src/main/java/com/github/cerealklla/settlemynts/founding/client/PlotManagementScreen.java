@@ -21,14 +21,14 @@ import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
  */
 public final class PlotManagementScreen extends Screen {
 
-    private final FoundingScreen parent;
+    private final TownHallContext parent;
     private final int coreEntityId;
     private final boolean hasTownHallPlot;
     private boolean showPlotPerimeters;
 
     private Button plotPerimetersToggleButton;
 
-    public PlotManagementScreen(FoundingScreen parent, int coreEntityId, boolean showPlotPerimeters, boolean hasTownHallPlot) {
+    PlotManagementScreen(TownHallContext parent, int coreEntityId, boolean showPlotPerimeters, boolean hasTownHallPlot) {
         super(Component.literal("Plots"));
         this.parent = parent;
         this.coreEntityId = coreEntityId;
@@ -55,7 +55,7 @@ public final class PlotManagementScreen extends Screen {
             y += 30;
         }
 
-        addRenderableWidget(Button.builder(Component.literal("Back"), b -> Minecraft.getInstance().setScreen(parent))
+        addRenderableWidget(Button.builder(Component.literal("Back"), b -> Minecraft.getInstance().setScreen(parent.hostScreen()))
                 .bounds(centerX - 50, height - 30, 100, 20).build());
     }
 
@@ -85,7 +85,13 @@ public final class PlotManagementScreen extends Screen {
 
     @Override
     public void onClose() {
-        Minecraft.getInstance().setScreen(parent);
+        Minecraft.getInstance().setScreen(parent.hostScreen());
+    }
+
+    /** Matches every other Town Hall Core screen's dark backdrop -- see BannerDesignerScreen's own doc, 2026-11-13. */
+    @Override
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        graphics.fill(0, 0, width, height, 0xC0101010);
     }
 
     @Override

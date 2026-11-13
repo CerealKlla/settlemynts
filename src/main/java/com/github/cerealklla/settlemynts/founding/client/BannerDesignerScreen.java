@@ -76,13 +76,21 @@ public final class BannerDesignerScreen extends Screen {
         }
 
         int centerX = width / 2;
+        // Real layout bug, fixed 2026-11-13: the header text below the preview and the
+        // Pattern/Color button row used to land on the exact same y (both derived from
+        // `belowPreview`, one with a +36 offset and the other with a +26-then-further-unrelated
+        // offset that happened to coincide) -- confirmed by the live screenshot showing "No layers
+        // yet (blank banner)" printed directly through the Pattern/Color buttons. Every row below
+        // is now a strictly increasing cursor, matching the preview's own real (now 4x-scaled, see
+        // PREVIEW_SCALE) footprint instead of the old purely-decorative PREVIEW_SIZE reservation.
         int previewTop = 30;
-        int belowPreview = previewTop + PREVIEW_SIZE + 10;
+        int headerY = previewTop + PREVIEW_SIZE + 14;
+        int removeLastLayerY = headerY + 14;
 
         addRenderableWidget(Button.builder(Component.literal("Remove Last Layer"), b -> removeLastLayer())
-                .bounds(centerX - 100, belowPreview, 200, 20).build());
+                .bounds(centerX - 100, removeLastLayerY, 200, 20).build());
 
-        int y = belowPreview + 26;
+        int y = removeLastLayerY + 26;
         patternButton = addRenderableWidget(Button.builder(patternLabel(), b -> cyclePattern())
                 .bounds(centerX - 100, y, 140, 20).build());
         layerColorButton = addRenderableWidget(Button.builder(colorLabel(), b -> cycleLayerColor())
@@ -99,7 +107,10 @@ public final class BannerDesignerScreen extends Screen {
                 .bounds(centerX + 5, y, 100, 20).build());
     }
 
+    /** The on-screen box the preview occupies, in pixels -- the actual rendered icon is scaled up to fill it, see {@link #PREVIEW_SCALE}. */
     private static final int PREVIEW_SIZE = 64;
+    /** Vanilla's own GUI item icon is a fixed 16px ({@code GuiGraphicsExtractor#item} takes no scale parameter) -- scaled up via a manual {@code pose()} transform instead, confirmed safe against the real decompiled source (the current pose IS captured into the render state at the moment {@code item(...)} is called). */
+    private static final float PREVIEW_SCALE = PREVIEW_SIZE / 16.0F;
 
     private void cyclePattern() {
         if (availablePatterns.isEmpty()) {
@@ -168,6 +179,17 @@ public final class BannerDesignerScreen extends Screen {
     }
 
     @Override
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        // Matches nuclyus.menu.client.NuclyusMenuScreen's own backdrop -- see this class's own doc
+        // on the whole Town Hall Core screen family being restyled to the same look, 2026-11-13.
+        // Real, concrete side effect this fixes on its own: the live preview below used to render
+        // over whatever was directly behind this screen (sky/grass), making a small banner icon
+        // nearly invisible -- a dark backdrop plus the panel behind the preview (see
+        // extractRenderState) gives it real contrast for the first time.
+        graphics.fill(0, 0, width, height, 0xC0101010);
+    }
+
+    @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
         int centerX = width / 2;
@@ -175,11 +197,28 @@ public final class BannerDesignerScreen extends Screen {
         graphics.text(font, title, centerX - titleWidth / 2, 10, 0xFFFFFFFF);
 
         int previewTop = 30;
-        graphics.item(previewStack(), centerX - PREVIEW_SIZE / 2, previewTop);
+        int panelPad = 6;
+        graphics.fill(centerX - PREVIEW_SIZE / 2 - panelPad, previewTop - panelPad,
+                centerX + PREVIEW_SIZE / 2 + panelPad, previewTop + PREVIEW_SIZE + panelPad, 0xFF2B2B2B);
 
-        int listY = previewTop + PREVIEW_SIZE + 36;
-        String header = draft.isEmpty() ? "No layers yet (blank banner)" : "Layers:";
-        graphics.text(font, header, centerX - font.width(header) / 2, listY, 0xFFAAAAAA);
+        // Real preview fix, 2026-11-13 -- a live screenshot showed the preview as a near-invisible
+        // tiny red sliver; GuiGraphicsExtractor#item has no scale parameter of its own, but it does
+        // capture whatever the current pose() transform is at the moment it's called (confirmed
+        // against the real decompiled source), so a manual push/scale/pop around the call genuinely
+        // scales the rendered icon -- this was flagged as a known, deliberately-not-pursued
+        // limitation when this screen was first built; pursuing it now that it's a real reported
+        // problem, not a cosmetic nice-to-have.
+        graphics.pose().pushMatrix();
+        graphics.pose().translate(centerX - PREVIEW_SIZE / 2.0F, previewTop);
+        graphics.pose().scale(PREVIEW_SCALE, PREVIEW_SCALE);
+        graphics.item(previewStack(), 0, 0);
+        graphics.pose().popMatrix();
+
+        int headerY = previewTop + PREVIEW_SIZE + 14;
+        String header = draft.isEmpty()
+                ? "No layers yet (blank banner)"
+                : "Layers: " + draft.size() + "/" + BannerBlockEntity.MAX_PATTERNS;
+        graphics.text(font, header, centerX - font.width(header) / 2, headerY, 0xFFAAAAAA);
     }
 
     @Override

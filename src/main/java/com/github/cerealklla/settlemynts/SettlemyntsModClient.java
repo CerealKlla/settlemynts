@@ -174,7 +174,7 @@ public class SettlemyntsModClient {
 
         ClientFoundingRequests.takePendingFoundingScreen().ifPresent(request -> {
             if (Minecraft.getInstance().screen == null) {
-                Minecraft.getInstance().setScreen(new FoundingScreen(request));
+                Minecraft.getInstance().setScreen(FoundingScreen.open(request));
             }
         });
         ClientFoundingRequests.takePendingStakeScreen().ifPresent(request -> {

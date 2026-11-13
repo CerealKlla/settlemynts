@@ -19,13 +19,13 @@ import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
  */
 public final class RoadwayManagementScreen extends Screen {
 
-    private final FoundingScreen parent;
+    private final TownHallContext parent;
     private final int coreEntityId;
     private boolean showRoadwayStakes;
 
     private Button roadwayStakesToggleButton;
 
-    public RoadwayManagementScreen(FoundingScreen parent, int coreEntityId, boolean showRoadwayStakes) {
+    RoadwayManagementScreen(TownHallContext parent, int coreEntityId, boolean showRoadwayStakes) {
         super(Component.literal("Roadways"));
         this.parent = parent;
         this.coreEntityId = coreEntityId;
@@ -53,7 +53,7 @@ public final class RoadwayManagementScreen extends Screen {
                 .bounds(centerX - 100, y, 245, 20).build());
         y += 30;
 
-        addRenderableWidget(Button.builder(Component.literal("Back"), b -> Minecraft.getInstance().setScreen(parent))
+        addRenderableWidget(Button.builder(Component.literal("Back"), b -> Minecraft.getInstance().setScreen(parent.hostScreen()))
                 .bounds(centerX - 50, height - 30, 100, 20).build());
     }
 
@@ -82,7 +82,13 @@ public final class RoadwayManagementScreen extends Screen {
 
     @Override
     public void onClose() {
-        Minecraft.getInstance().setScreen(parent);
+        Minecraft.getInstance().setScreen(parent.hostScreen());
+    }
+
+    /** Matches every other Town Hall Core screen's dark backdrop -- see BannerDesignerScreen's own doc, 2026-11-13. */
+    @Override
+    public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+        graphics.fill(0, 0, width, height, 0xC0101010);
     }
 
     @Override
