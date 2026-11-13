@@ -613,6 +613,18 @@ Stake screen validity flag. Also synced `GhostPlotStakeEntity#ownerCoreId` (prev
 since the client-side overlay needed it. `./gradlew build`/`test` green, whole-suite (17 mods)
 rebuild + `runClient` boot-smoke-test clean. **Not live-tested at all yet.**
 
+**Capital City Keep color/banner selection UI implemented, 2026-11-13 -- backlog item 10** (see
+[context/decisions.md](context/decisions.md), [context/classes/CapitalCityKeep.md](context/classes/CapitalCityKeep.md))
+-- "Capital City Keep..." button on `FoundingScreen` (Capital-City-only) opens a new
+`CapitalCityKeepScreen`: no-tier-gate color cycling (reuses `settlementColor`), plus two "Design...
+Banner..." buttons (Tier 2+/3+) opening a new, reusable `BannerDesignerScreen` -- a real
+from-scratch pattern-layer designer over the live `Registries.BANNER_PATTERN` registry, client-side
+draft, live `ItemStack`-rendered preview. `GhostTownHallCoreEntity` gained `kingdomBannerPatterns`
+-- confirmed "Kingdom" is still not its own concept, just a second pattern field reusing the same
+color. Closed out Blueprynts' own deferred `KingdomBanner` substitution gap from backlog item 8 in
+the same pass. `./gradlew build`/`test` green in both repos, whole-suite (17 mods) rebuild +
+`runClient` boot-smoke-test clean. **Not live-tested at all.**
+
 **Tavern Plot Type built as a full vertical slice, 2026-10-31** (see
 [context/decisions.md](context/decisions.md),
 [context/classes/TavernPlotType.md](context/classes/TavernPlotType.md), design doc Section 17) --
