@@ -1,6 +1,7 @@
 package com.github.cerealklla.settlemynts.guardhouse;
 
 import java.util.EnumSet;
+import java.util.Optional;
 import java.util.UUID;
 
 import net.minecraft.core.BlockPos;
@@ -9,160 +10,114 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.portal.TeleportTransition;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Real user spec, 2026-10-29: a Guard that ends up outside its home dimension (e.g. chasing a
- * hostile mob through a Nether Portal while legitimately defending the town) should path to the
- * nearest portal and walk through it naturally once there's nothing left to fight or heal -- not
- * get yanked back with an instant teleport. Deliberately NOT portal-blocking/immune (an earlier
- * same-session attempt at that was built, then reverted) -- a Guard crossing dimensions through a
- * real portal, in either direction, has to stay possible, since the user explicitly wants to keep
- * the door open for a future Nether trade route.
+ * Recalls a Guard straight back to its home Guard Kit Stand the instant it's found in the wrong
+ * dimension with nothing left to fight or heal. Originally (2026-10-29) built to path the guard to
+ * the nearest portal and let it walk/cross naturally -- see this class's own real git history for
+ * that version's full writeup -- but **rebuilt into a direct, portal-free recall on 2026-11-13**
+ * per an explicit, absolute instruction: "NOTHING should be able to go through a portal now unless
+ * it's a player right clicking... No wild mobs, nothing else can ever go through End and Nether
+ * portals." That's a hard reversal of the original design's own stated goal ("deliberately NOT
+ * portal-blocking/immune... has to stay possible, since the user explicitly wants to keep the door
+ * open for a future Nether trade route") -- the new rule wins; a guard must never interact with a
+ * portal block at all, crossing or otherwise, so {@code nuclyus.api.Nuclyus#attemptPortalCrossing}
+ * is no longer called here, and neither is any portal lookup/pathing.
  *
- * <p><b>Real bug fix, 2026-10-29, same day</b> -- "I have made a settlement in the nether with a
- * guardhouse... The guards are immediately walking to the nether portal in the settlement... and
- * standing directly under it, no matter what." Root cause: {@link #isStrandedWithNoTarget}
- * originally hardcoded "home" as {@code Level.OVERWORLD} -- correct for every settlement built so
- * far, but simply wrong for one genuinely founded in the Nether, where it made this goal's
- * {@code canUse()} return {@code true} *permanently* (every guard is always "not in the Overworld"
- * there), completely starving {@link GuardPatrolAreaGoal}/the weapon goals at the same priority tier
- * of ever running at all. Now compares against {@link GuardEntity#homeDimension()} -- the real
- * dimension each guard actually spawned into (see {@code GuardSpawnTicker}) -- instead of a fixed
- * dimension, so a Nether settlement's own guards correctly read as "home" there and patrol normally;
- * only a guard that's truly strayed into a *different* dimension than its own settlement still
- * triggers this goal. A guard saved before this field existed resolves its real home dimension from
- * its own Guard Kit Stand ({@link GuardKitStandIndex}, see {@link #isStrandedWithNoTarget}'s own
- * doc for a real correction to this migration logic) rather than falling back to the same hardcoded
- * assumption that caused the bug -- so an existing Nether settlement's already-spawned guards
- * self-correct immediately, with no need to wait for them to die and respawn.
+ * <p>Practically, this also makes the scenario this goal exists for close to unreachable going
+ * forward: Nuclyus's {@code portal.VanillaPortalAutoTeleportListener} now blocks literally any
+ * non-player entity (including whatever a Guard might be chasing) from auto-crossing a portal at
+ * all, so a Guard can no longer end up astray by chasing a target through one the way the original
+ * 2026-10-29 report described. This goal is kept anyway, as a cheap defensive backstop for an
+ * already-stranded guard on an existing save (from before this change), or any other future way a
+ * guard's dimension and its home might diverge -- not deleted outright, per the general principle
+ * that a standing safety net costing nothing per-tick is worth keeping even once its original
+ * trigger is gone.
  *
  * <p>{@link GuardEntity#getTarget()} doubles as the "actively engaged" signal for both combat AND
  * healing (see {@code GuardSpellCastGoal#engage}'s own doc -- it sets the same field either way),
- * so checking for "no target" alone already covers "not fighting or healing allies" exactly as
- * asked, with no new tracking needed.
+ * so checking for "no target" alone already covers "not fighting or healing allies," same as the
+ * original design.
  *
- * <p>Finding the nearest portal reuses vanilla's own real portal lookup,
- * {@link net.minecraft.world.level.portal.PortalForcer#findClosestPortalPosition} -- the exact
- * same POI-indexed search vanilla itself uses when an entity crosses a portal and looks for an
- * existing linked one to reuse, not a hand-rolled block scan (which would be a real, needless
- * per-tick cost for every stranded guard).
- *
- * <p>Priority 2, alongside the weapon/spell goals -- safe to share that tier because the two are
- * naturally mutually exclusive by their own {@code canUse()} conditions (this goal requires no
- * target at all; the weapon/spell goals only want to run when there genuinely is one), same
- * established pattern this class already uses between {@link GuardPatrolAreaGoal} and the weapon
- * goals.
- *
- * <p><b>Real bug fix, 2026-10-30</b> -- "a bunch of guards are just standing here" (screenshot of
- * several Guards clustered around, but not inside, a Nether portal). Root cause: every stranded
- * guard pathed to the exact same single portal interior block and relied entirely on vanilla's own
- * entity-overlaps-the-portal-block detection to actually cross -- fine for one guard, but several
- * arriving at once jostle/push each other off that one block via ordinary entity collision before
- * any of them can sit still long enough to register as "inside" it, so they end up loitering next
- * to the portal instead of crossing. Fixed by snapping a guard directly onto the portal block
- * ({@link #SNAP_TRIGGER_DISTANCE_BLOCKS}, 2 blocks out, well short of melee/spell engagement range)
- * once navigation has closed most of the distance, rather than requiring it to physically walk the
- * last stretch in.
- *
- * <p><b>Updated 2026-11-13</b> -- vanilla's own automatic in-portal crossing is now disabled by
- * default (see Nuclyus's own CLAUDE.md "Plans for future" entry), specifically so a guard can no
- * longer wander into a portal and cross entirely on its own with nothing tracking it (which is
- * exactly how a guard went "missing forever" chasing a target through one). Snapping onto the
- * portal block alone would now just leave the guard standing there, so {@link #tick()} calls
- * {@code nuclyus.api.Nuclyus#attemptPortalCrossing} directly once snapped, instead of relying on
- * vanilla's (now-disabled) detection to finish the job.
+ * <p>Home position/dimension resolves from {@link GuardKitStandIndex} -- the real {@link
+ * GlobalPos} (dimension + block position) of the guard's own assigned stand, independent of chunk-
+ * load state or where the guard itself currently is (see {@link #resolveHomeFromStand}'s own doc
+ * for the migration case of a guard saved before {@link GuardEntity#homeDimension()} existed).
+ * Falls back to a safe position at the home dimension's origin (its own heightmap surface at
+ * 0,0) if the stand itself can't be resolved (e.g. picked up/removed) but the dimension is still
+ * known.
  */
 public final class GuardReturnToDimensionGoal extends Goal {
 
-    private static final double SNAP_TRIGGER_DISTANCE_BLOCKS = 2.0D;
-
     private final GuardEntity guard;
-    private final double speedModifier;
-    private BlockPos portalTarget;
 
-    public GuardReturnToDimensionGoal(GuardEntity guard, double speedModifier) {
+    public GuardReturnToDimensionGoal(GuardEntity guard) {
         this.guard = guard;
-        this.speedModifier = speedModifier;
-        setFlags(EnumSet.of(Flag.MOVE));
+        setFlags(EnumSet.noneOf(Flag.class));
     }
 
     @Override
     public boolean canUse() {
-        if (!isStrandedWithNoTarget()) {
-            return false;
-        }
-        portalTarget = findNearestPortal((ServerLevel) guard.level());
-        return portalTarget != null;
+        return isStrandedWithNoTarget();
     }
 
     @Override
     public boolean canContinueToUse() {
-        return isStrandedWithNoTarget() && portalTarget != null && !guard.getNavigation().isDone();
+        // One-shot -- start() performs the recall synchronously, nothing left to continue ticking.
+        return false;
     }
 
     /**
      * A guard saved before {@link GuardEntity#homeDimension} existed has {@code null} there.
-     *
-     * <p><b>Corrected the same day, real follow-up report</b>: "There is a guard which successfully
-     * left the nether to go to the overworld and now he's just standing here instead of going
-     * back... he has been here since before your fix." The first version of this migration lazily
-     * adopted whichever dimension the guard was *already in* as home -- wrong for precisely this
-     * guard, who was already astray (legitimately chasing/healing across a portal, from a Nether
-     * settlement) at the exact moment the migration ran, permanently mislearning "home" as the
-     * Overworld he just happened to be standing in. Fixed by resolving the real home dimension from
-     * an authoritative source instead of a guess: {@link GuardKitStandIndex} already tracks every
-     * stand's real {@link GlobalPos} (dimension included) independent of chunk-load state or where
-     * the guard itself currently is -- the same reason that index exists at all. Falls back to the
-     * guard's current dimension only if the stand itself can't be resolved (e.g. picked up/removed),
-     * matching the original, narrower fallback.
+     * Resolves the real home dimension from an authoritative source instead of a guess: {@link
+     * GuardKitStandIndex} already tracks every stand's real {@link GlobalPos} (dimension included)
+     * independent of chunk-load state or where the guard itself currently is -- the same reason
+     * that index exists at all. Falls back to the guard's current dimension only if the stand
+     * itself can't be resolved (e.g. picked up/removed).
      */
     private boolean isStrandedWithNoTarget() {
         if (!(guard.level() instanceof ServerLevel level) || guard.getTarget() != null) {
             return false;
         }
         if (guard.homeDimension() == null) {
-            guard.setHomeDimension(resolveHomeDimensionFromStand(level).orElse(level.dimension()));
+            guard.setHomeDimension(resolveHomeFromStand().map(GlobalPos::dimension).orElse(level.dimension()));
         }
         return level.dimension() != guard.homeDimension();
     }
 
-    private java.util.Optional<ResourceKey<Level>> resolveHomeDimensionFromStand(ServerLevel level) {
+    private Optional<GlobalPos> resolveHomeFromStand() {
         UUID standId = guard.assignedStandId();
-        if (standId == null) {
-            return java.util.Optional.empty();
+        if (standId == null || !(guard.level() instanceof ServerLevel level)) {
+            return Optional.empty();
         }
-        return GuardKitStandIndex.get(level.getServer()).get(standId).map(GlobalPos::dimension);
+        return GuardKitStandIndex.get(level.getServer()).get(standId);
     }
 
     @Override
     public void start() {
-        if (portalTarget != null) {
-            guard.getNavigation().moveTo(portalTarget.getX() + 0.5, portalTarget.getY(), portalTarget.getZ() + 0.5, speedModifier);
+        if (!(guard.level() instanceof ServerLevel currentLevel)) {
+            return;
         }
+        Optional<GlobalPos> stand = resolveHomeFromStand();
+        ResourceKey<Level> homeDimension = stand.map(GlobalPos::dimension).orElse(guard.homeDimension());
+        if (homeDimension == null) {
+            return;
+        }
+        ServerLevel homeLevel = currentLevel.getServer().getLevel(homeDimension);
+        if (homeLevel == null) {
+            return;
+        }
+        BlockPos homePos = stand.map(GlobalPos::pos)
+                .orElseGet(() -> homeLevel.getHeightmapPos(Heightmap.Types.MOTION_BLOCKING, BlockPos.ZERO));
+        Vec3 target = Vec3.atBottomCenterOf(homePos);
+        guard.teleport(new TeleportTransition(
+                homeLevel, target, Vec3.ZERO, guard.getYRot(), 0.0F, TeleportTransition.DO_NOTHING));
     }
 
     @Override
     public void stop() {
-        portalTarget = null;
-    }
-
-    @Override
-    public void tick() {
-        if (portalTarget == null) {
-            return;
-        }
-        Vec3 portalCenter = Vec3.atCenterOf(portalTarget);
-        if (guard.position().closerThan(portalCenter, SNAP_TRIGGER_DISTANCE_BLOCKS) && guard.level() instanceof ServerLevel level) {
-            guard.teleportTo(portalCenter.x, portalTarget.getY(), portalCenter.z);
-            com.github.cerealklla.nuclyus.api.Nuclyus.attemptPortalCrossing(level, guard, portalTarget);
-        }
-    }
-
-    private BlockPos findNearestPortal(ServerLevel level) {
-        boolean searchingInNether = level.dimension() == Level.NETHER;
-        return level.getPortalForcer()
-                .findClosestPortalPosition(guard.blockPosition(), searchingInNether, level.getWorldBorder())
-                .orElse(null);
     }
 }

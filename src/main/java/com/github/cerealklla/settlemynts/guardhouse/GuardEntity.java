@@ -319,7 +319,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         // Also priority 2 -- a Guard stranded outside its home dimension with nothing to fight or
         // heal paths back to the nearest portal instead of patrolling nonsensically; see that
         // class's own doc for why sharing this tier with the weapon/spell goals is safe.
-        this.goalSelector.addGoal(2, new GuardReturnToDimensionGoal(this, 0.8));
+        this.goalSelector.addGoal(2, new GuardReturnToDimensionGoal(this));
         // "Put out fires they can see... priority 1 upon reaching a target, then looking for
         // enemies, then picking a new stake" (explicit user spec, 2026-10-30) -- priority 1, strictly
         // above GuardReturnToDimensionGoal/the weapon-or-spell goal above (priority 2, which already
@@ -536,25 +536,28 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
      * and I'm guessing because no one is in there they are just stuck in stasis." Confirmed root
      * cause: nothing force-loads a guard's chunk once it crosses into a dimension with no player
      * nearby, so the chunk unloads under ordinary vanilla rules and this guard (including {@link
-     * GuardReturnToDimensionGoal}, the very goal that would walk it back home) simply stops ticking,
-     * frozen wherever it stood, forever. Explicit user direction: "I don't care if they go into the
-     * portal so long as they come back out again" -- so this doesn't block/avoid portal crossings at
-     * all (that's deliberately left alone, see {@link GuardReturnToDimensionGoal}'s own doc), it just
-     * guarantees a stranded guard's chunk never goes to sleep until it's actually found its way home,
-     * via the user's own suggested mechanism: Nuclyus's shared {@link ChunkClaims} ticket primitive.
+     * GuardReturnToDimensionGoal}, the very goal that would recall it home) simply stops ticking,
+     * frozen wherever it stood, forever. Guarantees a stranded guard's chunk never goes to sleep
+     * until it's actually found its way home, via Nuclyus's shared {@link ChunkClaims} ticket
+     * primitive.
+     *
+     * <p><b>Note (2026-11-13)</b>: this no longer matters for how a guard ends up stranded in the
+     * first place -- Nuclyus's {@code portal.VanillaPortalAutoTeleportListener} now blocks any
+     * non-player entity from crossing a portal at all, including whatever a guard was chasing, so
+     * the original 2026-11-02 scenario can't recur going forward (see {@link
+     * GuardReturnToDimensionGoal}'s own doc). Left in place regardless as a cheap, still-correct
+     * safety net for an already-stranded guard from before that change, or any other future way a
+     * guard's dimension and its home might diverge.
      *
      * <p>Since this runs every tick a guard is actively ticking (which a forced chunk always is),
      * claiming just the guard's own current chunk here -- not a fixed radius, and with no separate
      * re-claim timer -- is enough: {@link ChunkClaims#claim} is cheap to call redundantly (a no-op
      * once a chunk's already claimed), and because it's additive rather than replacing the claim's
-     * chunk set each time, every chunk the guard ever stands in while stranded stays force-loaded for
-     * the rest of the trip, naturally force-loading a full trail from its arrival point to wherever
-     * the portal actually is -- no need to know that location in advance, or to force-load the
-     * portal's own chunk specifically (vanilla's POI-backed portal lookup doesn't need its target
-     * chunk to be currently loaded to find it, only the searching entity's own chunk needs to keep
-     * ticking). Released in one call the instant the guard's dimension matches {@link
-     * #homeDimension()} again -- correctly covers a guard that's fighting/healing mid-crossing too,
-     * since that only pauses {@link GuardReturnToDimensionGoal} itself, not this dimension check.
+     * chunk set each time, every chunk the guard ever stands in while stranded stays force-loaded
+     * for as long as it takes to find its way home. Released in one call the instant the guard's
+     * dimension matches {@link #homeDimension()} again -- correctly covers a guard that's
+     * fighting/healing while stranded too, since that only pauses {@link
+     * GuardReturnToDimensionGoal} itself, not this dimension check.
      */
     private boolean strandedChunkClaimActive;
 
