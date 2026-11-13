@@ -132,6 +132,16 @@ public final class BlueprintsConstructionBridge {
         resolveLivePos(level, plot).ifPresent(pos -> Blueprynts.notifyPlotBoxesChanged(level, pos));
     }
 
+    /**
+     * Notifies {@code plot}'s own Construction Box (if any, and if currently loaded) that the
+     * settlement's local-variant theme (color/banner) just changed, so it re-pulls a fresh value --
+     * added 2026-11-13 (backlog item 7), same shape as {@link #notifyPlotBoxesChanged} above but for
+     * {@code api.Blueprynts#notifyLocalVariantChanged}.
+     */
+    public static void notifyLocalVariantChanged(ServerLevel level, PlotRecord plot) {
+        resolveLivePos(level, plot).ifPresent(pos -> Blueprynts.notifyLocalVariantChanged(level, pos));
+    }
+
     /** A plot's current Construction Box Tier -- added 2026-10-05 for {@code zone.ShopSeeding}, which needs to know how far up a Zone Type's seed catalog it's allowed to reach. */
     public static Optional<Integer> resolveTier(ServerLevel level, UUID constructionBoxId) {
         return Blueprynts.getConstructionBoxPos(level, constructionBoxId)

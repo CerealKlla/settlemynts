@@ -28,7 +28,9 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BannerPatternLayers;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.Vec3;
@@ -127,6 +129,15 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
     // free-form text storage here, same "trust the author" shape as every other open-ended tag/name
     // field in this suite.
     private final Set<String> requiredTags = new HashSet<>();
+
+    // Local variant details (backlog item 7, added 2026-11-13) -- "the banner is defined within the
+    // town hall core," per explicit user spec. No Mayor-facing UI to set these exists yet (that's
+    // backlog items 11/12, Tier-gated Settlement Color/Banner selection) -- these setters exist now
+    // purely so that future UI has something real to call, and so Blueprynts' Construction Box can
+    // already pull a real (if currently always-default/never-updated) value. `null`/`EMPTY` means
+    // "not set yet," handled as a sensible default on the Blueprynts side (no tint / a blank banner).
+    private DyeColor settlementColor;
+    private BannerPatternLayers settlementBannerPatterns = BannerPatternLayers.EMPTY;
 
     public GhostTownHallCoreEntity(EntityType<? extends GhostTownHallCoreEntity> type, Level level) {
         super(type, level);
@@ -301,6 +312,42 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         requiredTags.addAll(tags);
     }
 
+    /** {@code null} if the Mayor hasn't set one yet -- see {@link #settlementColor} field doc. */
+    public DyeColor settlementColor() {
+        return settlementColor;
+    }
+
+    public void setSettlementColor(ServerLevel level, DyeColor color) {
+        this.settlementColor = color;
+        notifyLocalVariantChanged(level);
+    }
+
+    /** {@link BannerPatternLayers#EMPTY} ("blank banner") if the Mayor hasn't designed one yet. */
+    public BannerPatternLayers settlementBannerPatterns() {
+        return settlementBannerPatterns;
+    }
+
+    public void setSettlementBannerPatterns(ServerLevel level, BannerPatternLayers patterns) {
+        this.settlementBannerPatterns = patterns == null ? BannerPatternLayers.EMPTY : patterns;
+        notifyLocalVariantChanged(level);
+    }
+
+    /**
+     * Pushes a refreshed local-variant context out to every one of this settlement's plots' own
+     * Construction Boxes -- per explicit user spec, "it needs to be updated any time the town hall
+     * core updates it." Mirrors {@code bridge.BlueprintsConstructionBridge#notifyPlotBoxesChanged}'s
+     * own existing shape/no-op guarantees (a Blueprynts-less server, or a plot with no live box,
+     * just does nothing).
+     */
+    private void notifyLocalVariantChanged(ServerLevel level) {
+        if (!net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
+            return;
+        }
+        for (PlotRecord plot : plots) {
+            com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.notifyLocalVariantChanged(level, plot);
+        }
+    }
+
     public boolean isFounder(UUID playerId) {
         return founderId != null && founderId.equals(playerId);
     }
@@ -441,6 +488,8 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         taxPerItem = Math.max(0, input.getIntOr("TaxPerTransaction", 1));
         requiredTags.clear();
         requiredTags.addAll(input.read("RequiredTags", Codec.STRING.listOf()).orElse(List.of()));
+        settlementColor = input.read("SettlementColor", DyeColor.CODEC).orElse(null);
+        settlementBannerPatterns = input.read("SettlementBannerPatterns", BannerPatternLayers.CODEC).orElse(BannerPatternLayers.EMPTY);
         plots.clear();
         plots.addAll(input.read("Plots", Codec.list(PlotRecord.CODEC)).orElse(List.of()));
     }
@@ -459,6 +508,8 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
         output.putBoolean("ShowRoadwayStakes", showRoadwayStakes);
         output.putInt("TaxPerTransaction", taxPerItem);
         output.store("RequiredTags", Codec.STRING.listOf(), List.copyOf(requiredTags));
+        output.storeNullable("SettlementColor", DyeColor.CODEC, settlementColor);
+        output.store("SettlementBannerPatterns", BannerPatternLayers.CODEC, settlementBannerPatterns);
         output.store("Plots", Codec.list(PlotRecord.CODEC), List.copyOf(plots));
     }
 }

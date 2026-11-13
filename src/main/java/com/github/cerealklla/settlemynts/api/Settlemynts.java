@@ -1267,6 +1267,34 @@ public final class Settlemynts {
     }
 
     /**
+     * A plot's full local-variant context (backlog item 7, added 2026-11-13) -- the biome-derived
+     * wood species at {@code posForBiome} ({@link com.github.cerealklla.settlemynts.zone.LocalWoodResolver}),
+     * plus {@code settlementCoreId}'s own Mayor-set color/banner (empty/blank if unset, or if
+     * {@code settlementCoreId} doesn't resolve to a real core at all -- e.g. a natural village, or a
+     * chunk-not-loaded core). Kingdom color/banner are **not** included here -- there is no "Kingdom"
+     * concept anywhere in this suite yet (backlog items 9/10, not built), so this intentionally only
+     * ever covers the Settlement level. The intended call site is Blueprynts' own Construction Box
+     * (via {@code bridge.SettlemyntsPlotBoxBridge#getLocalVariantContext}), for the not-yet-built
+     * backlog item 8 (actually substituting LocalWood/SettlementTorch/etc. placeholder blocks).
+     */
+    public record LocalVariantContext(Identifier woodPlanksId, Optional<net.minecraft.world.item.DyeColor> settlementColor,
+                                       net.minecraft.world.level.block.entity.BannerPatternLayers settlementBannerPatterns) {
+    }
+
+    public static LocalVariantContext getLocalVariantContext(ServerLevel level, UUID settlementCoreId, BlockPos posForBiome) {
+        Identifier woodPlanksId = com.github.cerealklla.settlemynts.zone.LocalWoodResolver.resolve(level, posForBiome);
+        if (settlementCoreId == null) {
+            return new LocalVariantContext(woodPlanksId, Optional.empty(), net.minecraft.world.level.block.entity.BannerPatternLayers.EMPTY);
+        }
+        com.github.cerealklla.settlemynts.founding.SettlementCoreIndex.get(level.getServer()).get(settlementCoreId)
+                .ifPresent(pos -> forceLoadCoreChunk(level, pos));
+        if (!(level.getEntity(settlementCoreId) instanceof com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity core)) {
+            return new LocalVariantContext(woodPlanksId, Optional.empty(), net.minecraft.world.level.block.entity.BannerPatternLayers.EMPTY);
+        }
+        return new LocalVariantContext(woodPlanksId, Optional.ofNullable(core.settlementColor()), core.settlementBannerPatterns());
+    }
+
+    /**
      * {@code settlementCoreId}'s display name, covering BOTH real player-founded cores ({@link
      * #getSettlementName}) and natural villages -- added 2026-11-08 for Terrytories' reputation UI
      * and the mayor's-letter feature, both of which need a real name for a natural village's
