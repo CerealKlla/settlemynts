@@ -81,6 +81,13 @@ public class SettlemyntsModClient {
     }
 
     @SubscribeEvent
+    static void onRegisterLayerDefinitions(EntityRenderersEvent.RegisterLayerDefinitions event) {
+        // Guard cloak (backlog item 12, 2026-11-13) -- see GuardCloakModel's own doc.
+        event.registerLayerDefinition(com.github.cerealklla.settlemynts.guardhouse.client.ModGuardModelLayers.GUARD_CLOAK,
+                com.github.cerealklla.settlemynts.guardhouse.client.GuardCloakModel::createCloakLayer);
+    }
+
+    @SubscribeEvent
     static void onRegisterRenderers(EntityRenderersEvent.RegisterRenderers event) {
         // The Core itself no longer renders a floating icon (2026-10-05, see its renderer's own
         // doc) -- GhostTownHallCoreRenderer is now a deliberate no-op; the visible marker is its

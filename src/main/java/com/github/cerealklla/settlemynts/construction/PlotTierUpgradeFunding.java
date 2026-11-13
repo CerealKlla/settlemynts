@@ -268,6 +268,9 @@ public final class PlotTierUpgradeFunding {
         if (isTownHall) {
             com.github.cerealklla.settlemynts.roadway.RoadwayRetier.repaintSettlementRoads(level, core.getUUID(), newTier);
         }
+        // Backlog item 12 (2026-11-13) -- any plot's Tier can affect its own guards' cloaks (Town
+        // Hall Tier gates cloak visibility; a Guardhouse plot's own Tier gates the banner on it).
+        com.github.cerealklla.settlemynts.guardhouse.GuardCloakSync.refreshForSettlement(level, core.getUUID());
         com.github.cerealklla.settlemynts.SettlemyntsMod.grantMayorSkillXpForPlotUpgrade(level.getServer(), core, newTier);
         return Optional.of(newTier);
     }

@@ -30,6 +30,7 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EntityType;
@@ -54,8 +55,10 @@ import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BannerPatternLayers;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
  * A spawned garrison guard -- the first real {@code Mob}/{@code PathfinderMob} anywhere in this
@@ -175,6 +178,18 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     private static final EntityDataAccessor<Boolean> DATA_FEMALE =
             SynchedEntityData.defineId(GuardEntity.class, EntityDataSerializers.BOOLEAN);
 
+    /**
+     * Backlog item 12, added 2026-11-13 -- a {@link net.minecraft.world.item.DyeColor} name ({@code
+     * ""} = no cloak at all, Town Hall below Tier 3), and whether this guard's own Guardhouse plot
+     * is Tier 3+ (so its cloak also shows the settlement banner). Both plain {@code
+     * SynchedEntityData}, unlike {@link #lastSentCloakBannerPatterns} -- see {@link
+     * GuardCloakBannerPayload}'s own doc for why the actual pattern layers need a separate payload.
+     */
+    private static final EntityDataAccessor<String> DATA_CLOAK_COLOR =
+            SynchedEntityData.defineId(GuardEntity.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<Boolean> DATA_SHOW_BANNER =
+            SynchedEntityData.defineId(GuardEntity.class, EntityDataSerializers.BOOLEAN);
+
     /** Floating nameplate text (Nuclyus's stat-bar overlay) -- reads the already-synced {@link #DATA_DISPLAY_NAME}. */
     @Override
     public net.minecraft.network.chat.Component displayName() {
@@ -186,11 +201,23 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         return entityData.get(DATA_FEMALE);
     }
 
+    /** {@code ""} if no cloak should render at all right now -- see {@link #refreshCloakState}. */
+    public String cloakColorName() {
+        return entityData.get(DATA_CLOAK_COLOR);
+    }
+
+    /** Whether this guard's cloak should also show its settlement's banner -- meaningless if {@link #cloakColorName()} is empty. */
+    public boolean showsCloakBanner() {
+        return entityData.get(DATA_SHOW_BANNER);
+    }
+
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
         builder.define(DATA_DISPLAY_NAME, "");
         builder.define(DATA_FEMALE, false);
+        builder.define(DATA_CLOAK_COLOR, "");
+        builder.define(DATA_SHOW_BANNER, false);
     }
 
     /** Overwrites {@link #DATA_DISPLAY_NAME} directly, bypassing {@link #syncDisplayName}'s "already has a real name" guard -- only for {@code debug.DebugCommands#dedupNpcNames}, a one-time admin fix for already-persisted duplicate names (see that command's own doc). */
@@ -301,6 +328,65 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
                 .map(GeographicEntity::geometry)
                 .filter(Geometry.Polygon.class::isInstance)
                 .map(Geometry.Polygon.class::cast);
+    }
+
+    /** The last {@link BannerPatternLayers} actually broadcast via {@link GuardCloakBannerPayload} -- not persisted (a fresh spawn/reload always re-resolves via {@link #refreshCloakState}), used only to skip a redundant resend when nothing changed. */
+    private BannerPatternLayers lastSentCloakBannerPatterns = BannerPatternLayers.EMPTY;
+
+    /**
+     * Recomputes this guard's cloak visibility/color (Town Hall Tier 3+, tinted the settlement
+     * color, defaulting to white if the Mayor hasn't picked one yet -- same "default white" fallback
+     * {@code client.BannerDesignerScreen}'s own constructor already uses) and banner-pattern
+     * visibility (this guard's own Guardhouse plot's live built Tier 3+) -- backlog item 12. Called
+     * at well-defined moments rather than polled: guard spawn ({@link GuardSpawnTicker}), whenever
+     * the Mayor changes the settlement's color/banner ({@code
+     * founding.GhostTownHallCoreEntity#notifyLocalVariantChanged}), and right after any plot's Tier
+     * is raised ({@code construction.PlotTierUpgradeFunding}) -- see {@link GuardCloakSync} for the
+     * settlement-wide fan-out across all three.
+     *
+     * <p><b>Known accepted gap</b>: if a Guardhouse's bound Blueprint finishes construction to Tier
+     * 3+ without a fresh "Upgrade Plot" click (the Tier cap was already raised earlier and
+     * construction simply caught up later), nothing currently re-triggers this -- there is no
+     * "construction completed" event anywhere in this codebase to hook (every other live-tier read
+     * in this mod, e.g. {@link #fundFastRespawn}, accepts the same "resolved fresh only when
+     * something else already needs it" limitation rather than polling for it).
+     */
+    public void refreshCloakState(ServerLevel level) {
+        if (settlementCoreId == null || !(level.getEntity(settlementCoreId) instanceof GhostTownHallCoreEntity core)) {
+            return;
+        }
+        int townHallTier = core.townHallPlot().map(PlotRecord::tier).orElse(1);
+        boolean showCloak = townHallTier >= 3;
+        entityData.set(DATA_CLOAK_COLOR, showCloak
+                ? (core.settlementColor() != null ? core.settlementColor() : net.minecraft.world.item.DyeColor.WHITE).getName()
+                : "");
+
+        boolean showBanner = false;
+        if (showCloak && plotId != null && net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
+            PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(plotId)).findFirst().orElse(null);
+            if (plot != null) {
+                showBanner = com.github.cerealklla.settlemynts.bridge.BlueprintsConstructionBridge.resolveTier(level, plot) >= 3;
+            }
+        }
+        entityData.set(DATA_SHOW_BANNER, showBanner);
+        sendCloakBannerPatterns(level, showBanner ? core.settlementBannerPatterns() : BannerPatternLayers.EMPTY);
+    }
+
+    private void sendCloakBannerPatterns(ServerLevel level, BannerPatternLayers patterns) {
+        if (patterns.equals(lastSentCloakBannerPatterns)) {
+            return;
+        }
+        lastSentCloakBannerPatterns = patterns;
+        PacketDistributor.sendToPlayersTrackingEntity(this, new GuardCloakBannerPayload(getId(), patterns));
+    }
+
+    /** A new tracker never replays a previously-broadcast custom payload on its own (unlike {@code SynchedEntityData}, which resyncs for free) -- explicitly resend the current cloak banner pattern here, see {@link GuardCloakBannerPayload}'s own doc. */
+    @Override
+    public void startSeenByPlayer(ServerPlayer player) {
+        super.startSeenByPlayer(player);
+        if (!lastSentCloakBannerPatterns.layers().isEmpty()) {
+            PacketDistributor.sendToPlayer(player, new GuardCloakBannerPayload(getId(), lastSentCloakBannerPatterns));
+        }
     }
 
     /** Placeholder numbers, flagged as tunable later -- same "retune later" convention as {@link GuardhouseConstants#capacityForTier}. */

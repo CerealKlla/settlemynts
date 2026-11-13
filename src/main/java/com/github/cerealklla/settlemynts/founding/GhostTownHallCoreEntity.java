@@ -379,6 +379,9 @@ public class GhostTownHallCoreEntity extends Entity implements com.github.cereal
      * just does nothing).
      */
     private void notifyLocalVariantChanged(ServerLevel level) {
+        // Backlog item 12 (2026-11-13) -- a color/banner change can affect every guard's cloak in
+        // this settlement, independent of whether Blueprynts is even loaded.
+        com.github.cerealklla.settlemynts.guardhouse.GuardCloakSync.refreshForSettlement(level, getUUID());
         if (!net.neoforged.fml.ModList.get().isLoaded("blueprynts")) {
             return;
         }

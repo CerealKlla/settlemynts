@@ -625,6 +625,41 @@ color. Closed out Blueprynts' own deferred `KingdomBanner` substitution gap from
 the same pass. `./gradlew build`/`test` green in both repos, whole-suite (17 mods) rebuild +
 `runClient` boot-smoke-test clean. **Not live-tested at all.**
 
+**Regular-settlement color/banner selection UI implemented, 2026-11-13 -- backlog item 11** (see
+[context/decisions.md](context/decisions.md), [context/classes/ColorAndBannerScreen.md](context/classes/ColorAndBannerScreen.md))
+-- picked up directly after backlog item 10, same day. Item 10's Capital-City-only
+`CapitalCityKeepScreen`/payloads were renamed/widened in place (`ColorAndBannerScreen`,
+`RequestColorAndBannerScreenPayload`, `OpenColorAndBannerScreenPayload`,
+`SetSettlementColorPayload`, `SetSettlementBannerPayload`) rather than duplicated, since
+`settlementColor`/`settlementBannerPatterns` were already settlement-type-agnostic fields
+(backlog item 7) -- a regular settlement's Town Hall can now select a color at Tier 2+ and
+design a banner at Tier 3+, the exact same mechanism/UI a Capital City already used at Tier
+1+/2+. Kingdom Banner stays Capital-City-only, no equivalent built for a regular settlement.
+`BannerDesignerScreen` needed zero changes -- already fully generic via its `CommitFactory`
+interface. `./gradlew build`/`test` green, whole-suite (17 mods) rebuild +
+`runClient` boot-smoke-test clean (needed three attempts before one reached mod
+construction; the first two just timed out mid-mixin-application, environmental slowness,
+not a real bug). **Not yet live-tested.**
+
+**Guard Cloaks implemented, 2026-11-13 -- backlog item 12, closing out the whole items 4-12 chain**
+(see [context/decisions.md](context/decisions.md), [context/classes/GuardCloak.md](context/classes/GuardCloak.md))
+-- Town Hall Tier 3+ shows every one of a settlement's guards a cloak tinted the settlement color
+(white default); a guard's own Guardhouse plot reaching Tier 3+ (its *live built* Tier, via
+`bridge.BlueprintsConstructionBridge#resolveTier`, not just the plot's raised Tier cap) additionally
+shows the settlement banner on it. Two new plain `SynchedEntityData` fields on `GuardEntity`
+(`cloakColorName`/`showsCloakBanner`) plus a new server-to-client `GuardCloakBannerPayload` for the
+actual `BannerPatternLayers` (no `EntityDataSerializer` exists for that type, same established
+reason this mod never registers one -- see `GhostPlotStakeEntity`'s own class doc). New
+`client.GuardCloakLayer`/`GuardCloakModel` render the cloak by calling vanilla's own
+`BannerRenderer#submitPatterns` directly against a small custom flag-shaped model -- no new
+texture-baking code, since "a color-tinted cloak with a banner pattern on it" is already exactly
+what a banner's own base+pattern rendering means. Refreshed from three event triggers only
+(`GuardCloakSync#refreshForSettlement`), deliberately not a ticker -- guard spawn, the Mayor
+changing the settlement color/banner, and any plot's Tier being raised -- following the standing
+lesson `GuardSpawnTicker`'s own 2026-10-22 doc already recorded about this exact class of
+guard-state refresh. `./gradlew build`/`test` green, whole-suite (17 mods) rebuild + `runClient`
+boot-smoke-test clean (all common-setup lines logged, no exceptions). **Not yet live-tested.**
+
 **Tavern Plot Type built as a full vertical slice, 2026-10-31** (see
 [context/decisions.md](context/decisions.md),
 [context/classes/TavernPlotType.md](context/classes/TavernPlotType.md), design doc Section 17) --

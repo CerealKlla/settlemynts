@@ -820,6 +820,14 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.guardhouse.SetPreferredFoodPayload.STREAM_CODEC,
                 (payload, context) -> setPreferredFood(payload, context));
 
+        // Guard cloak banner pattern (backlog item 12, 2026-11-13) -- see GuardCloakBannerPayload's
+        // own doc for why this can't just be plain SynchedEntityData. ClientGuardCloakData is safe
+        // to reference directly here (no real client-only type involved -- see its own doc).
+        registrar.playToClient(com.github.cerealklla.settlemynts.guardhouse.GuardCloakBannerPayload.TYPE,
+                com.github.cerealklla.settlemynts.guardhouse.GuardCloakBannerPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.guardhouse.client.ClientGuardCloakData
+                        .set(payload.entityId(), payload.patterns()));
+
         // "Auto-Drop" keybind (2026-10-17) -- see zone.AutoDropper's own doc.
         registrar.playToServer(com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload.TYPE,
                 com.github.cerealklla.settlemynts.zone.RequestAutoDropPayload.STREAM_CODEC,
@@ -3158,6 +3166,9 @@ public class SettlemyntsMod {
         // (updatePlot above), so this is the real, current average, not a stale pre-upgrade value.
         com.github.cerealklla.settlemynts.roadway.HighwayRetier.retierHighwaysForSettlement(
                 serverLevel, core.getUUID(), com.github.cerealklla.settlemynts.roadway.SettlementTierResolver.averageTier(core.getPlots()));
+        // Backlog item 12 (2026-11-13) -- any plot's Tier can affect its own guards' cloaks (Town
+        // Hall Tier gates cloak visibility; a Guardhouse plot's own Tier gates the banner on it).
+        com.github.cerealklla.settlemynts.guardhouse.GuardCloakSync.refreshForSettlement(serverLevel, core.getUUID());
         grantMayorSkillXpForPlotUpgrade(serverLevel.getServer(), core, newTier);
         // Real live report, 2026-10-12: a Myssions "help upgrade this plot" quest themed around this
         // exact upgrade had no way to find out it happened, and stayed stuck forever even though the

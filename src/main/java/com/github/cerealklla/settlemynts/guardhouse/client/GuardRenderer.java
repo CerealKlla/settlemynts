@@ -10,6 +10,7 @@ import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.client.resources.DefaultPlayerSkin;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.DyeColor;
 
 /**
  * {@link GuardEntity}'s client renderer -- built on vanilla's own {@link ModelLayers#ZOMBIE} body
@@ -36,6 +37,12 @@ import net.minecraft.resources.Identifier;
  * "Alex is the slim-arm skin" would suggest. {@link #getTextureLocation} branches on {@link
  * GuardRenderState#female} (populated in {@link #extractRenderState}) between the two -- zero new art
  * needed, both are real vanilla game assets.
+ *
+ * <p><b>Cloak, 2026-11-13</b> -- backlog item 12. A second {@code addLayer} call wires in {@link
+ * GuardCloakLayer}; its visibility/color/banner-pattern flag come off {@link GuardEntity}'s own
+ * synced state ({@link GuardEntity#cloakColorName()}/{@link GuardEntity#showsCloakBanner()}, plain
+ * {@code SynchedEntityData}) plus {@link ClientGuardCloakData} for the actual pattern layers (which
+ * can't go through {@code SynchedEntityData} at all -- see that payload's own doc).
  */
 public final class GuardRenderer extends HumanoidMobRenderer<GuardEntity, GuardRenderState, HumanoidModel<GuardRenderState>> {
 
@@ -47,6 +54,8 @@ public final class GuardRenderer extends HumanoidMobRenderer<GuardEntity, GuardR
         ArmorModelSet<HumanoidModel<GuardRenderState>> armorModels =
                 ArmorModelSet.bake(ModelLayers.ZOMBIE_ARMOR, context.getModelSet(), HumanoidModel::new);
         this.addLayer(new HumanoidArmorLayer<>(this, armorModels, context.getEquipmentRenderer()));
+        // Backlog item 12 (2026-11-13) -- see GuardCloakLayer's own doc.
+        this.addLayer(new GuardCloakLayer(this, context.getModelSet(), context.getSprites()));
     }
 
     @Override
@@ -58,6 +67,12 @@ public final class GuardRenderer extends HumanoidMobRenderer<GuardEntity, GuardR
     public void extractRenderState(GuardEntity entity, GuardRenderState state, float partialTicks) {
         super.extractRenderState(entity, state, partialTicks);
         state.female = entity.isFemale();
+        state.showCloak = !entity.cloakColorName().isEmpty();
+        state.cloakColor = state.showCloak ? DyeColor.byName(entity.cloakColorName(), DyeColor.WHITE) : DyeColor.WHITE;
+        state.showBanner = entity.showsCloakBanner();
+        state.cloakBannerPatterns = state.showBanner
+                ? ClientGuardCloakData.get(entity.getId())
+                : net.minecraft.world.level.block.entity.BannerPatternLayers.EMPTY;
     }
 
     @Override

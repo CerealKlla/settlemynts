@@ -138,6 +138,9 @@ public final class GuardSpawnTicker {
         guard.setHomeDimension(level.dimension());
         level.addFreshEntity(guard);
         stand.setAssignedGuardId(guard.getUUID());
+        // Backlog item 12 (2026-11-13) -- a freshly-spawned guard otherwise starts with no cloak
+        // state at all until the next settlement-wide refresh event.
+        guard.refreshCloakState(level);
     }
 
     /**
