@@ -579,6 +579,19 @@ Lumberjack/Miner each just `implements nuclyus.statbar.StatBarOwner` now. `./gra
 whole-suite (13 mods) rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested** -- the
 new client rendering code has only been confirmed to compile.
 
+**Town Hall Core required Blueprint tags, 2026-11-13 -- backlog item 5** (see
+[context/decisions.md](context/decisions.md),
+[context/classes/FoundingScreenAndPayloads.md](context/classes/FoundingScreenAndPayloads.md)) --
+picked up directly after Blueprynts' own tag system (backlog item 4), per explicit user direction
+to move through the root project's "Plans for future" list in order. `GhostTownHallCoreEntity`
+gained a persisted `requiredTags` set, Mayor-only settable (`core.isFounder`, narrower than every
+sibling control on `FoundingScreen`, which any Town Planner may use) via a new `FoundingScreen`
+"Required Tags" box and `SetRequiredTagsPayload`. New `api.Settlemynts#getRequiredTags` is the
+cross-mod read facade; Blueprynts' Construction Box picker now filters to Blueprints carrying every
+required tag (ALL semantics, not ANY -- ANY would make one incidental tag satisfy an otherwise-
+unrelated list). `./gradlew build`/`test` green in both repos, whole-suite (17 mods) rebuild +
+`runServer` boot-smoke-test clean. **Not yet live-tested.**
+
 **Tavern Plot Type built as a full vertical slice, 2026-10-31** (see
 [context/decisions.md](context/decisions.md),
 [context/classes/TavernPlotType.md](context/classes/TavernPlotType.md), design doc Section 17) --
