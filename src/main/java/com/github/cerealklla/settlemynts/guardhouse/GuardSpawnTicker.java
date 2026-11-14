@@ -6,6 +6,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.github.cerealklla.kyt.loadout.LoadoutRecord;
+import com.github.cerealklla.nuclyus.chunkload.ChunkClaimId;
+import com.github.cerealklla.nuclyus.chunkload.ChunkClaims;
 import com.github.cerealklla.settlemynts.api.Settlemynts;
 import com.github.cerealklla.settlemynts.bridge.KytGuardhouseBridge;
 import com.github.cerealklla.settlemynts.npc.NpcIdentityBirth;
@@ -114,8 +116,19 @@ public final class GuardSpawnTicker {
             // visiting every stand for the guard's own death/respawn timer, is the closest thing to
             // a "timer" available without a dedicated new scheduling mechanism; see
             // GuardEntity#recheckCompanions's own doc.
-            if (level.getEntity(stand.assignedGuardId().get()) instanceof GuardEntity guard) {
+            UUID guardId = stand.assignedGuardId().get();
+            if (level.getEntity(guardId) instanceof GuardEntity guard) {
                 guard.recheckCompanions(level);
+            } else {
+                // Real bug fix, 2026-11-13 -- see GuardStrandedLocationIndex's own doc for the full
+                // bootstrap-gap incident ("several of my settlement's guards are not respawning
+                // because the server thinks they're in the nether still"). Not found here just means
+                // "not currently loaded in this stand's own home dimension" -- harmless on its own
+                // (a guard away on patrol looks the same), but if it's ALSO listed as stranded, its
+                // own chunk-claim died with the last server restart and nothing else will ever force
+                // it open again. Re-issuing it here, from this stand's reliably-loaded home chunk, is
+                // what breaks that cycle.
+                reclaimStrandedGuard(level.getServer(), guardId);
             }
             return;
         }
@@ -159,5 +172,23 @@ public final class GuardSpawnTicker {
         return Settlemynts.resolvePolygonDirect(level, plot)
                 .map(polygon -> Settlemynts.resolveBoxesForPolygon(level, polygon))
                 .orElse(List.of());
+    }
+
+    /**
+     * Re-issues a stranded guard's own chunk-force-load claim from here -- a reliably-loaded,
+     * reachable-every-scan anchor (this stand's own home chunk), unlike the guard's own entity-side
+     * claim in {@code GuardEntity#maintainStrandedChunkClaim}, which can only ever re-establish
+     * itself from inside a tick that will never happen again once the claim's been wiped by a
+     * restart. Uses the exact same {@link ChunkClaimId} shape the guard itself uses
+     * ({@code strandedChunkClaimId()}), so once the chunk loads and the guard resumes ticking, it
+     * seamlessly takes back over maintaining (and eventually releasing) this same claim.
+     */
+    private static void reclaimStrandedGuard(MinecraftServer server, UUID guardId) {
+        GuardStrandedLocationIndex.get(server).get(guardId).ifPresent(pos -> {
+            ServerLevel strandedLevel = server.getLevel(pos.dimension());
+            if (strandedLevel != null) {
+                ChunkClaims.claim(strandedLevel, new ChunkClaimId("settlemynts", "guard_stranded", guardId), List.of(pos.pos()));
+            }
+        });
     }
 }

@@ -565,6 +565,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         if (strandedChunkClaimActive && level() instanceof ServerLevel claimLevel) {
             strandedChunkClaimActive = false;
             ChunkClaims.release(claimLevel.getServer(), strandedChunkClaimId());
+            GuardStrandedLocationIndex.get(claimLevel.getServer()).remove(getUUID());
         }
         if (plotId == null || assignedStandId == null || !(level() instanceof ServerLevel serverLevel)) {
             return;
@@ -654,9 +655,16 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         if (level.dimension() != homeDimension()) {
             strandedChunkClaimActive = true;
             ChunkClaims.claim(level, strandedChunkClaimId(), List.of(blockPosition()));
+            // Real bug fix, 2026-11-13 -- see GuardStrandedLocationIndex's own doc for the full
+            // bootstrap-gap incident this closes. Written every tick while stranded (cheap plain map
+            // write) so GuardSpawnTicker always has a current position to re-claim from after a
+            // restart wipes this entity-side claim out from under it.
+            GuardStrandedLocationIndex.get(level.getServer())
+                    .put(getUUID(), net.minecraft.core.GlobalPos.of(level.dimension(), blockPosition()));
         } else if (strandedChunkClaimActive) {
             strandedChunkClaimActive = false;
             ChunkClaims.release(level.getServer(), strandedChunkClaimId());
+            GuardStrandedLocationIndex.get(level.getServer()).remove(getUUID());
         }
     }
 
