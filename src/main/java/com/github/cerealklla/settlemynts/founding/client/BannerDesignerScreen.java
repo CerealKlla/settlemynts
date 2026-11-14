@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.founding.client;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -38,6 +39,12 @@ import net.minecraft.world.level.block.entity.BannerPatternLayers;
  * <p>Available patterns are enumerated from {@code Registries.BANNER_PATTERN} at {@link #init()}
  * time (a real datapack-driven registry, not a hardcoded list -- survives any future datapack
  * adding more) via the connected level's own registry access, the same lookup a server would use.
+ *
+ * <p>Redesigned into a two-column layout, 2026-11-13, from a user-supplied mockup: a left "Design"
+ * column (the composed-banner preview, Save/Wipe/Cancel) and a right column (a left/right-arrow
+ * Pattern preview showing the candidate next layer, a direct 4x4 {@link DyeColor} swatch grid --
+ * exactly 16 colors, no cycling needed -- and Add/Undo). The old single "Pattern: N/M" text button
+ * and "Color: white" cycle button are both gone, replaced by direct-manipulation controls.
  */
 public final class BannerDesignerScreen extends Screen {
 
@@ -55,10 +62,24 @@ public final class BannerDesignerScreen extends Screen {
     private int patternIndex;
     private DyeColor layerColor = DyeColor.WHITE;
 
-    private Button addLayerButton;
-    private Button patternButton;
-    private Button layerColorButton;
-    private int candidatePreviewTop;
+    private Button addButton;
+
+    /** The main (left-column) composed-banner preview -- bigger than the pattern preview, it's the headline result. */
+    private static final int MAIN_PREVIEW_SIZE = 72;
+    private static final float MAIN_PREVIEW_SCALE = MAIN_PREVIEW_SIZE / 16.0F;
+    /** The right-column "what would Add produce" preview, flanked by Prev/Next arrows. */
+    private static final int PATTERN_PREVIEW_SIZE = 48;
+    private static final float PATTERN_PREVIEW_SCALE = PATTERN_PREVIEW_SIZE / 16.0F;
+    private static final int PATTERN_PREVIEW_PANEL_PAD = 4;
+    private static final int SWATCH_SIZE = 24;
+    private static final int SWATCH_GAP = 4;
+    private static final int SWATCH_COLUMNS = 4;
+
+    private int leftColCenterX;
+    private int rightColCenterX;
+    private int mainPreviewTop;
+    private int patternPreviewTop;
+    private int colorGridTop;
 
     public BannerDesignerScreen(Screen parent, int coreEntityId, DyeColor baseColor, BannerPatternLayers current, CommitFactory commitFactory) {
         super(Component.literal("Banner Designer"));
@@ -77,79 +98,93 @@ public final class BannerDesignerScreen extends Screen {
         }
 
         int centerX = width / 2;
-        // Real layout bug, fixed 2026-11-13: the header text below the preview and the
-        // Pattern/Color button row used to land on the exact same y (both derived from
-        // `belowPreview`, one with a +36 offset and the other with a +26-then-further-unrelated
-        // offset that happened to coincide) -- confirmed by the live screenshot showing "No layers
-        // yet (blank banner)" printed directly through the Pattern/Color buttons. Every row below
-        // is now a strictly increasing cursor, matching the preview's own real (now 4x-scaled, see
-        // PREVIEW_SCALE) footprint instead of the old purely-decorative PREVIEW_SIZE reservation.
-        int previewTop = 30;
-        int headerY = previewTop + PREVIEW_SIZE + 14;
-        int removeLastLayerY = headerY + 14;
+        leftColCenterX = centerX - 110;
+        rightColCenterX = centerX + 110;
 
-        addRenderableWidget(Button.builder(Component.literal("Remove Last Layer"), b -> removeLastLayer())
-                .bounds(centerX - 100, removeLastLayerY, 200, 20).build());
-
-        int y = removeLastLayerY + 26;
-        patternButton = addRenderableWidget(Button.builder(patternLabel(), b -> cyclePattern())
-                .bounds(centerX - 100, y, 140, 20).build());
-        layerColorButton = addRenderableWidget(Button.builder(colorLabel(), b -> cycleLayerColor())
-                .bounds(centerX + 45, y, 100, 20).build());
-        y += 24;
-
-        // Preview of the currently-selected Pattern/Color combo, added 2026-11-13 -- real user
-        // report: cycling "Pattern: 3/43" gave no indication at all of what that pattern actually
-        // looks like, forcing an add-then-remove just to check. Shows the draft banner with the
-        // candidate layer appended (not yet committed), so it doubles as a true "what would Add
-        // Layer produce" preview rather than the pattern in isolation.
-        y += CANDIDATE_PREVIEW_LABEL_HEIGHT;
-        candidatePreviewTop = y;
-        y += CANDIDATE_PREVIEW_SIZE + 10;
-
-        addLayerButton = addRenderableWidget(Button.builder(Component.literal("Add Layer"), b -> addLayer())
-                .bounds(centerX - 100, y, 245, 20).build());
-        updateAddLayerActive();
-        y += 30;
-
+        // ---- Left column: "Design" -- the composed-banner preview, Save/Wipe/Cancel ----
+        mainPreviewTop = 46;
+        int headerY = mainPreviewTop + MAIN_PREVIEW_SIZE + 14;
+        int saveWipeY = headerY + 20;
         addRenderableWidget(Button.builder(Component.literal("Save"), b -> save())
-                .bounds(centerX - 100, y, 100, 20).build());
+                .bounds(leftColCenterX - 70, saveWipeY, 68, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("Wipe"), b -> wipe())
+                .bounds(leftColCenterX + 2, saveWipeY, 68, 20).build());
+        int cancelY = saveWipeY + 24;
         addRenderableWidget(Button.builder(Component.literal("Cancel"), b -> cancel())
-                .bounds(centerX + 5, y, 100, 20).build());
+                .bounds(leftColCenterX - 50, cancelY, 100, 20).build());
+
+        // ---- Right column: Pattern preview + arrows, Color swatch grid, Add/Undo ----
+        patternPreviewTop = 46;
+        int arrowSize = PATTERN_PREVIEW_SIZE + PATTERN_PREVIEW_PANEL_PAD * 2;
+        int arrowY = patternPreviewTop - PATTERN_PREVIEW_PANEL_PAD;
+        int panelHalf = PATTERN_PREVIEW_SIZE / 2 + PATTERN_PREVIEW_PANEL_PAD;
+        addRenderableWidget(Button.builder(Component.literal("<"), b -> cyclePattern(-1))
+                .bounds(rightColCenterX - panelHalf - 4 - 20, arrowY, 20, arrowSize).build());
+        addRenderableWidget(Button.builder(Component.literal(">"), b -> cyclePattern(1))
+                .bounds(rightColCenterX + panelHalf + 4, arrowY, 20, arrowSize).build());
+
+        int patternIndexLabelY = patternPreviewTop + PATTERN_PREVIEW_SIZE + PATTERN_PREVIEW_PANEL_PAD + 6;
+        int colorLabelY = patternIndexLabelY + 14;
+        colorGridTop = colorLabelY + 10;
+
+        int gridWidth = SWATCH_COLUMNS * SWATCH_SIZE + (SWATCH_COLUMNS - 1) * SWATCH_GAP;
+        int gridStartX = rightColCenterX - gridWidth / 2;
+        DyeColor[] colors = DyeColor.values();
+        for (int i = 0; i < colors.length; i++) {
+            int col = i % SWATCH_COLUMNS;
+            int row = i / SWATCH_COLUMNS;
+            int x = gridStartX + col * (SWATCH_SIZE + SWATCH_GAP);
+            int y = colorGridTop + row * (SWATCH_SIZE + SWATCH_GAP);
+            addRenderableWidget(createColorSwatch(colors[i], x, y));
+        }
+
+        int rows = (colors.length + SWATCH_COLUMNS - 1) / SWATCH_COLUMNS;
+        int addUndoY = colorGridTop + rows * (SWATCH_SIZE + SWATCH_GAP) - SWATCH_GAP + 10;
+        addButton = addRenderableWidget(Button.builder(Component.literal("Add"), b -> addLayer())
+                .bounds(rightColCenterX - 70, addUndoY, 68, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("Undo"), b -> removeLastLayer())
+                .bounds(rightColCenterX + 2, addUndoY, 68, 20).build());
+        updateAddButtonActive();
     }
 
-    /** The on-screen box the preview occupies, in pixels -- the actual rendered icon is scaled up to fill it, see {@link #PREVIEW_SCALE}. */
-    private static final int PREVIEW_SIZE = 64;
-    /** Vanilla's own GUI item icon is a fixed 16px ({@code GuiGraphicsExtractor#item} takes no scale parameter) -- scaled up via a manual {@code pose()} transform instead, confirmed safe against the real decompiled source (the current pose IS captured into the render state at the moment {@code item(...)} is called). */
-    private static final float PREVIEW_SCALE = PREVIEW_SIZE / 16.0F;
-    /** Smaller than the main composed-banner preview -- this one's just "what would this pattern add," not the headline result. */
-    private static final int CANDIDATE_PREVIEW_SIZE = 32;
-    private static final float CANDIDATE_PREVIEW_SCALE = CANDIDATE_PREVIEW_SIZE / 16.0F;
-    private static final int CANDIDATE_PREVIEW_LABEL_HEIGHT = 12;
+    private Button createColorSwatch(DyeColor color, int x, int y) {
+        Supplier<DyeColor> selected = () -> layerColor;
+        return Button.builder(Component.literal(color.getName()), b -> selectLayerColor(color))
+                .bounds(x, y, SWATCH_SIZE, SWATCH_SIZE)
+                .build(builder -> new ColorSwatchButton(builder, color, selected));
+    }
 
-    private void cyclePattern() {
+    /** A plain filled color square, no vanilla button sprite -- {@code extractContents} draws its own border/fill instead of calling {@code extractDefaultSprite}. */
+    private static final class ColorSwatchButton extends Button {
+        private final DyeColor swatchColor;
+        private final Supplier<DyeColor> selectedColor;
+
+        private ColorSwatchButton(Button.Builder builder, DyeColor swatchColor, Supplier<DyeColor> selectedColor) {
+            super(builder);
+            this.swatchColor = swatchColor;
+            this.selectedColor = selectedColor;
+        }
+
+        @Override
+        protected void extractContents(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+            boolean selected = selectedColor.get() == swatchColor;
+            int borderColor = selected ? 0xFFFFFFFF : (isHovered ? 0xFFAAAAAA : 0xFF555555);
+            graphics.fill(getX(), getY(), getX() + getWidth(), getY() + getHeight(), borderColor);
+            int fill = 0xFF000000 | swatchColor.getFireworkColor();
+            graphics.fill(getX() + 2, getY() + 2, getX() + getWidth() - 2, getY() + getHeight() - 2, fill);
+        }
+    }
+
+    private void selectLayerColor(DyeColor color) {
+        layerColor = color;
+    }
+
+    private void cyclePattern(int delta) {
         if (availablePatterns.isEmpty()) {
             return;
         }
-        patternIndex = (patternIndex + 1) % availablePatterns.size();
-        patternButton.setMessage(patternLabel());
-    }
-
-    private Component patternLabel() {
-        if (availablePatterns.isEmpty()) {
-            return Component.literal("(no patterns)");
-        }
-        return Component.literal("Pattern: " + (patternIndex + 1) + "/" + availablePatterns.size());
-    }
-
-    private void cycleLayerColor() {
-        DyeColor[] values = DyeColor.values();
-        layerColor = values[(layerColor.getId() + 1) % values.length];
-        layerColorButton.setMessage(colorLabel());
-    }
-
-    private Component colorLabel() {
-        return Component.literal("Color: " + layerColor.getName());
+        int size = availablePatterns.size();
+        patternIndex = ((patternIndex + delta) % size + size) % size;
     }
 
     private void addLayer() {
@@ -157,19 +192,26 @@ public final class BannerDesignerScreen extends Screen {
             return;
         }
         draft.add(new BannerPatternLayers.Layer(availablePatterns.get(patternIndex), layerColor));
-        updateAddLayerActive();
+        updateAddButtonActive();
     }
 
     private void removeLastLayer() {
         if (!draft.isEmpty()) {
             draft.remove(draft.size() - 1);
-            updateAddLayerActive();
+            updateAddButtonActive();
         }
     }
 
-    private void updateAddLayerActive() {
-        if (addLayerButton != null) {
-            addLayerButton.active = draft.size() < BannerBlockEntity.MAX_PATTERNS && !availablePatterns.isEmpty();
+    private void wipe() {
+        if (!draft.isEmpty()) {
+            draft.clear();
+            updateAddButtonActive();
+        }
+    }
+
+    private void updateAddButtonActive() {
+        if (addButton != null) {
+            addButton.active = draft.size() < BannerBlockEntity.MAX_PATTERNS && !availablePatterns.isEmpty();
         }
     }
 
@@ -193,7 +235,7 @@ public final class BannerDesignerScreen extends Screen {
         return stack;
     }
 
-    /** Draft + the currently-selected Pattern/Color as an un-committed extra layer, for the "what would Add Layer produce" preview. */
+    /** Draft + the currently-selected Pattern/Color as an un-committed extra layer, for the "what would Add produce" preview. */
     private ItemStack candidatePreviewStack() {
         Identifier bannerId = Identifier.withDefaultNamespace(baseColor.getName() + "_banner");
         ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.getOptional(bannerId).orElse(net.minecraft.world.item.Items.WHITE_BANNER));
@@ -209,59 +251,54 @@ public final class BannerDesignerScreen extends Screen {
     public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         // Matches nuclyus.menu.client.NuclyusMenuScreen's own backdrop -- see this class's own doc
         // on the whole Town Hall Core screen family being restyled to the same look, 2026-11-13.
-        // Real, concrete side effect this fixes on its own: the live preview below used to render
-        // over whatever was directly behind this screen (sky/grass), making a small banner icon
-        // nearly invisible -- a dark backdrop plus the panel behind the preview (see
-        // extractRenderState) gives it real contrast for the first time.
         graphics.fill(0, 0, width, height, 0xC0101010);
     }
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        int centerX = width / 2;
         int titleWidth = font.width(title);
-        graphics.text(font, title, centerX - titleWidth / 2, 10, 0xFFFFFFFF);
+        graphics.text(font, title, width / 2 - titleWidth / 2, 10, 0xFFFFFFFF);
 
-        int previewTop = 30;
-        int panelPad = 6;
-        graphics.fill(centerX - PREVIEW_SIZE / 2 - panelPad, previewTop - panelPad,
-                centerX + PREVIEW_SIZE / 2 + panelPad, previewTop + PREVIEW_SIZE + panelPad, 0xFF2B2B2B);
+        // ---- Left column ----
+        String designLabel = "Design";
+        graphics.text(font, designLabel, leftColCenterX - font.width(designLabel) / 2, mainPreviewTop - 14, 0xFF888888);
 
-        // Real preview fix, 2026-11-13 -- a live screenshot showed the preview as a near-invisible
-        // tiny red sliver; GuiGraphicsExtractor#item has no scale parameter of its own, but it does
-        // capture whatever the current pose() transform is at the moment it's called (confirmed
-        // against the real decompiled source), so a manual push/scale/pop around the call genuinely
-        // scales the rendered icon -- this was flagged as a known, deliberately-not-pursued
-        // limitation when this screen was first built; pursuing it now that it's a real reported
-        // problem, not a cosmetic nice-to-have.
+        int mainPanelPad = 6;
+        graphics.fill(leftColCenterX - MAIN_PREVIEW_SIZE / 2 - mainPanelPad, mainPreviewTop - mainPanelPad,
+                leftColCenterX + MAIN_PREVIEW_SIZE / 2 + mainPanelPad, mainPreviewTop + MAIN_PREVIEW_SIZE + mainPanelPad, 0xFF2B2B2B);
         graphics.pose().pushMatrix();
-        graphics.pose().translate(centerX - PREVIEW_SIZE / 2.0F, previewTop);
-        graphics.pose().scale(PREVIEW_SCALE, PREVIEW_SCALE);
+        graphics.pose().translate(leftColCenterX - MAIN_PREVIEW_SIZE / 2.0F, mainPreviewTop);
+        graphics.pose().scale(MAIN_PREVIEW_SCALE, MAIN_PREVIEW_SCALE);
         graphics.item(previewStack(), 0, 0);
         graphics.pose().popMatrix();
 
-        int headerY = previewTop + PREVIEW_SIZE + 14;
+        int headerY = mainPreviewTop + MAIN_PREVIEW_SIZE + 14;
         String header = draft.isEmpty()
                 ? "No layers yet (blank banner)"
                 : "Layers: " + draft.size() + "/" + BannerBlockEntity.MAX_PATTERNS;
-        graphics.text(font, header, centerX - font.width(header) / 2, headerY, 0xFFAAAAAA);
+        graphics.text(font, header, leftColCenterX - font.width(header) / 2, headerY, 0xFFAAAAAA);
 
-        // Pattern/Color preview, added 2026-11-13 -- see candidatePreviewStack()'s own doc.
-        String previewLabel = "Preview with selected pattern:";
-        graphics.text(font, previewLabel, centerX - font.width(previewLabel) / 2,
-                candidatePreviewTop - CANDIDATE_PREVIEW_LABEL_HEIGHT, 0xFF888888);
+        // ---- Right column ----
+        String patternLabel = "Pattern";
+        graphics.text(font, patternLabel, rightColCenterX - font.width(patternLabel) / 2, patternPreviewTop - 14, 0xFF888888);
 
-        int candidatePanelPad = 4;
-        graphics.fill(centerX - CANDIDATE_PREVIEW_SIZE / 2 - candidatePanelPad, candidatePreviewTop - candidatePanelPad,
-                centerX + CANDIDATE_PREVIEW_SIZE / 2 + candidatePanelPad, candidatePreviewTop + CANDIDATE_PREVIEW_SIZE + candidatePanelPad,
-                0xFF2B2B2B);
-
+        int patternPanelPad = PATTERN_PREVIEW_PANEL_PAD;
+        graphics.fill(rightColCenterX - PATTERN_PREVIEW_SIZE / 2 - patternPanelPad, patternPreviewTop - patternPanelPad,
+                rightColCenterX + PATTERN_PREVIEW_SIZE / 2 + patternPanelPad, patternPreviewTop + PATTERN_PREVIEW_SIZE + patternPanelPad, 0xFF2B2B2B);
         graphics.pose().pushMatrix();
-        graphics.pose().translate(centerX - CANDIDATE_PREVIEW_SIZE / 2.0F, candidatePreviewTop);
-        graphics.pose().scale(CANDIDATE_PREVIEW_SCALE, CANDIDATE_PREVIEW_SCALE);
+        graphics.pose().translate(rightColCenterX - PATTERN_PREVIEW_SIZE / 2.0F, patternPreviewTop);
+        graphics.pose().scale(PATTERN_PREVIEW_SCALE, PATTERN_PREVIEW_SCALE);
         graphics.item(candidatePreviewStack(), 0, 0);
         graphics.pose().popMatrix();
+
+        int patternIndexLabelY = patternPreviewTop + PATTERN_PREVIEW_SIZE + patternPanelPad + 6;
+        String indexLabel = availablePatterns.isEmpty() ? "(no patterns)" : (patternIndex + 1) + " / " + availablePatterns.size();
+        graphics.text(font, indexLabel, rightColCenterX - font.width(indexLabel) / 2, patternIndexLabelY, 0xFFAAAAAA);
+
+        String colorLabel = "Color: " + layerColor.getName();
+        int colorLabelY = patternIndexLabelY + 14;
+        graphics.text(font, colorLabel, rightColCenterX - font.width(colorLabel) / 2, colorLabelY, 0xFF888888);
     }
 
     @Override
