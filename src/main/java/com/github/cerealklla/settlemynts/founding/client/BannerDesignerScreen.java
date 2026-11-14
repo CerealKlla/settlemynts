@@ -235,15 +235,20 @@ public final class BannerDesignerScreen extends Screen {
         return stack;
     }
 
-    /** Draft + the currently-selected Pattern/Color as an un-committed extra layer, for the "what would Add produce" preview. */
+    /**
+     * Just the currently-selected Pattern/Color, alone on a plain base banner -- real user
+     * correction, 2026-11-13: an earlier version composited this on top of the full draft (to show
+     * "what would Add produce"), but that made an already-busy design unreadable and buried what the
+     * candidate layer itself actually looks like. This is now purely "what does Pattern N look
+     * like," independent of the draft.
+     */
     private ItemStack candidatePreviewStack() {
         Identifier bannerId = Identifier.withDefaultNamespace(baseColor.getName() + "_banner");
         ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.getOptional(bannerId).orElse(net.minecraft.world.item.Items.WHITE_BANNER));
-        List<BannerPatternLayers.Layer> candidateLayers = new ArrayList<>(draft);
-        if (!availablePatterns.isEmpty() && candidateLayers.size() < BannerBlockEntity.MAX_PATTERNS) {
-            candidateLayers.add(new BannerPatternLayers.Layer(availablePatterns.get(patternIndex), layerColor));
-        }
-        stack.set(net.minecraft.core.component.DataComponents.BANNER_PATTERNS, new BannerPatternLayers(List.copyOf(candidateLayers)));
+        List<BannerPatternLayers.Layer> candidateLayers = availablePatterns.isEmpty()
+                ? List.of()
+                : List.of(new BannerPatternLayers.Layer(availablePatterns.get(patternIndex), layerColor));
+        stack.set(net.minecraft.core.component.DataComponents.BANNER_PATTERNS, new BannerPatternLayers(candidateLayers));
         return stack;
     }
 
