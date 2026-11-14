@@ -698,3 +698,20 @@ simpler per-block override, was the only way to make an arbitrary-cargo-filled R
 recognizable to pathfinding at all) and `registerGoals()` adds a new `RollerDoorOpenGoal`. `./gradlew
 build` green in both repos, whole-suite (17 mods) rebuild + `runServer` boot-smoke-test clean. **Not
 yet live-tested.**
+
+**Bad Omen now triggers real raids in a player-founded settlement, not just a real village,
+2026-11-14** (see [context/classes/BadOmenRaid.md](context/classes/BadOmenRaid.md)) -- real user
+report: "currently they only work on NPC villages. These should work in any settlement." Vanilla's
+own Bad Omen -> Raid trigger is gated on `ServerLevel#isVillage`, which has no concept of a
+Settlemynts settlement at all. New `raid.BadOmenSettlementRaidListener` drives the same underlying
+raid system directly (`Raids#createOrExtendRaid`) whenever a player with Bad Omen is standing in a
+*player-founded* plot (`api.Settlemynts#findPlotAt` + `#isNaturalSettlement` to skip real villages,
+which vanilla already covers on its own) -- confirmed this entry point does no independent
+village-revalidation of its own, matching how existing community mods ("RevertRaidChanges," "raided")
+already get Bad Omen working outside vanilla's village gate the same way. Removes Bad Omen once a
+raid actually starts/extends, mirroring vanilla's own one-shot-per-captain-kill economy rather than
+letting it farm infinite raids by standing still. `./gradlew build` green, whole-suite (17 mods)
+rebuild + `runServer` boot-smoke-test clean (Settlemynts' own common-setup line logged, no
+exceptions from the new listener). **Not yet live-tested** -- the actual in-game raid trigger itself
+still needs a real playtest.
+yet live-tested.**

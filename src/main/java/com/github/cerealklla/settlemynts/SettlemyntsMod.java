@@ -239,6 +239,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerShopInteractListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.diagnostics.LagDiagnostics());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.watchtower.WatchTowerChunkLoadListener());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.raid.BadOmenSettlementRaidListener());
         // Tavern Plot Type (design doc Section 17, added 2026-10-31). The daily NPC refresh itself
         // is no longer a separate event subscriber -- see tavern.TavernDailySpawnTicker's own doc --
         // it's driven by zone.ShopMidnightRestockTicker's real per-settlement midnight pipeline now.
