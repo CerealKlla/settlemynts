@@ -13,6 +13,7 @@ import com.github.cerealklla.kyt.generic.GenericFamily;
 import com.github.cerealklla.kyt.loadout.LoadoutRecord;
 import com.github.cerealklla.nuclyus.chunkload.ChunkClaimId;
 import com.github.cerealklla.nuclyus.chunkload.ChunkClaims;
+import com.github.cerealklla.settlemynts.bridge.BuildyngBlocksBridge;
 import com.github.cerealklla.settlemynts.bridge.LyfeEquipmentFamiliesBridge;
 import com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge;
 import com.github.cerealklla.settlemynts.bridge.LyfeSummoningBridge;
@@ -46,6 +47,7 @@ import net.minecraft.world.entity.ai.goal.MeleeAttackGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.ai.goal.RangedBowAttackGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
+import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.RangedAttackMob;
 import net.minecraft.world.entity.player.Player;
@@ -146,6 +148,22 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         // (BLOCKED-equivalent, matching AbstractVillager's own FIRE treatment) makes the pathfinder
         // route around a tree instead of through its canopy.
         this.setPathfindingMalus(net.minecraft.world.level.pathfinder.PathType.LEAVES, -1.0F);
+    }
+
+    /**
+     * BuildyngBlocks' Roller Door, 2026-11-14: a plain {@code GroundPathNavigation} (the inherited
+     * default) can never deliberately route a guard through a closed Roller Door at all -- its
+     * chain cells are arbitrary vanilla blocks, not instances of a Roller Door block, so nothing
+     * about them is recognizable to pathfinding without a custom evaluator. See {@code
+     * BuildyngBlocksBridge#createRollerDoorAwareNavigation}'s own doc for why this override lives
+     * behind a bridge rather than referencing BuildyngBlocks' types here directly.
+     */
+    @Override
+    protected PathNavigation createNavigation(Level level) {
+        if (BuildyngBlocksBridge.isLoaded()) {
+            return BuildyngBlocksBridge.createRollerDoorAwareNavigation(this, level);
+        }
+        return super.createNavigation(level);
     }
 
     /** Called once by {@link GuardSpawnTicker} right after construction -- which plot's "Town Proper" buffer this guard patrols (see {@link #resolvePatrolArea}). */
@@ -444,6 +462,13 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         // Fence gates have no vanilla equivalent at all -- see GuardGateOpenGoal's own doc for why
         // this is a separate, custom goal rather than reusing OpenDoorGoal.
         this.goalSelector.addGoal(3, new GuardGateOpenGoal(this));
+        // BuildyngBlocks' Roller Door, 2026-11-14 -- same priority/shape as OpenDoorGoal/
+        // GuardGateOpenGoal above (see BuildyngBlocksBridge and createNavigation's own doc for the
+        // other required half: a plain GroundPathNavigation can't recognize a closed Roller Door
+        // as openable at all, regardless of this goal existing).
+        if (BuildyngBlocksBridge.isLoaded()) {
+            this.goalSelector.addGoal(3, BuildyngBlocksBridge.createRollerDoorOpenGoal(this));
+        }
         this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
 

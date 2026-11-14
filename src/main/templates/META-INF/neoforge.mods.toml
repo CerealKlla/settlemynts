@@ -204,6 +204,18 @@ taxation/rent, on top of Cartographyr's geographic entity model.
     ordering="NONE"
     side="BOTH"
 
+# Optional soft dependency (2026-11-14) -- GuardEntity's own navigation/goals let a guard open/
+# close and route through a closed Roller Door, if BuildyngBlocks happens to be loaded (see
+# bridge.BuildyngBlocksBridge). Same "ordering=NONE, no versionRange" reasoning as the other
+# optional dependencies above -- the bridge only ever runs from guard construction/goal-selection,
+# long after both mods' common setup, so load order doesn't matter.
+[[dependencies.${mod_id}]]
+    modId="buildyngblocks"
+    type="optional"
+    reason="Lets a guard open/close and route through a closed Roller Door."
+    ordering="NONE"
+    side="BOTH"
+
 # Features are specific properties of the game environment, that you may want to declare you require. This example declares
 # that your mod requires GL version 3.2 or higher. Other features will be added. They are side aware so declaring this won't
 # stop your mod loading on the server for example.

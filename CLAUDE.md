@@ -685,3 +685,16 @@ ceiling already established). New `bridge.LyfeTavernBridge` wraps the one new fa
 rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested** -- the stool/NPC visuals, all
 three hire-requirement types, the daily respawn cycle, and the Companion Token itself all still need
 a real playtest pass.
+
+**Guards can now open/route through a closed BuildyngBlocks Roller Door, 2026-11-14** (see
+[context/decisions.md](context/decisions.md),
+[context/classes/GuardEntity.md](context/classes/GuardEntity.md)) -- real question: a guard
+spawned inside a Guardhouse whose only exit is a Roller Door would otherwise just get stuck pressed
+against it, same mechanism `GuardGateOpenGoal` already fixes for closed fence gates. New optional
+dependency on BuildyngBlocks + `bridge.BuildyngBlocksBridge`: `GuardEntity#createNavigation` swaps
+in a custom `WalkNodeEvaluator`-backed navigation (built in BuildyngBlocks itself, see its own
+CLAUDE.md/decisions.md for the full technical account of why a genuine evaluator subclass, not a
+simpler per-block override, was the only way to make an arbitrary-cargo-filled Roller Door
+recognizable to pathfinding at all) and `registerGoals()` adds a new `RollerDoorOpenGoal`. `./gradlew
+build` green in both repos, whole-suite (17 mods) rebuild + `runServer` boot-smoke-test clean. **Not
+yet live-tested.**

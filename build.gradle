@@ -218,6 +218,13 @@ dependencies {
     // runtime, same isolation pattern as every other optional sibling-mod dependency above.
     compileOnly files("../TinyWyrlds/build/libs/tinywyrlds-${tinywyrlds_version}.jar")
 
+    // BuildyngBlocks is an optional soft dependency (see neoforge.mods.toml) -- GuardEntity's own
+    // navigation/goals let a guard open/close and route through a closed Roller Door if
+    // BuildyngBlocks happens to be loaded (see bridge.BuildyngBlocksBridge), gated behind
+    // ModList.get().isLoaded("buildyngblocks") at runtime, same isolation pattern as every other
+    // optional sibling-mod dependency above.
+    compileOnly files("../BuildyngBlocks/build/libs/buildyngblocks-${buildyngblocks_version}.jar")
+
     // Plain JUnit 5 for pure Codec round-trip tests (no live server/registry needed, so
     // ModDevGradle's neoForge { unitTest {} } FML-bootstrap machinery isn't required here).
     testImplementation 'org.junit.jupiter:junit-jupiter:5.7.1'
