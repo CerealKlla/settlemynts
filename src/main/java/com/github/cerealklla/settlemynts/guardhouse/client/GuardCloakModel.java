@@ -19,11 +19,31 @@ import net.minecraft.util.Mth;
  * instead this mirrors {@code net.minecraft.client.model.object.banner.BannerFlagModel} exactly: one
  * root-level part, pivoted directly to the right spot on the entity itself.
  *
- * <p>Geometry/pivot numbers are a direct adaptation of vanilla's real {@code
- * PlayerCapeModel#createCapeLayer} cape box ({@code addBox(-5, 0, -1, 10, 16, 1)} at pivot {@code
- * (0, 0, 2)} rotated 180 degrees about Y, confirmed against the real decompiled source) -- same
- * width/depth/pivot, just a bit shorter (12 tall instead of 16) to sit comfortably on this mob's own
- * proportions without dragging past the knees.
+ * <p><b>Real fix, 2026-11-13</b> -- a live screenshot after this feature's first-ever real test
+ * showed the cloak rendering as a crudely-stretched, barely-recognizable smear instead of a clean
+ * banner image ("why didn't you give them actual cloaks?"). Root cause: the geometry here used to
+ * be a direct adaptation of vanilla's real {@code PlayerCapeModel#createCapeLayer} cape box
+ * ({@code addBox(-5, 0, -1, 10, 16, 1)}) declared against a 16x16 texture -- a reasonable-looking
+ * *shape* to copy, but the wrong thing to copy UV from. {@link
+ * net.minecraft.client.renderer.blockentity.BannerRenderer#submitPatterns} binds each pattern layer
+ * as a banner-pattern sprite from the atlas (sized/laid out for vanilla's own real {@code
+ * BannerFlagModel}, confirmed against its decompiled source: a {@code -10,0,-2, 20,40,1} box
+ * declared against a <b>64x64</b> texture, {@code texOffs(0,0)}) -- a model baked with different
+ * box dimensions *and* a different declared texture size computes completely different UV
+ * fractions for the same {@code texOffs}, so every pattern sprite sampled onto this box's faces was
+ * reading from the wrong region of itself, stretched ~4x in the process. Player capes were never
+ * the relevant reference at all; they're textured from the player skin, a completely different UV
+ * convention this renderer never touches.
+ *
+ * <p>Fixed by copying {@code BannerFlagModel}'s real box + 64x64 texture declaration verbatim (UV-
+ * correct by construction, since it's the exact geometry {@code submitPatterns}' sprites are already
+ * sized for) and scaling the whole part down via {@link PartPose#scaled} instead of hand-picking new
+ * box numbers -- a transform-level scale doesn't touch UV at all, so correctness survives resizing
+ * for a guard's proportions. {@code 0.5F} keeps the flag's real 1:2 width:height ratio (10 wide x 20
+ * tall x 0.5 thick), closer to an actual draping cloak than the original's stubbier 10x12 box.
+ * Pivot/rotation (offset {@code (0, 0, 2)}, 180 degrees about Y) is unchanged -- that part was never
+ * the problem, it's genuinely the same placement {@code PlayerCapeModel}'s own cape uses relative to
+ * a humanoid body, confirmed against the real decompiled source.
  *
  * <p>Rendered via {@code net.minecraft.client.renderer.blockentity.BannerRenderer#submitPatterns}
  * directly (see {@link GuardCloakLayer}) -- reusing vanilla's own banner base-color-plus-pattern-
@@ -45,9 +65,9 @@ public final class GuardCloakModel extends Model<Float> {
         PartDefinition root = mesh.getRoot();
         root.addOrReplaceChild(
                 "cloak",
-                CubeListBuilder.create().texOffs(0, 0).addBox(-5.0F, 0.0F, -1.0F, 10.0F, 12.0F, 1.0F),
-                PartPose.offsetAndRotation(0.0F, 0.0F, 2.0F, 0.0F, (float) Math.PI, 0.0F));
-        return LayerDefinition.create(mesh, 16, 16);
+                CubeListBuilder.create().texOffs(0, 0).addBox(-10.0F, 0.0F, -2.0F, 20.0F, 40.0F, 1.0F),
+                PartPose.offsetAndRotation(0.0F, 0.0F, 2.0F, 0.0F, (float) Math.PI, 0.0F).scaled(0.5F));
+        return LayerDefinition.create(mesh, 64, 64);
     }
 
     @Override
