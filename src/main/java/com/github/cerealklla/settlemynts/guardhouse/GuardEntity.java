@@ -610,12 +610,35 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
      * while it's supposedly trying to," with a rescue destination (its own assigned stand) that's
      * always known-safe rather than freshly (and fallibly) computed.
      */
+    /**
+     * Real bug fix, 2026-11-13: "2 builds ago they all had the original [cloaks] on their backs... I
+     * don't think they should need to be respawned but I can't tell." Confirmed real cause,
+     * independent of the model/geometry fixes shipped the same day: {@code DATA_CLOAK_COLOR}/{@code
+     * DATA_SHOW_BANNER} are plain {@code SynchedEntityData} with no entry in {@link
+     * #addAdditionalSaveData}/{@link #readAdditionalSaveData} at all -- they only ever get set by
+     * {@link #refreshCloakState}, called from exactly three *events* (spawn, the Mayor changing
+     * color/banner, a plot Tier upgrade), none of which is "the server restarted." Every already-
+     * spawned guard's cloak state silently resets to blank on every reload, with nothing to ever
+     * notice or fix it again -- a guard just sits there correctly equipped and correctly rendered in
+     * every other way, with no cloak, forever, until one of those three specific events happens to
+     * fire for its settlement again. Fixed the same way {@link #readAdditionalSaveData}'s own
+     * ranged-attack-goal bug (right above, 2026-10-08) was: a one-time self-heal on this guard's own
+     * first real tick after loading, not a new permanent poll -- {@code cloakStateNeedsRefresh}
+     * defaults {@code true} for every constructed instance (fresh spawn or reloaded from NBT alike)
+     * and is cleared the first time it actually runs, so this costs nothing on every subsequent tick.
+     */
+    private boolean cloakStateNeedsRefresh = true;
+
     @Override
     protected void customServerAiStep(ServerLevel level) {
         super.customServerAiStep(level);
         stuckWatchdog.tick(this, homePos);
         maintainStrandedChunkClaim(level);
         syncDisplayName();
+        if (cloakStateNeedsRefresh) {
+            cloakStateNeedsRefresh = false;
+            refreshCloakState(level);
+        }
     }
 
     /**
