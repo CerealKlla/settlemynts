@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.github.cerealklla.settlemynts.raid.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": [
+    "ServerLevelVillageMixin"
+  ],
+  "client": [],
+  "server": []
+}

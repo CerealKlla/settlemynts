@@ -714,4 +714,22 @@ letting it farm infinite raids by standing still. `./gradlew build` green, whole
 rebuild + `runServer` boot-smoke-test clean (Settlemynts' own common-setup line logged, no
 exceptions from the new listener). **Not yet live-tested** -- the actual in-game raid trigger itself
 still needs a real playtest.
+
+**Real correction, same day: the listener above never actually worked, and has been replaced** (see
+[context/classes/BadOmenRaid.md](context/classes/BadOmenRaid.md)) -- real live report: "I was
+standing in the middle of my settlement and it converted the omen but nothing seems to be
+happening." Confirmed against the real decompiled vanilla source: Bad Omen doesn't trigger a raid
+directly even in a real village (it converts to a 30-second Raid Omen effect first, which is what
+the user actually saw "convert"), and -- the real root cause -- `Raid#tick()` re-validates
+`isVillage` on EVERY tick for the raid's entire life, silently self-stopping the instant that check
+fails with zero waves spawned, regardless of how the raid was created. The old listener's one-time
+`createOrExtendRaid` bypass never covered that ongoing re-check, so a raid in a settlement could
+never survive its own first tick. Deleted outright, replaced by Settlemynts' first-ever Mixin
+(`raid.mixin.ServerLevelVillageMixin`, patching the real chokepoint, `ServerLevel#isCloseToVillage`)
+-- fixes the entire vanilla pipeline unmodified, not just raids: iron golem spawning, zombie-siege
+avoidance, and village-seeking AI goals now also treat a player-founded settlement as a real
+village. `./gradlew build` green, whole-suite (17 mods) rebuild + `runServer` boot-smoke-test clean
+(confirmed the Mixin itself applies with no injection errors). **Not yet live-tested** -- needs a
+real raid, including waiting the genuine 30-second Raid Omen delay before expecting anything to
+happen.
 yet live-tested.**
