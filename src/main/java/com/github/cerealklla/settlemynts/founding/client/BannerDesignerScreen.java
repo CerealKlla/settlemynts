@@ -58,6 +58,7 @@ public final class BannerDesignerScreen extends Screen {
     private Button addLayerButton;
     private Button patternButton;
     private Button layerColorButton;
+    private int candidatePreviewTop;
 
     public BannerDesignerScreen(Screen parent, int coreEntityId, DyeColor baseColor, BannerPatternLayers current, CommitFactory commitFactory) {
         super(Component.literal("Banner Designer"));
@@ -96,6 +97,16 @@ public final class BannerDesignerScreen extends Screen {
         layerColorButton = addRenderableWidget(Button.builder(colorLabel(), b -> cycleLayerColor())
                 .bounds(centerX + 45, y, 100, 20).build());
         y += 24;
+
+        // Preview of the currently-selected Pattern/Color combo, added 2026-11-13 -- real user
+        // report: cycling "Pattern: 3/43" gave no indication at all of what that pattern actually
+        // looks like, forcing an add-then-remove just to check. Shows the draft banner with the
+        // candidate layer appended (not yet committed), so it doubles as a true "what would Add
+        // Layer produce" preview rather than the pattern in isolation.
+        y += CANDIDATE_PREVIEW_LABEL_HEIGHT;
+        candidatePreviewTop = y;
+        y += CANDIDATE_PREVIEW_SIZE + 10;
+
         addLayerButton = addRenderableWidget(Button.builder(Component.literal("Add Layer"), b -> addLayer())
                 .bounds(centerX - 100, y, 245, 20).build());
         updateAddLayerActive();
@@ -111,6 +122,10 @@ public final class BannerDesignerScreen extends Screen {
     private static final int PREVIEW_SIZE = 64;
     /** Vanilla's own GUI item icon is a fixed 16px ({@code GuiGraphicsExtractor#item} takes no scale parameter) -- scaled up via a manual {@code pose()} transform instead, confirmed safe against the real decompiled source (the current pose IS captured into the render state at the moment {@code item(...)} is called). */
     private static final float PREVIEW_SCALE = PREVIEW_SIZE / 16.0F;
+    /** Smaller than the main composed-banner preview -- this one's just "what would this pattern add," not the headline result. */
+    private static final int CANDIDATE_PREVIEW_SIZE = 32;
+    private static final float CANDIDATE_PREVIEW_SCALE = CANDIDATE_PREVIEW_SIZE / 16.0F;
+    private static final int CANDIDATE_PREVIEW_LABEL_HEIGHT = 12;
 
     private void cyclePattern() {
         if (availablePatterns.isEmpty()) {
@@ -178,6 +193,18 @@ public final class BannerDesignerScreen extends Screen {
         return stack;
     }
 
+    /** Draft + the currently-selected Pattern/Color as an un-committed extra layer, for the "what would Add Layer produce" preview. */
+    private ItemStack candidatePreviewStack() {
+        Identifier bannerId = Identifier.withDefaultNamespace(baseColor.getName() + "_banner");
+        ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.getOptional(bannerId).orElse(net.minecraft.world.item.Items.WHITE_BANNER));
+        List<BannerPatternLayers.Layer> candidateLayers = new ArrayList<>(draft);
+        if (!availablePatterns.isEmpty() && candidateLayers.size() < BannerBlockEntity.MAX_PATTERNS) {
+            candidateLayers.add(new BannerPatternLayers.Layer(availablePatterns.get(patternIndex), layerColor));
+        }
+        stack.set(net.minecraft.core.component.DataComponents.BANNER_PATTERNS, new BannerPatternLayers(List.copyOf(candidateLayers)));
+        return stack;
+    }
+
     @Override
     public void extractBackground(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         // Matches nuclyus.menu.client.NuclyusMenuScreen's own backdrop -- see this class's own doc
@@ -219,6 +246,22 @@ public final class BannerDesignerScreen extends Screen {
                 ? "No layers yet (blank banner)"
                 : "Layers: " + draft.size() + "/" + BannerBlockEntity.MAX_PATTERNS;
         graphics.text(font, header, centerX - font.width(header) / 2, headerY, 0xFFAAAAAA);
+
+        // Pattern/Color preview, added 2026-11-13 -- see candidatePreviewStack()'s own doc.
+        String previewLabel = "Preview with selected pattern:";
+        graphics.text(font, previewLabel, centerX - font.width(previewLabel) / 2,
+                candidatePreviewTop - CANDIDATE_PREVIEW_LABEL_HEIGHT, 0xFF888888);
+
+        int candidatePanelPad = 4;
+        graphics.fill(centerX - CANDIDATE_PREVIEW_SIZE / 2 - candidatePanelPad, candidatePreviewTop - candidatePanelPad,
+                centerX + CANDIDATE_PREVIEW_SIZE / 2 + candidatePanelPad, candidatePreviewTop + CANDIDATE_PREVIEW_SIZE + candidatePanelPad,
+                0xFF2B2B2B);
+
+        graphics.pose().pushMatrix();
+        graphics.pose().translate(centerX - CANDIDATE_PREVIEW_SIZE / 2.0F, candidatePreviewTop);
+        graphics.pose().scale(CANDIDATE_PREVIEW_SCALE, CANDIDATE_PREVIEW_SCALE);
+        graphics.item(candidatePreviewStack(), 0, 0);
+        graphics.pose().popMatrix();
     }
 
     @Override
