@@ -37,13 +37,24 @@ import net.minecraft.util.Mth;
  *
  * <p>Fixed by copying {@code BannerFlagModel}'s real box + 64x64 texture declaration verbatim (UV-
  * correct by construction, since it's the exact geometry {@code submitPatterns}' sprites are already
- * sized for) and scaling the whole part down via {@link PartPose#scaled} instead of hand-picking new
- * box numbers -- a transform-level scale doesn't touch UV at all, so correctness survives resizing
- * for a guard's proportions. {@code 0.5F} keeps the flag's real 1:2 width:height ratio (10 wide x 20
- * tall x 0.5 thick), closer to an actual draping cloak than the original's stubbier 10x12 box.
- * Pivot/rotation (offset {@code (0, 0, 2)}, 180 degrees about Y) is unchanged -- that part was never
- * the problem, it's genuinely the same placement {@code PlayerCapeModel}'s own cape uses relative to
- * a humanoid body, confirmed against the real decompiled source.
+ * sized for) and scaling the whole part down via {@link PartPose#withScale} instead of hand-picking
+ * new box numbers -- a pure scale-field change doesn't touch UV at all, so correctness survives
+ * resizing for a guard's proportions. {@code 0.5F} keeps the flag's real 1:2 width:height ratio (10
+ * wide x 20 tall x 0.5 thick), closer to an actual draping cloak than the original's stubbier 10x12
+ * box. Pivot/rotation (offset {@code (0, 0, 2)}, 180 degrees about Y) is unchanged -- that part was
+ * never the problem, it's genuinely the same placement {@code PlayerCapeModel}'s own cape uses
+ * relative to a humanoid body, confirmed against the real decompiled source.
+ *
+ * <p><b>Real follow-up fix, same day</b> -- the first attempt at the above used {@link
+ * PartPose#scaled} instead of {@link PartPose#withScale}, which made the cloak disappear entirely
+ * ("Now I see no cape at all"). Confirmed against {@code PartPose}'s own decompiled source:
+ * {@code scaled(factor)} multiplies the pivot's {@code x}/{@code y}/{@code z} offset by that same
+ * factor <i>in addition to</i> the scale fields -- it's meant for resizing an already-positioned
+ * part in place (e.g. a baby mob variant), not for "keep this pivot, just shrink the box." That
+ * silently halved the cloak's outward offset from the back (2 -> 1), pulling it close enough to the
+ * body/armor geometry to be fully depth-occluded from every normal camera angle -- geometrically
+ * still "there," just never winning the depth test. {@code withScale(factor)} only replaces the
+ * scale fields, leaving the pivot position exactly as declared.
  *
  * <p>Rendered via {@code net.minecraft.client.renderer.blockentity.BannerRenderer#submitPatterns}
  * directly (see {@link GuardCloakLayer}) -- reusing vanilla's own banner base-color-plus-pattern-
@@ -66,7 +77,7 @@ public final class GuardCloakModel extends Model<Float> {
         root.addOrReplaceChild(
                 "cloak",
                 CubeListBuilder.create().texOffs(0, 0).addBox(-10.0F, 0.0F, -2.0F, 20.0F, 40.0F, 1.0F),
-                PartPose.offsetAndRotation(0.0F, 0.0F, 2.0F, 0.0F, (float) Math.PI, 0.0F).scaled(0.5F));
+                PartPose.offsetAndRotation(0.0F, 0.0F, 2.0F, 0.0F, (float) Math.PI, 0.0F).withScale(0.5F));
         return LayerDefinition.create(mesh, 64, 64);
     }
 
