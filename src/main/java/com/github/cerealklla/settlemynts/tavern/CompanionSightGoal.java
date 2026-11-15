@@ -56,6 +56,18 @@ public class CompanionSightGoal extends Goal {
         LivingEntity found = findNearestVisibleHostile(level);
         if (found != null) {
             npc.setTarget(found);
+            // Priority Location trigger, 2026-11-15 -- a Companion has no fixed settlement
+            // affiliation of its own (it follows its owner anywhere), so unlike
+            // guardhouse.GuardSightGoal this resolves "which settlement, if any" from the sighted
+            // enemy's own CURRENT position rather than trusting any remembered identity. Correctly
+            // a no-op while adventuring far from any settlement. See
+            // guardhouse.PriorityLocationRegistry's own doc.
+            com.github.cerealklla.settlemynts.api.Settlemynts.findPlotAt(level, found.blockPosition()).ifPresent(plot -> {
+                if (!com.github.cerealklla.settlemynts.api.Settlemynts.isNaturalSettlement(level, plot.settlementCoreId())) {
+                    com.github.cerealklla.settlemynts.guardhouse.PriorityLocationRegistry.registerSighting(
+                            level, plot.settlementCoreId(), found.blockPosition(), found.getUUID());
+                }
+            });
         }
         return false;
     }

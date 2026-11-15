@@ -125,6 +125,11 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     // a claim only matters for the lifetime of one in-progress patrol leg, and every claim across
     // the whole settlement naturally clearing on a restart is harmless.
     private UUID claimedPatrolStakeId;
+    // Priority Location response (2026-11-15) -- which PriorityLocation (if any) this guard
+    // currently has a claimed slot on, see GuardPriorityResponseGoal's own doc. Not persisted,
+    // same reasoning as claimedPatrolStakeId above -- PriorityLocationRegistry itself isn't
+    // persisted either, so a reference surviving a save/load round trip would be meaningless.
+    private PriorityLocation claimedPriorityLocation;
     // Set by GuardPatrolAreaGoal's own one-shot arrival scan (never polled continuously -- see
     // GuardExtinguishFireGoal's own doc) -- non-null tells that goal there's a real fire to go
     // extinguish right now.
@@ -283,6 +288,11 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     /** Set by {@code GuardPatrolAreaGoal} while this guard has a {@link RoadwayStakeEntity} claimed as its final patrol destination -- {@code null} otherwise. Read by {@link #die} to release the claim if this guard dies en route. */
     public void setClaimedPatrolStakeId(UUID claimedPatrolStakeId) {
         this.claimedPatrolStakeId = claimedPatrolStakeId;
+    }
+
+    /** Set by {@code GuardPriorityResponseGoal} while this guard has a claimed slot on a {@link PriorityLocation} -- {@code null} otherwise. Read by {@link #die} to release the claim if this guard dies en route. */
+    public void setClaimedPriorityLocation(PriorityLocation claimedPriorityLocation) {
+        this.claimedPriorityLocation = claimedPriorityLocation;
     }
 
     /** Set by {@code GuardPatrolAreaGoal}'s one-shot arrival scan; read and cleared by {@code GuardExtinguishFireGoal}. */
@@ -453,6 +463,15 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         // order, which is strictly more robust than the previous tie-break this method's own doc
         // used to describe.
         this.goalSelector.addGoal(4, new GuardPatrolAreaGoal(this, 0.8));
+        // Priority Location response (2026-11-15) -- strictly lower priority number than the patrol
+        // goal right above (3 < 4) so it always wins the shared MOVE flag whenever both are
+        // eligible, matching that goal's own established "priority number, not self-deference, is
+        // the robust mechanism" precedent (see the doc comment right above this one). Separately,
+        // ALSO self-defers via guard.getTarget() in its own canUse()/canContinueToUse() -- unlike
+        // GuardPatrolAreaGoal, which never checked that at all (the actual root cause of the
+        // priority-tie bug described above), so this one doesn't depend on priority ordering alone
+        // to get out of real combat's way.
+        this.goalSelector.addGoal(3, new GuardPriorityResponseGoal(this));
         // Real wooden doors (explicit live report, 2026-10-16: "not opening/closing doors/gates when
         // they get stuck") -- same priority/shape vanilla's own Vindicator uses for the identical
         // goal. `setCanOpenDoors(true)` on the navigation is the other required half (see the
@@ -583,6 +602,13 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         if (claimedPatrolStakeId != null && level() instanceof ServerLevel claimLevel
                 && claimLevel.getEntity(claimedPatrolStakeId) instanceof com.github.cerealklla.settlemynts.roadway.RoadwayStakeEntity claimedStake) {
             claimedStake.clearClaim();
+        }
+        // Priority Location response (2026-11-15) -- same reasoning as the stake release right
+        // above: a dead entity generally stops ticking before the goal selector would ever call
+        // GuardPriorityResponseGoal#stop() again.
+        if (claimedPriorityLocation != null) {
+            claimedPriorityLocation.release(getUUID());
+            claimedPriorityLocation = null;
         }
         // Dimension-stranded chunk claim (2026-11-02): a dead entity generally stops ticking before
         // the goal selector/customServerAiStep would ever run again, same reasoning as the patrol

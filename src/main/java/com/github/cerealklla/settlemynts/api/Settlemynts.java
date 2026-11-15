@@ -753,6 +753,13 @@ public final class Settlemynts {
             return villager.getPersistentData().getIntArray(com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerator.PLOT_ID_TAG)
                     .map(net.minecraft.core.UUIDUtil::uuidFromIntArray);
         }
+        // Only while still the stationary, never-hired patron sitting on its stool -- a summoned
+        // Companion (stoolPos() == null) follows its owner anywhere, potentially nowhere near any
+        // settlement at all, and must never resolve to a stale "where it was hired" plot. Added
+        // 2026-11-15 for the Priority Location damage trigger (guardhouse.PriorityLocationDamageListener).
+        if (entity instanceof com.github.cerealklla.settlemynts.tavern.TavernNpcEntity tavernNpc && tavernNpc.stoolPos() != null) {
+            return Optional.ofNullable(tavernNpc.plotId());
+        }
         return Optional.empty();
     }
 

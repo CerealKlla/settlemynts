@@ -732,4 +732,23 @@ village. `./gradlew build` green, whole-suite (17 mods) rebuild + `runServer` bo
 (confirmed the Mixin itself applies with no injection errors). **Not yet live-tested** -- needs a
 real raid, including waiting the genuine 30-second Raid Omen delay before expecting anything to
 happen.
-yet live-tested.**
+
+**Priority Locations: guards now converge on active threats ahead of normal patrol, 2026-11-15**
+(see [context/classes/PriorityLocation.md](context/classes/PriorityLocation.md)) -- full explicit
+user design, confirmed via follow-up questions before building (see that doc's own "Full spec"
+section for the complete back-and-forth). A guard or Tavern Companion sighting a hostile
+(`GuardSightGoal`/`CompanionSightGoal`), or ANY settlement NPC taking damage
+(`guardhouse.PriorityLocationDamageListener`, excluding players and wandering summoned Companions),
+drops or escalates a `PriorityLocation` -- a non-persisted, server-memory-only marker
+(`guardhouse.PriorityLocationRegistry`, same "ephemeral combat bookkeeping" precedent as Lyfe's own
+`combat.AssistMarkers`). New `guardhouse.GuardPriorityResponseGoal` (priority 3, one step above
+`GuardPatrolAreaGoal`'s 4) sends an idle guard running (reusing `tavern.CompanionFollowPlayerGoal`'s
+own run-speed value) to whichever active location is closest to it, claiming one of the location's
+open slots first (capacity = current escalation level, no cap at all) -- released on arrival, not
+held for the whole fight, so a prolonged fight keeps pulling in fresh waves of reinforcements rather
+than tying up a fixed number of guards forever. The whole mechanic has exactly one lifecycle rule:
+a location is removed outright once a periodic 10-second sweep finds no hostiles left in its area
+(`guardhouse.PriorityLocationCleanupTicker`) -- no decay, no other expiry. `./gradlew build` green,
+whole-suite (17 mods) rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested at all** --
+needs a real fight to exercise both trigger paths, the closest-location pick across multiple active
+locations, claim/slot behavior under several guards, and the auto-clear.

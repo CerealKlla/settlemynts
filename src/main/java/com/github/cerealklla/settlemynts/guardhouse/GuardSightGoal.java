@@ -2,6 +2,7 @@ package com.github.cerealklla.settlemynts.guardhouse;
 
 import java.util.EnumSet;
 import java.util.List;
+import java.util.UUID;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -83,6 +84,13 @@ public class GuardSightGoal extends Goal {
         com.github.cerealklla.settlemynts.diagnostics.TickProfiler.record("GuardSightGoal.findNearestVisibleHostile", elapsedNanos);
         if (found != null) {
             guard.setTarget(found);
+            // Priority Location trigger, 2026-11-15 -- explicit user spec: "if an NPC in town sees
+            // an enemy, a priority location be placed down where that enemy is." See
+            // PriorityLocationRegistry's own doc.
+            UUID settlementCoreId = guard.getSettlementCoreId();
+            if (settlementCoreId != null) {
+                PriorityLocationRegistry.registerSighting(level, settlementCoreId, found.blockPosition(), found.getUUID());
+            }
         }
         return false;
     }
