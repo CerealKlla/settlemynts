@@ -185,9 +185,16 @@ public class GuardPatrolAreaGoal extends Goal {
             // have unloaded and reloaded (a fresh deserialized instance) sometime during this
             // possibly-long walk, and a write to a stale detached reference would silently never
             // persist.
-            UUID reachedId = currentRoute.get(waypointIndex).getUUID();
-            if (level.getEntity(reachedId) instanceof RoadwayStakeEntity reached) {
-                reached.markVisited(level.getGameTime());
+            //
+            // currentRoute is empty whenever this arrival is the fallback-wander target (no road
+            // route at all -- the only path every natural-village guard takes, since it has no
+            // settlementCoreId for buildRoadRoute to resolve a route from) -- real production crash,
+            // 2026-11-16: ArrayIndexOutOfBoundsException indexing into this empty list unconditionally.
+            if (!currentRoute.isEmpty()) {
+                UUID reachedId = currentRoute.get(waypointIndex).getUUID();
+                if (level.getEntity(reachedId) instanceof RoadwayStakeEntity reached) {
+                    reached.markVisited(level.getGameTime());
+                }
             }
         }
         if (waypointIndex + 1 < currentRoute.size()) {
