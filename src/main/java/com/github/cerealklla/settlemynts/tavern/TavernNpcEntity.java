@@ -1,5 +1,6 @@
 package com.github.cerealklla.settlemynts.tavern;
 
+import java.util.List;
 import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge;
@@ -108,6 +109,14 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, c
     private UUID plotId;
     private int tier = 1;
     private HireRequirement hireRequirement;
+    // Adaptive weapon selection (2026-11-16, explicit user spec, scope confirmed to cover every
+    // NPC that can currently fight -- see guardhouse.GuardEntity#spareWeapons's own doc for the
+    // full mechanism this mirrors). There is deliberately no gear source that ever populates this
+    // for a Companion today ("no gear roller exists any more," see this class's own doc) -- it
+    // stays empty and this feature stays inert for a Companion until/unless some future mechanism
+    // equips one with more than one weapon, same as a bare GuardEntity with an empty hotbar would.
+    private final java.util.List<ItemStack> spareWeapons = new java.util.ArrayList<>();
+    private int combatWeaponCheckCooldown;
 
     public TavernNpcEntity(EntityType<? extends TavernNpcEntity> type, Level level) {
         super(type, level);
@@ -239,6 +248,55 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, c
         }
     }
 
+    @Override
+    protected void customServerAiStep(ServerLevel level) {
+        super.customServerAiStep(level);
+        if (combatWeaponCheckCooldown-- <= 0) {
+            combatWeaponCheckCooldown = 10;
+            reassessCombatWeapon();
+        }
+    }
+
+    private static final double RANGED_PREFERENCE_DISTANCE_BLOCKS = 6.0;
+    private static final double VERTICAL_PREFERENCE_BLOCKS = 3.0;
+
+    private static boolean isRangedWeapon(ItemStack stack) {
+        return stack.getItem() instanceof BowItem;
+    }
+
+    /** Direct copy of {@code guardhouse.GuardEntity#reassessCombatWeapon} -- see that method's own doc. A no-op today since {@link #spareWeapons} has no way to ever be non-empty for a Companion (see that field's own doc), kept for the same "the mechanism exists even where nothing currently feeds it" reasoning as the rest of this class's goal set. */
+    private void reassessCombatWeapon() {
+        if (!(level() instanceof ServerLevel) || stoolPos != null) {
+            return;
+        }
+        LivingEntity target = getTarget();
+        if (target == null) {
+            return;
+        }
+        ItemStack mainhand = getMainHandItem();
+        if (LyfeMagicianBridge.isLoaded() && LyfeMagicianBridge.isNatureStaff(mainhand)) {
+            return;
+        }
+        boolean wantsRanged = distanceToSqr(target) >= RANGED_PREFERENCE_DISTANCE_BLOCKS * RANGED_PREFERENCE_DISTANCE_BLOCKS
+                || target.getY() - getY() >= VERTICAL_PREFERENCE_BLOCKS;
+        boolean mainhandIsRanged = isRangedWeapon(mainhand);
+        if (!mainhand.isEmpty() && wantsRanged == mainhandIsRanged) {
+            return;
+        }
+        for (int i = 0; i < spareWeapons.size(); i++) {
+            ItemStack candidate = spareWeapons.get(i);
+            if (isRangedWeapon(candidate) != wantsRanged) {
+                continue;
+            }
+            spareWeapons.remove(i);
+            if (!mainhand.isEmpty()) {
+                spareWeapons.add(mainhand);
+            }
+            setItemSlot(EquipmentSlot.MAINHAND, candidate);
+            return;
+        }
+    }
+
     /**
      * Real report, 2026-11-03: "my own companion killed me, that shouldn't be possible." Root cause:
      * this class had no owner-alliance concept at all -- {@link HurtByTargetGoal} (no predicate,
@@ -343,6 +401,7 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, c
         output.storeNullable("PlotId", UUIDUtil.CODEC, plotId);
         output.putInt("Tier", tier);
         HireRequirementCodec.save(output, hireRequirement);
+        output.store("SpareWeapons", ItemStack.OPTIONAL_CODEC.listOf(), spareWeapons);
     }
 
     @Override
@@ -353,6 +412,8 @@ public class TavernNpcEntity extends PathfinderMob implements RangedAttackMob, c
         plotId = input.read("PlotId", UUIDUtil.CODEC).orElse(null);
         tier = input.getIntOr("Tier", 1);
         hireRequirement = HireRequirementCodec.load(input);
+        spareWeapons.clear();
+        spareWeapons.addAll(input.read("SpareWeapons", ItemStack.OPTIONAL_CODEC.listOf()).orElse(List.of()));
         // Same real bug GuardEntity#readAdditionalSaveData already fixed once (2026-10-08): super's
         // call above restores equipment via a raw EntityEquipment#setAll that bypasses onEquipItem
         // entirely, so a reloaded companion (every server restart) would otherwise stay stuck on

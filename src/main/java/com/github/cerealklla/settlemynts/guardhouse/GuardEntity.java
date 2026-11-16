@@ -143,6 +143,16 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     // GuardExtinguishFireGoal's own doc) -- non-null tells that goal there's a real fire to go
     // extinguish right now.
     private net.minecraft.core.BlockPos pendingFireTarget;
+    // Adaptive weapon selection (2026-11-16, explicit user spec: "Town Guard NPCs have an entire
+    // hotbar... use whatever weapon makes sense" against the live target) -- every weapon this
+    // guard was equipped with beyond whichever one is currently in MAINHAND, so there's actually
+    // something to switch TO. Persisted the same shape as companionItems. See
+    // reassessCombatWeapon()'s own doc for the live switching logic this feeds.
+    private final List<ItemStack> spareWeapons = new java.util.ArrayList<>();
+    // Throttles reassessCombatWeapon() to once every 10 ticks (0.5s) -- cheap either way (a tiny
+    // list scan), but re-deciding literally every tick buys nothing and risks visible mainhand
+    // flicker right at the range threshold.
+    private int combatWeaponCheckCooldown;
 
     public GuardEntity(EntityType<? extends GuardEntity> type, Level level) {
         super(type, level);
@@ -720,6 +730,80 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
             cloakStateNeedsRefresh = false;
             refreshCloakState(level);
         }
+        if (combatWeaponCheckCooldown-- <= 0) {
+            combatWeaponCheckCooldown = 10;
+            reassessCombatWeapon();
+        }
+    }
+
+    /** A plain {@link BowItem} only -- matches exactly what {@link #reassessWeaponGoal} itself already checks mainhand against for picking {@link #bowGoal}. */
+    private static boolean isRangedWeapon(ItemStack stack) {
+        return stack.getItem() instanceof BowItem;
+    }
+
+    // "Far away" threshold for reassessCombatWeapon()'s range check below. No type-based "is this
+    // airborne" signal exists to check instead -- confirmed against the real decompiled source
+    // that neither Ghast nor Phantom (vanilla's two flying hostiles) implements any flying marker
+    // interface or sets noGravity; both just run a custom MoveControl under ordinary gravity. A
+    // vertical-elevation check (see VERTICAL_PREFERENCE_BLOCKS below) covers "flying," and every
+    // other mod's flyer too, without needing a per-type allowlist: a target a guard can't reach by
+    // walking up to it needs a ranged response regardless of why it's elevated.
+    private static final double RANGED_PREFERENCE_DISTANCE_BLOCKS = 6.0;
+    private static final double VERTICAL_PREFERENCE_BLOCKS = 3.0;
+
+    /**
+     * Live weapon switching against the guard's current target -- explicit user spec, 2026-11-16:
+     * "If there is a mob that is far away or flying, use a ranged weapon/spells. If there is a
+     * grounded/nearby enemy switch to melee/spells." Runs every 10 ticks from {@link
+     * #customServerAiStep} (see {@link #combatWeaponCheckCooldown}), independent of which combat
+     * goal is currently active, so it keeps working whether this guard is mid-patrol-response,
+     * mid-fight, or anything else -- {@link #reassessWeaponGoal} (unchanged) is what actually swaps
+     * {@link #bowGoal}/{@link #meleeGoal}/{@link #spellCastGoal} in and out, triggered as a side
+     * effect of {@link #onEquipItem} the instant this method changes MAINHAND, exactly the same way
+     * re-equipping via a Kyt already does -- this method never touches the goal selector itself.
+     *
+     * <p>Deliberately leaves a Nature Staff (or any mainhand {@link
+     * LyfeMagicianBridge#isNatureStaff} item) equipped untouched regardless of range -- a caster
+     * build's identity shouldn't get silently overridden by this feature; spellcasting already
+     * covers both "ranged" (cast at range) and "melee" (cast at close range, or melee-fallback while
+     * on cooldown) on its own via {@link GuardSpellCastGoal}'s existing priority ladder, so there is
+     * nothing for this method to improve on for that case. Only ever swaps between a physical
+     * {@link BowItem} and a physical melee weapon (anything else non-empty the guard was equipped
+     * with) sitting in {@link #spareWeapons} -- if the category it wants isn't available there, it
+     * leaves whatever's currently equipped alone rather than going unarmed.
+     */
+    private void reassessCombatWeapon() {
+        if (!(level() instanceof ServerLevel level) || level.isClientSide()) {
+            return;
+        }
+        LivingEntity target = getTarget();
+        if (target == null) {
+            return;
+        }
+        ItemStack mainhand = getMainHandItem();
+        if (com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge.isLoaded()
+                && com.github.cerealklla.settlemynts.bridge.LyfeMagicianBridge.isNatureStaff(mainhand)) {
+            return;
+        }
+        boolean wantsRanged = distanceToSqr(target) >= RANGED_PREFERENCE_DISTANCE_BLOCKS * RANGED_PREFERENCE_DISTANCE_BLOCKS
+                || target.getY() - getY() >= VERTICAL_PREFERENCE_BLOCKS;
+        boolean mainhandIsRanged = isRangedWeapon(mainhand);
+        if (!mainhand.isEmpty() && wantsRanged == mainhandIsRanged) {
+            return; // Already carrying the right category -- nothing to swap.
+        }
+        for (int i = 0; i < spareWeapons.size(); i++) {
+            ItemStack candidate = spareWeapons.get(i);
+            if (isRangedWeapon(candidate) != wantsRanged) {
+                continue;
+            }
+            spareWeapons.remove(i);
+            if (!mainhand.isEmpty()) {
+                spareWeapons.add(mainhand);
+            }
+            setItemSlot(EquipmentSlot.MAINHAND, candidate);
+            return;
+        }
+        // Nothing in the stash fits the wanted category -- keep whatever's equipped, better than unarmed.
     }
 
     /**
@@ -862,6 +946,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         output.storeNullable("HomeDimension", ResourceKey.codec(Registries.DIMENSION), homeDimension);
         output.storeNullable("NaturalSettlementKey", SettlementKey.CODEC, naturalSettlementKey);
         output.store("CompanionItems", ItemStack.OPTIONAL_CODEC.listOf(), companionItems);
+        output.store("SpareWeapons", ItemStack.OPTIONAL_CODEC.listOf(), spareWeapons);
     }
 
     @Override
@@ -875,6 +960,8 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         naturalSettlementKey = input.read("NaturalSettlementKey", SettlementKey.CODEC).orElse(null);
         companionItems.clear();
         companionItems.addAll(input.read("CompanionItems", ItemStack.OPTIONAL_CODEC.listOf()).orElse(List.of()));
+        spareWeapons.clear();
+        spareWeapons.addAll(input.read("SpareWeapons", ItemStack.OPTIONAL_CODEC.listOf()).orElse(List.of()));
         // Real bug found live, 2026-10-08: a guard that existed before the ranged-attack fix shot
         // nothing on Production even after redeploying, while a freshly-spawned guard worked fine on
         // the Dev Server. Root cause: LivingEntity#readAdditionalSaveData (just called via super,
@@ -903,10 +990,20 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         setItemSlot(EquipmentSlot.LEGS, record.leggings().copy());
         setItemSlot(EquipmentSlot.FEET, record.boots().copy());
         setItemSlot(EquipmentSlot.OFFHAND, record.offhand().copy());
+        spareWeapons.clear();
+        boolean mainhandSet = false;
         for (ItemStack stack : record.hotbar()) {
-            if (!stack.isEmpty()) {
+            if (stack.isEmpty()) {
+                continue;
+            }
+            if (!mainhandSet) {
                 setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
-                break;
+                mainhandSet = true;
+            } else {
+                // Adaptive weapon selection (2026-11-16) -- every OTHER non-empty hotbar entry used
+                // to just be discarded here; now kept as a real switch-to candidate for
+                // reassessCombatWeapon() instead, same drop-chance/persistence treatment as mainhand.
+                spareWeapons.add(stack.copy());
             }
         }
         for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
@@ -921,13 +1018,10 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
      * Fixed starter kit for an automatically-spawned natural-village guard -- explicit user spec,
      * 2026-11-16: "all leather armor and a wood sword and bow." No Kyt, Guard Kit Stand, or box
      * economy involved at all (none of that exists for a natural village); every guard gets the
-     * exact same gear, unconditionally. A real {@link Items#BOW} rides in MAINHAND, not the sword --
-     * confirmed before building this that no Guard in this suite, and no vanilla mob at all (a
-     * Piglin's crossbow-or-melee choice is fixed for its whole life, same as a Skeleton's bow or a
-     * Vindicator's axe), ever runs melee and ranged simultaneously or switches between them live, so
-     * {@link #reassessWeaponGoal} needs the bow in the slot it actually reads to get real ranged
-     * combat out of this guard at all, matching every other bow-equipped Guard in this suite. The
-     * Wooden Sword rides in OFFHAND purely as a visual sidearm -- it is never swung.
+     * exact same gear, unconditionally. A real {@link Items#BOW} rides in MAINHAND to start --
+     * {@link #reassessCombatWeapon} (2026-11-16, "use whatever weapon makes sense") live-swaps it
+     * for the Wooden Sword in {@link #spareWeapons} once a target is close and grounded, and back
+     * again once it isn't, same as a Guard Kit Stand guard carrying more than one weapon.
      */
     public void equipFixedNaturalGuardGear() {
         setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.LEATHER_HELMET));
@@ -935,9 +1029,10 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.LEATHER_LEGGINGS));
         setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.LEATHER_BOOTS));
         setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
-        setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.WOODEN_SWORD));
+        spareWeapons.clear();
+        spareWeapons.add(new ItemStack(Items.WOODEN_SWORD));
         for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
-                EquipmentSlot.FEET, EquipmentSlot.MAINHAND, EquipmentSlot.OFFHAND)) {
+                EquipmentSlot.FEET, EquipmentSlot.MAINHAND)) {
             setDropChance(slot, 0.0F);
         }
         setPersistenceRequired();
@@ -971,12 +1066,41 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         }
         setPersistenceRequired();
         setCanPickUpLoot(false);
+        restockSpareWeapons(plotBoxes, record);
 
         // "Guard spawns, summon all companions" (explicit user spec, 2026-10-25) -- see
         // companionItems'/recheckCompanions' own doc.
         withdrawCompanionsFromHotbar(plotBoxes, record);
         if (level() instanceof ServerLevel serverLevel) {
             recheckCompanions(serverLevel);
+        }
+    }
+
+    /**
+     * Adaptive weapon selection (2026-11-16) -- tops up {@link #spareWeapons} with every OTHER
+     * non-empty {@code record.hotbar()} entry (beyond whichever one is currently equipped in
+     * MAINHAND) that's actually available in {@code plotBoxes} right now and not already tracked,
+     * one of each -- same best-effort-per-slot shape {@link #withdrawAndEquip} already uses, just
+     * against the stash list instead of a vanilla equipment slot. Called from both {@link
+     * #equipFromLoadoutUsingBoxes} (fresh spawn) and {@link #equipMissingFromLoadoutUsingBoxes} (a
+     * later box-restock), so a weapon that was out of stock at spawn still joins the stash once the
+     * boxes are refilled, without needing its own poll.
+     */
+    private void restockSpareWeapons(List<Container> plotBoxes, LoadoutRecord record) {
+        ItemStack mainhand = getMainHandItem();
+        for (ItemStack candidate : record.hotbar()) {
+            if (candidate.isEmpty() || candidate.getItem() == mainhand.getItem()) {
+                continue;
+            }
+            boolean alreadyTracked = spareWeapons.stream().anyMatch(stack -> stack.getItem() == candidate.getItem());
+            if (alreadyTracked) {
+                continue;
+            }
+            Identifier itemId = BuiltInRegistries.ITEM.getKey(candidate.getItem());
+            List<ItemStack> taken = ContainerWithdraw.drain(plotBoxes, ShopResource.ofItem(itemId), 1);
+            if (!taken.isEmpty()) {
+                spareWeapons.add(taken.get(0));
+            }
         }
     }
 
@@ -1059,6 +1183,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         if (getItemBySlot(EquipmentSlot.MAINHAND).isEmpty()) {
             withdrawAndEquipFirstAvailable(plotBoxes, record, EquipmentSlot.MAINHAND);
         }
+        restockSpareWeapons(plotBoxes, record);
         // Box contents just changed (this method's own trigger, see GuardEquipBoxChangeListener) --
         // a companion that was out of stock at spawn may be available now; this event is also a
         // reasonable point to retry summoning one that's tracked but still on/past cooldown.
