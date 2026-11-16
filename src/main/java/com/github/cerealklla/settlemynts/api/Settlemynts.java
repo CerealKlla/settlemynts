@@ -17,6 +17,7 @@ import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.founding.SettlementCoreIndex;
+import com.github.cerealklla.settlemynts.guardhouse.PriorityLocationRegistry;
 import com.github.cerealklla.settlemynts.npc.NpcGender;
 import com.github.cerealklla.settlemynts.npc.NpcIdentity;
 import com.github.cerealklla.settlemynts.npc.NpcIdentityBirth;
@@ -244,6 +245,31 @@ public final class Settlemynts {
         }
         result.sort(Comparator.comparingDouble(SettlementHandle::distanceBlocks));
         return result;
+    }
+
+    /**
+     * A nearby active Priority Location's position, current escalation level, and real cluster/
+     * cleanup radius -- see {@link #findNearbyPriorityLocations}. {@code alertRadiusBlocks} (added
+     * 2026-11-15, same day as this record itself) is {@code guardhouse.PriorityLocationRegistry
+     * #clusterRadiusBlocks()} verbatim -- handed over explicitly rather than left for Lyfe to
+     * duplicate as its own guessed constant, so the minimap's alert-region circle always matches
+     * whatever this mod's own cleanup check actually uses.
+     */
+    public record PriorityLocationHandle(BlockPos pos, int level, double alertRadiusBlocks) {
+    }
+
+    /**
+     * Every active Priority Location (see {@code guardhouse.PriorityLocationRegistry}) within
+     * {@code radiusBlocks} of {@code origin}, in {@code level}'s own dimension, across every
+     * settlement -- added 2026-11-15 for Lyfe's minimap sync (real user follow-up: "Priority
+     * Locations should show upon a player's minimap if they are nearby"). Returns a plain
+     * position+level snapshot rather than the real {@code guardhouse.PriorityLocation} object --
+     * callers outside this mod have no business touching its claim-tracking state.
+     */
+    public static List<PriorityLocationHandle> findNearbyPriorityLocations(ServerLevel level, BlockPos origin, double radiusBlocks) {
+        return PriorityLocationRegistry.findNearby(level, origin, radiusBlocks).stream()
+                .map(loc -> new PriorityLocationHandle(loc.pos(), loc.level(), PriorityLocationRegistry.clusterRadiusBlocks()))
+                .toList();
     }
 
     /** A plot's current Shop listings, if it has a Shop at all -- empty if it doesn't, or Yconomics isn't loaded. */

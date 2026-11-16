@@ -22,6 +22,8 @@ import com.github.cerealklla.settlemynts.guardhouse.GuardEntity;
 import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandEntity;
 import com.github.cerealklla.settlemynts.guardhouse.GuardKitStandIndex;
 import com.github.cerealklla.settlemynts.guardhouse.GuardPendingDeathIndex;
+import com.github.cerealklla.settlemynts.guardhouse.PriorityLocation;
+import com.github.cerealklla.settlemynts.guardhouse.PriorityLocationRegistry;
 import com.github.cerealklla.settlemynts.npc.NameBank;
 import com.github.cerealklla.settlemynts.npc.NpcGender;
 import com.github.cerealklla.settlemynts.npc.NpcIdentity;
@@ -101,6 +103,8 @@ public final class DebugCommands {
                         .executes(ctx -> guardInfo(ctx.getSource())))
                 .then(Commands.literal("stakeinfo")
                         .executes(ctx -> stakeInfo(ctx.getSource())))
+                .then(Commands.literal("priorityinfo")
+                        .executes(ctx -> priorityInfo(ctx.getSource())))
                 .then(Commands.literal("checkavailable")
                         .then(Commands.argument("itemId", StringArgumentType.string())
                                 .executes(ctx -> checkAvailable(ctx.getSource(), StringArgumentType.getString(ctx, "itemId")))))
@@ -1575,6 +1579,39 @@ public final class DebugCommands {
             String line = "  - " + stake.blockPosition().toShortString() + " owner=" + stake.getOwnerCoreId()
                     + " lastVisited=" + stake.lastVisitedGameTime() + " (" + (now - stake.lastVisitedGameTime()) + " ticks ago) "
                     + claimText;
+            source.sendSuccess(() -> Component.literal(line), false);
+        }
+        return 1;
+    }
+
+    /**
+     * {@code /settlemynts priorityinfo} -- added 2026-11-15, real user report: "priority locations
+     * are lasting incredibly long" despite the 10-second no-hostile-nearby auto-clear. Rather than
+     * guess at a cause, this reports every currently-active {@link PriorityLocation} in the
+     * executor's dimension -- position, settlement, level/claimed slots -- AND the actual {@link
+     * Enemy} entities {@link PriorityLocationRegistry#hostilesNearby} finds within its cluster
+     * radius right now, i.e. the literal reason (if any) it hasn't auto-cleared yet.
+     */
+    private static int priorityInfo(CommandSourceStack source) {
+        if (!(source.getLevel() instanceof ServerLevel level)) {
+            source.sendFailure(Component.literal("Must be run in a real level."));
+            return 0;
+        }
+        List<PriorityLocation> locations = PriorityLocationRegistry.allIn(level);
+        if (locations.isEmpty()) {
+            source.sendSuccess(() -> Component.literal("No active Priority Locations in this dimension."), false);
+            return 1;
+        }
+        source.sendSuccess(() -> Component.literal(locations.size() + " active Priority Location(s):"), false);
+        for (PriorityLocation loc : locations) {
+            List<LivingEntity> hostiles = PriorityLocationRegistry.hostilesNearby(level, loc);
+            String hostileText = hostiles.isEmpty() ? "NONE (should clear on next sweep)"
+                    : hostiles.size() + ": " + hostiles.stream()
+                            .map(e -> e.getType().getDescription().getString() + "@" + e.blockPosition().toShortString())
+                            .reduce((a, b) -> a + ", " + b).orElse("");
+            String line = "  - " + loc.pos().toShortString() + " settlement=" + loc.settlementCoreId()
+                    + " level=" + loc.level() + " openSlots=" + loc.openSlots()
+                    + " | hostiles nearby: " + hostileText;
             source.sendSuccess(() -> Component.literal(line), false);
         }
         return 1;

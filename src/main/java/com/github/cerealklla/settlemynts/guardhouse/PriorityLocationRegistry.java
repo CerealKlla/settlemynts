@@ -41,6 +41,11 @@ public final class PriorityLocationRegistry {
     private PriorityLocationRegistry() {
     }
 
+    /** The real cluster/cleanup radius every active location uses -- see this class's own doc. Exposed for {@code api.Settlemynts#findNearbyPriorityLocations}, which hands it to Lyfe's minimap so the alert-region circle it draws is never a guessed/duplicated constant. */
+    public static double clusterRadiusBlocks() {
+        return CLUSTER_RADIUS_BLOCKS;
+    }
+
     /** Sight-triggered path -- {@code mobId} is the sighted hostile's own UUID, deduped per location (see {@link PriorityLocation#registerSeenMob}). */
     public static void registerSighting(ServerLevel level, UUID settlementCoreId, BlockPos pos, UUID mobId) {
         if (settlementCoreId == null) {
@@ -95,6 +100,24 @@ public final class PriorityLocationRegistry {
         return nearest;
     }
 
+    /**
+     * Every active location in {@code level}'s own dimension within {@code radiusBlocks} of {@code
+     * origin}, across every settlement -- used by {@code api.Settlemynts#findNearbyPriorityLocations}
+     * (Lyfe's minimap sync, added 2026-11-15, real user follow-up to this feature's own launch:
+     * "Priority Locations should show upon a player's minimap if they are nearby").
+     */
+    public static List<PriorityLocation> findNearby(ServerLevel level, BlockPos origin, double radiusBlocks) {
+        List<PriorityLocation> result = new ArrayList<>();
+        for (List<PriorityLocation> locations : BY_SETTLEMENT.values()) {
+            for (PriorityLocation loc : locations) {
+                if (loc.dimension() == level.dimension() && loc.pos().closerThan(origin, radiusBlocks)) {
+                    result.add(loc);
+                }
+            }
+        }
+        return result;
+    }
+
     /** Removes every location in {@code level} with no hostile left within its own cluster radius -- see {@link PriorityLocationCleanupTicker}. */
     public static void cleanup(ServerLevel level) {
         for (List<PriorityLocation> locations : BY_SETTLEMENT.values()) {
@@ -103,7 +126,37 @@ public final class PriorityLocationRegistry {
     }
 
     private static boolean hasHostileNearby(ServerLevel level, PriorityLocation location) {
+        return !hostilesNearby(level, location).isEmpty();
+    }
+
+    /**
+     * Debug-only ({@code /settlemynts priorityinfo}) -- the actual {@link Enemy} entities {@link
+     * #cleanup} currently sees within {@code location}'s own cluster radius, i.e. the real reason
+     * (if any) it isn't auto-clearing. Same query {@link #hasHostileNearby} runs, just not collapsed
+     * to a boolean.
+     */
+    public static List<LivingEntity> hostilesNearby(ServerLevel level, PriorityLocation location) {
+        // The AABB is a cheap broad-phase box query only (its corners sit up to CLUSTER_RADIUS_BLOCKS
+        // * sqrt(3) away) -- the closerThan filter narrows it to the real 20-block sphere, the same
+        // distance definition clustering itself uses (see findOrCreate's own closerThan check). Real
+        // live bug, 2026-11-15: without this filter, hostile mobs in a cave ~20 blocks straight down
+        // (horizontally close but far below the surface) fell inside the cube's corners and kept a
+        // location "still a threat" forever, even with nothing actually near the settlement itself.
         AABB box = new AABB(location.pos()).inflate(CLUSTER_RADIUS_BLOCKS);
-        return !level.getEntitiesOfClass(LivingEntity.class, box, e -> e.isAlive() && e instanceof Enemy).isEmpty();
+        return level.getEntitiesOfClass(LivingEntity.class, box,
+                e -> e.isAlive() && e instanceof Enemy && location.pos().closerThan(e.blockPosition(), CLUSTER_RADIUS_BLOCKS));
+    }
+
+    /** Debug-only ({@code /settlemynts priorityinfo}) -- every active location in {@code level}'s own dimension, across every settlement, regardless of distance from any point. */
+    public static List<PriorityLocation> allIn(ServerLevel level) {
+        List<PriorityLocation> result = new ArrayList<>();
+        for (List<PriorityLocation> locations : BY_SETTLEMENT.values()) {
+            for (PriorityLocation loc : locations) {
+                if (loc.dimension() == level.dimension()) {
+                    result.add(loc);
+                }
+            }
+        }
+        return result;
     }
 }
