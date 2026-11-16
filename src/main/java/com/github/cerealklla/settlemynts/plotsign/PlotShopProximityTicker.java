@@ -6,10 +6,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.SettlemyntsMod;
+import com.github.cerealklla.settlemynts.npc.NpcIdentity;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityKey;
+import com.github.cerealklla.settlemynts.npc.NpcIdentityStore;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -202,12 +206,6 @@ public final class PlotShopProximityTicker {
      * resolving for proximity detection -- no additional world scanning beyond that.
      */
     private static void updateWishlistNameplate(ServerLevel level, Villager npc, ShopAnchor.Npc anchor) {
-        // Known, flagged, unconfirmed gap left as-is (narrower than the real bug fixed below, and not
-        // yet reported): this still overwrites a named NPC's real identity name with just "?" while a
-        // wishlist is active, rather than appending to it -- that real name is lost for good once the
-        // wishlist clears (falls back to null/vanilla, see the branch below), since nothing here
-        // tracks what the name was before the marker replaced it. Not fixed now since it's a real,
-        // separate scope from the live report this method's other branch fixes.
         boolean hasWishlist = SettlemyntsMod.anchorHasWishlist(level, anchor);
         if (hasWishlist) {
             if (!WISHLIST_MARKER.equals(npc.getCustomName())) {
@@ -223,6 +221,33 @@ public final class PlotShopProximityTicker {
             // walks up to one), it was wiping a freshly-named NPC's real name back to null on the
             // very first approach, for every NPC with no active wishlist -- "every NPC in town."
             // Only ever clear a name this method itself actually set.
+            restoreRealName(npc);
+        }
+    }
+
+    /**
+     * Restores an NPC's own real identity name instead of just nulling the nameplate back to
+     * vanilla's blank default -- real report, 2026-11-16: "Neutral village NPC names get erased and
+     * replaced with ? an !, like the settlement NPCs were originally." This is the exact gap this
+     * method's own doc previously flagged (and left unfixed) on 2026-11-07: clearing the "?" marker
+     * discarded the real name outright rather than restoring it, since nothing tracked what the name
+     * was before the marker overwrote it. It doesn't need to be tracked separately, though -- a
+     * {@code NpcRole#WANDERING} NPC's real name is already independently persisted in {@link
+     * NpcIdentityStore}, keyed by {@link NpcIdentityKey#wandering}, the moment it's born (see {@code
+     * npc.VillagerIdentityListener}/{@code npc.WanderingIdentityListener}), so it can just be re-read
+     * from there instead of relying on the live entity's own (just-overwritten) {@code CustomName}.
+     * Falls back to a plain null nameplate only if no identity is on record at all, which covers a
+     * plot-bound worker (Farmer/Lumberjack/Miner/Resident/Guard) wandering into this same code path --
+     * those roles are keyed by their owning plot/stand, not {@code wandering}, have no entry under
+     * this key, and show their name via Nuclyus's floating stat bar rather than a vanilla nameplate
+     * in the first place, so there's genuinely no real name to restore for them here.
+     */
+    private static void restoreRealName(Villager npc) {
+        Optional<NpcIdentity> identity = NpcIdentityStore.find(NpcIdentityKey.wandering(npc.getUUID()));
+        if (identity.isPresent() && !identity.get().name().startsWith("Unnamed ")) {
+            npc.setCustomName(net.minecraft.network.chat.Component.literal(identity.get().name()));
+            npc.setCustomNameVisible(true);
+        } else {
             npc.setCustomName(null);
             npc.setCustomNameVisible(false);
         }
