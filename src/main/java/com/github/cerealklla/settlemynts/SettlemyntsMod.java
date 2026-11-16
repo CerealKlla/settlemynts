@@ -215,6 +215,7 @@ public class SettlemyntsMod {
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.roadway.TravelerSpeedListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillagePlotGenerationTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillageShopLinkTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalVillageGuardSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.NaturalShopVaultProtectionListener());
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.server.ServerStartingEvent event) ->
                 com.github.cerealklla.settlemynts.zone.NaturalVillagePlotPending.clearStaleQueuesOnServerStart());

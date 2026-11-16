@@ -20,6 +20,7 @@ import com.github.cerealklla.settlemynts.bridge.LyfeSummoningBridge;
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
 import com.github.cerealklla.settlemynts.zone.ContainerWithdraw;
 import com.github.cerealklla.settlemynts.zone.PlotRecord;
+import com.github.cerealklla.settlemynts.zone.SettlementKey;
 import com.github.cerealklla.settlemynts.zone.ShopResource;
 
 import net.minecraft.core.UUIDUtil;
@@ -56,6 +57,7 @@ import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BannerPatternLayers;
 import net.minecraft.world.level.storage.ValueInput;
@@ -112,6 +114,13 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     private UUID settlementCoreId;
     private UUID plotId;
     private UUID assignedStandId;
+    // Natural-village guards (2026-11-16, explicit user spec: "1 guard for every 5 plots") have none
+    // of the player-settlement infrastructure (Guardhouse/Guard Kit Stand/GhostTownHallCoreEntity)
+    // the fields above identify a guard by -- this is the parallel identity for that case instead,
+    // mutually exclusive with settlementCoreId/plotId/assignedStandId (a guard is spawned one way or
+    // the other, never both). Set once by zone.NaturalVillageGuardSpawnTicker; read back by that same
+    // ticker's own population scan, and by resolvePatrolArea below.
+    private SettlementKey naturalSettlementKey;
     private net.minecraft.core.BlockPos homePos;
     // Real bug fix, 2026-10-29: a Nether-founded settlement's guards were permanently stuck
     // beelining for the nearest Nether portal and parking under it, no matter what -- see
@@ -180,6 +189,16 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     /** Called once by {@link GuardSpawnTicker} right after construction -- which {@link GuardKitStandEntity} spawned this guard, so {@link #die} knows which stand to notify. */
     public void setAssignedStandId(UUID assignedStandId) {
         this.assignedStandId = assignedStandId;
+    }
+
+    /** Called once by {@code zone.NaturalVillageGuardSpawnTicker} right after construction -- see {@link #naturalSettlementKey}'s own field doc. */
+    public void setNaturalSettlementIdentity(SettlementKey naturalSettlementKey) {
+        this.naturalSettlementKey = naturalSettlementKey;
+    }
+
+    /** {@code null} for a player-settlement guard (spawned from a Guard Kit Stand) -- see {@link #naturalSettlementKey}'s own field doc. */
+    public SettlementKey naturalSettlementKey() {
+        return naturalSettlementKey;
     }
 
     /** This guard's own Guard Kit Stand -- used by {@link GuardReturnToDimensionGoal} to resolve a pre-existing guard's real home dimension via {@link GuardKitStandIndex}, independent of wherever the guard itself currently is. */
@@ -342,6 +361,17 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
      * "known scaling simplification" every other plot-resolving lookup in this mod already accepts.
      */
     public Optional<Geometry.Polygon> resolvePatrolArea(ServerLevel level) {
+        if (naturalSettlementKey != null) {
+            // A natural village has no owning plot/Guardhouse to patrol -- the whole settlement's own
+            // Cartographyr polygon stands in for "this guard's patrol area" instead. GuardPatrolAreaGoal's
+            // road-route attempt naturally comes back empty first (no RoadwayStakeEntity network exists
+            // for a natural village -- that's player-settlement-only infrastructure), falling straight
+            // through to its random-point-in-polygon wander fallback, which is exactly this.
+            return Cartography.getEntity(level, new EntityId(naturalSettlementKey.settlementEntityId()))
+                    .map(GeographicEntity::geometry)
+                    .filter(Geometry.Polygon.class::isInstance)
+                    .map(Geometry.Polygon.class::cast);
+        }
         if (settlementCoreId == null || plotId == null) {
             return Optional.empty();
         }
@@ -830,6 +860,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         output.storeNullable("AssignedStandId", UUIDUtil.CODEC, assignedStandId);
         output.storeNullable("HomePos", net.minecraft.core.BlockPos.CODEC, homePos);
         output.storeNullable("HomeDimension", ResourceKey.codec(Registries.DIMENSION), homeDimension);
+        output.storeNullable("NaturalSettlementKey", SettlementKey.CODEC, naturalSettlementKey);
         output.store("CompanionItems", ItemStack.OPTIONAL_CODEC.listOf(), companionItems);
     }
 
@@ -841,6 +872,7 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         assignedStandId = input.read("AssignedStandId", UUIDUtil.CODEC).orElse(null);
         homePos = input.read("HomePos", net.minecraft.core.BlockPos.CODEC).orElse(null);
         homeDimension = input.read("HomeDimension", ResourceKey.codec(Registries.DIMENSION)).orElse(null);
+        naturalSettlementKey = input.read("NaturalSettlementKey", SettlementKey.CODEC).orElse(null);
         companionItems.clear();
         companionItems.addAll(input.read("CompanionItems", ItemStack.OPTIONAL_CODEC.listOf()).orElse(List.of()));
         // Real bug found live, 2026-10-08: a guard that existed before the ranged-attack fix shot
@@ -879,6 +911,33 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
         }
         for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
                 EquipmentSlot.FEET, EquipmentSlot.OFFHAND, EquipmentSlot.MAINHAND)) {
+            setDropChance(slot, 0.0F);
+        }
+        setPersistenceRequired();
+        setCanPickUpLoot(false);
+    }
+
+    /**
+     * Fixed starter kit for an automatically-spawned natural-village guard -- explicit user spec,
+     * 2026-11-16: "all leather armor and a wood sword and bow." No Kyt, Guard Kit Stand, or box
+     * economy involved at all (none of that exists for a natural village); every guard gets the
+     * exact same gear, unconditionally. A real {@link Items#BOW} rides in MAINHAND, not the sword --
+     * confirmed before building this that no Guard in this suite, and no vanilla mob at all (a
+     * Piglin's crossbow-or-melee choice is fixed for its whole life, same as a Skeleton's bow or a
+     * Vindicator's axe), ever runs melee and ranged simultaneously or switches between them live, so
+     * {@link #reassessWeaponGoal} needs the bow in the slot it actually reads to get real ranged
+     * combat out of this guard at all, matching every other bow-equipped Guard in this suite. The
+     * Wooden Sword rides in OFFHAND purely as a visual sidearm -- it is never swung.
+     */
+    public void equipFixedNaturalGuardGear() {
+        setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.LEATHER_HELMET));
+        setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.LEATHER_CHESTPLATE));
+        setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.LEATHER_LEGGINGS));
+        setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.LEATHER_BOOTS));
+        setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
+        setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.WOODEN_SWORD));
+        for (EquipmentSlot slot : List.of(EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS,
+                EquipmentSlot.FEET, EquipmentSlot.MAINHAND, EquipmentSlot.OFFHAND)) {
             setDropChance(slot, 0.0F);
         }
         setPersistenceRequired();
