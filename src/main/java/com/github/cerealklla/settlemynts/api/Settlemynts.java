@@ -11,7 +11,9 @@ import java.util.OptionalInt;
 import java.util.UUID;
 
 import com.github.cerealklla.cartographyr.api.Cartography;
+import com.github.cerealklla.cartographyr.geo.Classification;
 import com.github.cerealklla.cartographyr.geo.EntityId;
+import com.github.cerealklla.cartographyr.geo.EntityType;
 import com.github.cerealklla.cartographyr.geo.GeographicEntity;
 import com.github.cerealklla.cartographyr.geo.Geometry;
 import com.github.cerealklla.settlemynts.bridge.YconomicsShopBridge;
@@ -805,6 +807,40 @@ public final class Settlemynts {
                     return Optional.of(new UUID(settlement.worldSeed(), settlement.settlementEntityId()));
                 }
             }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Resolves the same two-flavor {@code settlementCoreId} {@link #findPlotAt}/{@link
+     * #findSettlementCoreIdForPlot} use, for any position within {@code marginBlocks} of a
+     * registered settlement's own overall Cartographyr polygon -- deliberately NOT scoped to any
+     * specific plot's own tighter polygon, since a village's open paths/commons between plots
+     * aren't covered by any plot at all. Added 2026-11-16 for {@code
+     * resident.VillagerConversionListener}'s Priority Location marker, where "died/converted
+     * somewhere in this village" needs to match even when that somewhere isn't inside a staked plot.
+     * Distinguishes the two flavors by checking whether a real, finalized settlement core's own
+     * position falls inside the matched polygon -- a settlement's Town Hall Core is always inside
+     * its own registered footprint by construction, so no cross-mod structure-association lookup is
+     * needed.
+     */
+    public static Optional<UUID> findSettlementCoreIdNear(ServerLevel level, BlockPos pos, double marginBlocks) {
+        for (GeographicEntity entity : Cartography.findEntities(level, Classification.CONSTRUCTED)) {
+            if (!entity.type().equals(EntityType.SETTLEMENT)) {
+                continue;
+            }
+            boolean withinMargin = entity.geometry() instanceof Geometry.Polygon polygon
+                    ? polygon.distanceOutside(pos.getX(), pos.getZ()) <= marginBlocks
+                    : entity.geometry().contains(pos.getX(), pos.getZ());
+            if (!withinMargin) {
+                continue;
+            }
+            for (GhostTownHallCoreEntity core : finalizedCoresIn(level)) {
+                if (entity.geometry().contains(core.blockPosition().getX(), core.blockPosition().getZ())) {
+                    return Optional.of(core.getUUID());
+                }
+            }
+            return Optional.of(new UUID(level.getSeed(), entity.id().value()));
         }
         return Optional.empty();
     }

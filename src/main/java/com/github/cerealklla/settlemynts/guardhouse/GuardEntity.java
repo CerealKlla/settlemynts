@@ -339,6 +339,24 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
     }
 
     /**
+     * {@code settlementCoreId} for a player-settlement guard, or the deterministic synthetic id
+     * derived from {@link #naturalSettlementKey} for a natural-village guard -- the id every
+     * Priority Location consumer ({@code GuardSightGoal}, {@code GuardPriorityResponseGoal}) should
+     * key off of, instead of the real-core-only {@link #getSettlementCoreId()}. Real gap found
+     * 2026-11-16: both of those always resolved {@code null} for a natural guard, silently opting
+     * every natural village out of the whole Priority Location feature since the day it shipped.
+     */
+    public UUID effectiveSettlementCoreId() {
+        if (settlementCoreId != null) {
+            return settlementCoreId;
+        }
+        if (naturalSettlementKey != null) {
+            return new UUID(naturalSettlementKey.worldSeed(), naturalSettlementKey.settlementEntityId());
+        }
+        return null;
+    }
+
+    /**
      * Real debug need, 2026-10-30: "I have seen the same 2 guards not move for several minutes
      * now" -- several real stuck-guard bugs this same session were each only findable by reading
      * live diagnostic log output or raw NBT, and this particular case produced neither (no logged

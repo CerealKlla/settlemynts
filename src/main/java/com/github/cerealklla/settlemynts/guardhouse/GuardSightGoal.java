@@ -87,7 +87,7 @@ public class GuardSightGoal extends Goal {
             // Priority Location trigger, 2026-11-15 -- explicit user spec: "if an NPC in town sees
             // an enemy, a priority location be placed down where that enemy is." See
             // PriorityLocationRegistry's own doc.
-            UUID settlementCoreId = guard.getSettlementCoreId();
+            UUID settlementCoreId = guard.effectiveSettlementCoreId();
             if (settlementCoreId != null) {
                 PriorityLocationRegistry.registerSighting(level, settlementCoreId, found.blockPosition(), found.getUUID());
             }

@@ -61,7 +61,7 @@ public class GuardPriorityResponseGoal extends Goal {
         if (guard.homeDimension() != null && level.dimension() != guard.homeDimension()) {
             return false; // same dimension-safety check GuardPatrolAreaGoal itself already applies
         }
-        UUID settlementCoreId = guard.getSettlementCoreId();
+        UUID settlementCoreId = guard.effectiveSettlementCoreId();
         if (settlementCoreId == null) {
             return false;
         }
