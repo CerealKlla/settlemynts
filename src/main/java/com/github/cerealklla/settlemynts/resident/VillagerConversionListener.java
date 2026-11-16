@@ -22,10 +22,12 @@ import net.neoforged.neoforge.event.entity.living.LivingConversionEvent;
  *
  * <p>Also plants a Priority Location centered on the new Zombie Villager, explicit user spec: "when
  * a villager becomes a zombie, stick a priority location marker centered on that villager until
- * they die." No custom until-it-dies tracking is needed -- the Zombie Villager is itself a real
- * {@code Enemy}, so {@code guardhouse.PriorityLocationCleanupTicker}'s existing "no hostile left in
- * range" sweep already removes the marker the instant that specific zombie actually dies (or is
- * cured back into a villager), the same way it already handles every other hostile.
+ * they die" -- and, same-day follow-up, "the 'until it dies' was directly tied to 'centered on the
+ * zombie,' meaning if the zombie is moving so is the location, so it can never walk out of the area
+ * and despawn." Uses {@code guardhouse.PriorityLocationRegistry#registerTrackedThreat} rather than
+ * the plain sighting/damage paths -- that location follows this exact zombie's live position every
+ * cleanup pass and is only removed once this exact entity can no longer be resolved alive, instead
+ * of the generic "no hostile left in a fixed radius" rule every other trigger uses.
  *
  * <p>Same {@code getClass() == Villager.class} scoping as {@link VillagerDeathListener} -- a {@code
  * ResidentVillagerEntity} can never reach this listener at all, since {@code
@@ -51,6 +53,6 @@ public final class VillagerConversionListener {
         Optional<UUID> settlementCoreId = Settlemynts.findSettlementCoreIdNear(
                 level, pos, VillagerRespawnQueue.OUTSIDE_SETTLEMENT_MARGIN_BLOCKS);
         settlementCoreId.ifPresent(coreId ->
-                PriorityLocationRegistry.registerSighting(level, coreId, pos, zombie.getUUID()));
+                PriorityLocationRegistry.registerTrackedThreat(level, coreId, zombie.getUUID(), pos));
     }
 }

@@ -23,18 +23,30 @@ import net.minecraft.world.level.Level;
  * normal patrol and would re-trigger fresh locations immediately if a fight is genuinely still
  * ongoing.
  *
- * <p>Position is fixed at creation and never re-centered -- every later contributing sighting/
- * damage event within {@link PriorityLocationRegistry}'s own cluster radius escalates this same
- * instance's {@link #level} instead of spawning a duplicate, but doesn't move {@link #pos}. This is
- * a deliberate simplification (confirmed acceptable, "if it's easier") over continuously averaging
- * position as the fight drifts.
+ * <p>Position is fixed at creation and never re-centered for the sighting/damage-triggered paths --
+ * every later contributing event within {@link PriorityLocationRegistry}'s own cluster radius
+ * escalates this same instance's {@link #level} instead of spawning a duplicate, but doesn't move
+ * {@link #pos}. This is a deliberate simplification (confirmed acceptable, "if it's easier") over
+ * continuously averaging position as the fight drifts.
+ *
+ * <p>The zombie-villager-conversion path is the one exception, explicit user spec, 2026-11-16: "the
+ * 'until it dies' was directly tied to 'centered on the zombie,' meaning if the zombie is moving so
+ * is the location, so it can never walk out of the area and despawn the area." A location created
+ * via {@link #trackEntity} gets re-centered onto that exact entity's live position every {@link
+ * PriorityLocationRegistry#cleanup} pass instead of relying on the fixed-radius "no hostile nearby"
+ * rule, and is removed the instant that specific entity can no longer be resolved alive (dead,
+ * cured, or its chunk unloaded) rather than when the *area* goes quiet -- see {@link
+ * PriorityLocationRegistry#cleanup}'s own doc for the exact removal rule.
  */
 public final class PriorityLocation {
 
-    private final BlockPos pos;
+    private BlockPos pos;
     private final ResourceKey<Level> dimension;
     private final UUID settlementCoreId;
     private int level;
+    // Non-null only for the zombie-conversion path (see this class's own doc) -- the entity this
+    // location follows instead of staying fixed, and whose death/disappearance is what removes it.
+    private UUID trackedEntityId;
     // Dedup for the sight-triggered path only -- a given mob (by UUID) escalates this location's
     // level at most once each, no matter how many times/how many different guards re-spot it. The
     // damage-triggered path deliberately has no equivalent dedup -- see PriorityLocationRegistry's
@@ -57,6 +69,20 @@ public final class PriorityLocation {
 
     public BlockPos pos() {
         return pos;
+    }
+
+    /** Re-centers a tracked location onto its followed entity's current position -- see this class's own doc. */
+    void moveTo(BlockPos newPos) {
+        this.pos = newPos;
+    }
+
+    /** Marks this location as following {@code entityId}'s live position instead of staying fixed -- see this class's own doc. Idempotent; a repeat call with the same id is a no-op. */
+    void trackEntity(UUID entityId) {
+        this.trackedEntityId = entityId;
+    }
+
+    UUID trackedEntityId() {
+        return trackedEntityId;
     }
 
     public ResourceKey<Level> dimension() {

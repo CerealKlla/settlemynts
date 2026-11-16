@@ -62,6 +62,21 @@ public final class PriorityLocationRegistry {
         findOrCreate(level, settlementCoreId, pos).escalateFromDamage();
     }
 
+    /**
+     * Zombie-villager-conversion path -- see {@link PriorityLocation}'s own doc for why this one
+     * follows {@code trackedEntityId}'s live position every {@link #cleanup} pass instead of
+     * staying fixed. {@code pos} is only the entity's position at the moment of this call (used to
+     * find/create the right location); {@link #cleanup} takes over re-centering it from here.
+     */
+    public static void registerTrackedThreat(ServerLevel level, UUID settlementCoreId, UUID trackedEntityId, BlockPos pos) {
+        if (settlementCoreId == null) {
+            return;
+        }
+        PriorityLocation location = findOrCreate(level, settlementCoreId, pos);
+        location.registerSeenMob(trackedEntityId);
+        location.trackEntity(trackedEntityId);
+    }
+
     private static PriorityLocation findOrCreate(ServerLevel level, UUID settlementCoreId, BlockPos pos) {
         List<PriorityLocation> locations = BY_SETTLEMENT.computeIfAbsent(settlementCoreId, k -> new ArrayList<>());
         for (PriorityLocation existing : locations) {
@@ -118,11 +133,28 @@ public final class PriorityLocationRegistry {
         return result;
     }
 
-    /** Removes every location in {@code level} with no hostile left within its own cluster radius -- see {@link PriorityLocationCleanupTicker}. */
+    /**
+     * Removes every location in {@code level} with no hostile left within its own cluster radius --
+     * except a tracked (zombie-conversion) location, which is instead re-centered onto its followed
+     * entity's live position and only removed once that exact entity can no longer be resolved
+     * alive (dead, cured, or its chunk unloaded) -- see {@link PriorityLocationCleanupTicker}.
+     */
     public static void cleanup(ServerLevel level) {
         for (List<PriorityLocation> locations : BY_SETTLEMENT.values()) {
-            locations.removeIf(loc -> loc.dimension() == level.dimension() && !hasHostileNearby(level, loc));
+            locations.removeIf(loc -> loc.dimension() == level.dimension() && shouldRemove(level, loc));
         }
+    }
+
+    private static boolean shouldRemove(ServerLevel level, PriorityLocation loc) {
+        UUID trackedEntityId = loc.trackedEntityId();
+        if (trackedEntityId == null) {
+            return !hasHostileNearby(level, loc);
+        }
+        if (level.getEntity(trackedEntityId) instanceof LivingEntity tracked && tracked.isAlive()) {
+            loc.moveTo(tracked.blockPosition());
+            return false;
+        }
+        return true;
     }
 
     private static boolean hasHostileNearby(ServerLevel level, PriorityLocation location) {
