@@ -14,7 +14,6 @@ import com.github.cerealklla.settlemynts.registration.ModEntities;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -39,11 +38,14 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
  * one-slot-per-stand/sign.
  *
  * <p><b>Patrol area</b>: a natural-village guard has no owning plot or Guardhouse to patrol, and no
- * Roadway Stake network either (that's player-settlement infrastructure only) -- {@link
- * GuardEntity#resolvePatrolArea} resolves straight to the settlement's own whole Cartographyr
- * polygon for a guard carrying a {@link SettlementKey}, so {@code guardhouse.GuardPatrolAreaGoal}'s
- * existing road-route attempt naturally comes back empty (no stakes to find) and falls straight
- * through to its existing random-point-in-polygon wander fallback, with zero changes needed there.
+ * real {@code roadway.RoadwayStakeEntity} network either (that's player-settlement infrastructure
+ * only, since it needs an actual Town Planner to place it) -- {@link GuardEntity#resolvePatrolArea}
+ * resolves straight to the settlement's own whole Cartographyr polygon for a guard carrying a {@link
+ * SettlementKey}, so {@code guardhouse.GuardPatrolAreaGoal}'s road-route attempt naturally comes back
+ * empty and falls through to its own natural-village fallback instead -- which, as of 2026-11-17,
+ * picks from {@link NaturalRoadStakes}' per-plot waypoints rather than a blind random point anywhere
+ * in that whole polygon (see that class's own doc for the real "guards stranded at the bottom of a
+ * cliff" bug this fixes). This ticker's own spawn-position picker uses the same waypoints.
  *
  * <p><b>Combat style</b>, explicit user spec after confirming no Guard in this suite -- and no
  * vanilla mob at all -- ever runs melee and ranged simultaneously or switches between them live:
@@ -57,7 +59,6 @@ public final class NaturalVillageGuardSpawnTicker {
     // Staggered against this mod's other 100-tick full-world scan tickers -- see
     // farm.FarmerSpawnTicker's own doc for the full "thundering herd" root cause this avoids.
     private static final int TICK_OFFSET = 88;
-    private static final int MAX_SAMPLE_ATTEMPTS = 10;
 
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
@@ -94,11 +95,19 @@ public final class NaturalVillageGuardSpawnTicker {
         }
         AABB bounds = new AABB(minX, level.getMinY(), minZ, maxX, level.getMaxY(), maxZ);
         int alive = level.getEntitiesOfClass(GuardEntity.class, bounds, g -> settlement.equals(g.naturalSettlementKey())).size();
+        if (alive >= target) {
+            return;
+        }
+        // Real bug fix, 2026-11-17 -- see NaturalRoadStakes' own doc for the full writeup. Used to
+        // sample a blind random (x, z) across the settlement's whole bounding polygon; on a cliff-
+        // sprawling village that's exactly as likely to land at the base of a cliff as anywhere a
+        // guard could actually patrol to from there, stranding it the instant it tried to move.
+        List<BlockPos> stakes = NaturalRoadStakes.resolve(level, plots);
+        if (stakes.isEmpty()) {
+            return; // No resolvable stake this scan -- try again next pass rather than guessing.
+        }
         for (int i = alive; i < target; i++) {
-            BlockPos spawnPos = pickSpawnPos(level, polygon, minX, maxX, minZ, maxZ);
-            if (spawnPos == null) {
-                return; // Couldn't find a contained point this scan -- try again next pass rather than guessing.
-            }
+            BlockPos spawnPos = stakes.get(level.getRandom().nextInt(stakes.size()));
             spawnGuard(level, settlement, spawnPos);
         }
     }
@@ -111,20 +120,5 @@ public final class NaturalVillageGuardSpawnTicker {
         guard.setHomePos(spawnPos);
         guard.setHomeDimension(level.dimension());
         level.addFreshEntity(guard);
-    }
-
-    private static BlockPos pickSpawnPos(ServerLevel level, Geometry.Polygon polygon, int minX, int maxX, int minZ, int maxZ) {
-        int rangeX = Math.max(1, maxX - minX + 1);
-        int rangeZ = Math.max(1, maxZ - minZ + 1);
-        for (int attempt = 0; attempt < MAX_SAMPLE_ATTEMPTS; attempt++) {
-            int x = minX + level.getRandom().nextInt(rangeX);
-            int z = minZ + level.getRandom().nextInt(rangeZ);
-            if (!polygon.contains(x, z)) {
-                continue;
-            }
-            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-            return new BlockPos(x, y, z);
-        }
-        return null;
     }
 }

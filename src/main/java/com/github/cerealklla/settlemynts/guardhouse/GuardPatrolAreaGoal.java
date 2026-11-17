@@ -224,7 +224,16 @@ public class GuardPatrolAreaGoal extends Goal {
         }
         BlockPos fallbackTarget = null;
         if (route.isEmpty()) {
-            fallbackTarget = guard.resolvePatrolArea(level).map(area -> pickTarget(level, area)).orElse(null);
+            // Real bug fix, 2026-11-17 -- see zone.NaturalRoadStakes' own doc for the full writeup.
+            // pickTarget's blind random-point-in-polygon sample is exactly as likely to land at the
+            // base of a cliff as anywhere a guard could actually walk to in a cliff-sprawling natural
+            // village, stranding it the instant it tried; a natural-village guard now picks from
+            // zone.NaturalRoadStakes' per-plot waypoints instead, same source the spawn ticker uses
+            // for homePos -- which is also what makes npc.NpcStuckWatchdog's existing rescue-to-
+            // homePos teleport always land somewhere real if this still gets stuck en route.
+            fallbackTarget = guard.naturalSettlementKey() != null
+                    ? pickNaturalStakeTarget(level)
+                    : guard.resolvePatrolArea(level).map(area -> pickTarget(level, area)).orElse(null);
         }
         currentRoute = route;
         waypointIndex = 0;
@@ -367,6 +376,23 @@ public class GuardPatrolAreaGoal extends Goal {
     /** Unweighted BFS over {@link RoadwayStakeEntity#getConnectionIds()} -- empty if {@code goal} isn't reachable from {@code start} (a disconnected network component). Delegates to the shared {@link com.github.cerealklla.settlemynts.roadway.RoadwayGraph}, added 2026-10-11 so the new Highway Stake feature can reuse the exact same algorithm. */
     private static List<RoadwayStakeEntity> findStakePath(List<RoadwayStakeEntity> stakes, RoadwayStakeEntity start, RoadwayStakeEntity goal) {
         return com.github.cerealklla.settlemynts.roadway.RoadwayGraph.shortestPath(stakes, start, goal);
+    }
+
+    /**
+     * A natural-village guard's own patrol target -- one of {@code zone.NaturalRoadStakes}' per-plot
+     * waypoints, picked at random, instead of {@link #pickTarget}'s blind random-point-in-polygon
+     * sample. See this method's own call site for the real bug this fixes. Returns {@code null} (same
+     * as a bad {@link #pickTarget} sample) if no stake resolves this scan -- e.g. every plot's own
+     * chunk is currently unloaded -- so {@code canUse()} just tries again next cycle.
+     */
+    private BlockPos pickNaturalStakeTarget(ServerLevel level) {
+        List<com.github.cerealklla.settlemynts.zone.PlotRecord> plots = com.github.cerealklla.settlemynts.zone.NaturalSettlementPlotStore
+                .get(level.getServer()).getPlots(guard.naturalSettlementKey());
+        List<BlockPos> stakes = com.github.cerealklla.settlemynts.zone.NaturalRoadStakes.resolve(level, plots);
+        if (stakes.isEmpty()) {
+            return null;
+        }
+        return stakes.get(guard.getRandom().nextInt(stakes.size()));
     }
 
     private BlockPos pickTarget(ServerLevel level, Geometry.Polygon area) {

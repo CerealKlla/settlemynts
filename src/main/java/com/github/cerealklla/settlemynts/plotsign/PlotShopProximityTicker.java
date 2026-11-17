@@ -196,61 +196,69 @@ public final class PlotShopProximityTicker {
             net.minecraft.network.chat.Component.literal("?").withStyle(net.minecraft.ChatFormatting.GREEN, net.minecraft.ChatFormatting.BOLD);
 
     /**
-     * Sets/clears a plain vanilla nameplate ("?") above an NPC whose plot currently has an unmet
-     * Planned Inventory deficit OR an unclaimed quest board offer (2026-10-10, "if they have needs
-     * they'd have a ! floating over their heads"; recolored/reglyphed green "?" 2026-10-11 -- the
-     * user's own correction, freeing up "!" for the new personal marker below: "Currently that
-     * results in a Golden ! and I now want a Green ?") -- reuses vanilla's own nametag rendering
-     * entirely, no new client rendering code needed. Public (visible to every player, not just
-     * whoever's asking), server-authoritative, computed only for NPCs this class is already
-     * resolving for proximity detection -- no additional world scanning beyond that.
+     * Sets/clears a plain vanilla nameplate above an NPC whose plot currently has an unmet Planned
+     * Inventory deficit OR an unclaimed quest board offer (2026-10-10, "if they have needs they'd
+     * have a ! floating over their heads"; recolored/reglyphed green "?" 2026-10-11 -- the user's own
+     * correction, freeing up "!" for the new personal marker below: "Currently that results in a
+     * Golden ! and I now want a Green ?") -- reuses vanilla's own nametag rendering entirely, no new
+     * client rendering code needed. Public (visible to every player, not just whoever's asking),
+     * server-authoritative, computed only for NPCs this class is already resolving for proximity
+     * detection -- no additional world scanning beyond that.
+     *
+     * <p><b>Real bug, found live 2026-11-17: "I walked up to this NPC named Oscar and when I got
+     * close it changed to just ?"</b> -- this used to set the bare marker as the WHOLE {@code
+     * CustomName}, directly overwriting a real named NPC's identity the instant a player walked
+     * close enough to trigger this scan (which is exactly when the user would notice). The marker is
+     * now appended onto the NPC's own real identity name instead of replacing it -- the same
+     * "combine, don't clobber" fix {@code client.PersonalQuestMarkerRenderer} already uses for the
+     * sibling personal "!" marker, just via a real {@code CustomName} mutation here (server-
+     * authoritative/public) instead of a client-only render hook (per-viewer/personal). Always
+     * recomputes the desired name from scratch and only writes it if different -- simpler and more
+     * robust than the old two-branch "was this marker, was this not" state tracking, which is what
+     * let a tagged-but-un-restored name slip through in the first place (see the 2026-11-07/2026-11-16
+     * history below).
+     *
+     * <p>History: originally cleared ANY non-null custom name once the NPC had no wishlist (2026-10-10),
+     * wiping a freshly-named NPC's real name back to null on its very first approach -- "Names still
+     * disappear on the NPCs when I walk up to them" (fixed 2026-11-07 by only clearing a name this
+     * method itself had set). That fix then discarded the real name outright instead of restoring it
+     * -- "Neutral village NPC names get erased and replaced with ? an !" (fixed 2026-11-16 by re-
+     * reading the real name from {@link NpcIdentityStore} instead of trying to reconstruct it from the
+     * live entity's own just-overwritten {@code CustomName}). This pass removes the overwrite itself.
      */
     private static void updateWishlistNameplate(ServerLevel level, Villager npc, ShopAnchor.Npc anchor) {
         boolean hasWishlist = SettlemyntsMod.anchorHasWishlist(level, anchor);
+        Optional<String> realName = realIdentityName(npc);
+        net.minecraft.network.chat.Component desired;
         if (hasWishlist) {
-            if (!WISHLIST_MARKER.equals(npc.getCustomName())) {
-                npc.setCustomName(WISHLIST_MARKER);
-                npc.setCustomNameVisible(true);
-            }
-        } else if (WISHLIST_MARKER.equals(npc.getCustomName())) {
-            // Real bug, found live 2026-11-07: "Names still disappear on the NPCs when I walk up to
-            // them." This used to clear ANY non-null custom name once the NPC had no wishlist --
-            // but almost every NPC's custom name is its own real identity name (set once by
-            // npc.VillagerIdentityListener / npc.WanderingIdentityListener), not this marker. Since
-            // this method runs for every NPC resolved by a proximity scan (i.e. the instant a player
-            // walks up to one), it was wiping a freshly-named NPC's real name back to null on the
-            // very first approach, for every NPC with no active wishlist -- "every NPC in town."
-            // Only ever clear a name this method itself actually set.
-            restoreRealName(npc);
+            desired = realName.isPresent()
+                    ? net.minecraft.network.chat.Component.literal(realName.get() + " ").append(WISHLIST_MARKER)
+                    : WISHLIST_MARKER;
+        } else {
+            desired = realName.map(net.minecraft.network.chat.Component::literal).orElse(null);
+        }
+        if (!Objects.equals(desired, npc.getCustomName())) {
+            npc.setCustomName(desired);
+            npc.setCustomNameVisible(desired != null);
         }
     }
 
     /**
-     * Restores an NPC's own real identity name instead of just nulling the nameplate back to
-     * vanilla's blank default -- real report, 2026-11-16: "Neutral village NPC names get erased and
-     * replaced with ? an !, like the settlement NPCs were originally." This is the exact gap this
-     * method's own doc previously flagged (and left unfixed) on 2026-11-07: clearing the "?" marker
-     * discarded the real name outright rather than restoring it, since nothing tracked what the name
-     * was before the marker overwrote it. It doesn't need to be tracked separately, though -- a
-     * {@code NpcRole#WANDERING} NPC's real name is already independently persisted in {@link
-     * NpcIdentityStore}, keyed by {@link NpcIdentityKey#wandering}, the moment it's born (see {@code
-     * npc.VillagerIdentityListener}/{@code npc.WanderingIdentityListener}), so it can just be re-read
-     * from there instead of relying on the live entity's own (just-overwritten) {@code CustomName}.
-     * Falls back to a plain null nameplate only if no identity is on record at all, which covers a
-     * plot-bound worker (Farmer/Lumberjack/Miner/Resident/Guard) wandering into this same code path --
-     * those roles are keyed by their owning plot/stand, not {@code wandering}, have no entry under
-     * this key, and show their name via Nuclyus's floating stat bar rather than a vanilla nameplate
-     * in the first place, so there's genuinely no real name to restore for them here.
+     * An NPC's own real identity name, if it has one -- a {@code NpcRole#WANDERING} NPC's real name
+     * is independently persisted in {@link NpcIdentityStore}, keyed by {@link
+     * NpcIdentityKey#wandering}, the moment it's born (see {@code npc.VillagerIdentityListener}/
+     * {@code npc.WanderingIdentityListener}), so it's read from there rather than from the live
+     * entity's own {@code CustomName} (which this method's own caller is in the middle of deciding
+     * whether to overwrite). Empty for a plot-bound worker (Farmer/Lumberjack/Miner/Resident/Guard)
+     * reaching this same code path -- those roles are keyed by their owning plot/stand, not {@code
+     * wandering}, have no entry under this key, and show their name via Nuclyus's floating stat bar
+     * rather than a vanilla nameplate in the first place, so there's genuinely no real name for them
+     * here (the bare "?" marker, with no name to prefix, is correct for them).
      */
-    private static void restoreRealName(Villager npc) {
-        Optional<NpcIdentity> identity = NpcIdentityStore.find(NpcIdentityKey.wandering(npc.getUUID()));
-        if (identity.isPresent() && !identity.get().name().startsWith("Unnamed ")) {
-            npc.setCustomName(net.minecraft.network.chat.Component.literal(identity.get().name()));
-            npc.setCustomNameVisible(true);
-        } else {
-            npc.setCustomName(null);
-            npc.setCustomNameVisible(false);
-        }
+    private static Optional<String> realIdentityName(Villager npc) {
+        return NpcIdentityStore.find(NpcIdentityKey.wandering(npc.getUUID()))
+                .map(NpcIdentity::name)
+                .filter(name -> !name.startsWith("Unnamed "));
     }
 
     /**

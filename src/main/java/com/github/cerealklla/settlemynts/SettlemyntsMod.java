@@ -237,7 +237,7 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.npc.NpcIdentityPrompting.shutdown());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerDeathListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerConversionListener());
-        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerRespawnTicker());
+        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerBedSpawnTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.VillagerShopInteractListener());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.diagnostics.LagDiagnostics());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.watchtower.WatchTowerChunkLoadListener());

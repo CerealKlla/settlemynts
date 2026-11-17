@@ -29,7 +29,7 @@ public final class FarmerSpawnTicker {
     // Staggered 2026-10-12 -- real report: every mob near the player stutter-moving in lockstep,
     // same symptom as an earlier guard-lag investigation. Root cause found this time: eight
     // independent full-world-scanning tickers across three mods (this one, GuardSpawnTicker,
-    // LumberjackSpawnTicker, MineshaftSpawnTicker, ResidentSpawnTicker, VillagerRespawnTicker,
+    // LumberjackSpawnTicker, MineshaftSpawnTicker, ResidentSpawnTicker, VillagerBedSpawnTicker,
     // NaturalVillageShopLinkTicker, Myssions' QuestDeadlineTicker) all independently picked the same
     // "every 100 ticks" cadence with no offset, so every one of their scans landed on the exact same
     // tick (0, 100, 200, ...) and their costs compounded into one periodic ~50-180ms spike every 5

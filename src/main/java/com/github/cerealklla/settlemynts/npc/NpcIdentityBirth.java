@@ -1,7 +1,6 @@
 package com.github.cerealklla.settlemynts.npc;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -54,18 +53,23 @@ public final class NpcIdentityBirth {
         if (existing.isPresent()) {
             return existing.get();
         }
-        String roleName = key.role().name();
-        String displayRole = roleName.charAt(0) + roleName.substring(1).toLowerCase(Locale.ROOT);
-        // Gender here is a throwaway placeholder value -- nothing ever reads it before the real
-        // generated identity (with its own freshly-rolled gender, see NpcIdentityPrompting) overwrites
-        // this record; a synced entity field only ever copies from a resolved REAL (non-"Unnamed ")
-        // identity in the first place (see e.g. GuardEntity#syncDisplayName's own guard).
-        NpcIdentity placeholder = new NpcIdentity(key, "Unnamed " + displayRole, "", List.of(), true, Optional.empty(), NpcGender.MALE);
+        // Real name/gender are rolled and persisted right here, synchronously, before any LLM call
+        // ever starts -- real bug, 2026-11-16: the old placeholder started as literal "Unnamed X" and
+        // only ever got swapped for a real name from inside NpcIdentityPrompting's async response
+        // handler, so an unconfigured/unreachable/slow Ollama (or any other failure on that path) left
+        // the NPC permanently nameless -- no nametag ever showed, since VillagerIdentityListener/
+        // WanderingIdentityListener both gate `setCustomName` on the name not starting with "Unnamed ".
+        // NameBank's picks are a plain in-memory draw, not LLM-dependent, so there's no reason the name
+        // itself should ever be gated on the backstory call succeeding.
+        List<String> usedNames = core != null ? NpcSettlementNames.inSettlement(level, core) : List.of();
+        NpcGender gender = NpcGender.roll();
+        String givenName = NameBank.pickGivenName(gender, usedNames);
+        String name = NameBank.rollSurname() ? givenName + " " + NameBank.pickSurname() : givenName;
+        NpcIdentity placeholder = new NpcIdentity(key, name, "", List.of(), true, Optional.empty(), gender);
         NpcIdentityStore.put(placeholder);
         Long settlementPlaceId = core != null ? core.getCartographyrEntityId() : null;
         LoreEntry lore = settlementPlaceId != null ? SettlementLoreStore.getOrAssign(settlementPlaceId) : GENERIC_LORE;
-        List<String> usedNames = core != null ? NpcSettlementNames.inSettlement(level, core) : List.of();
-        NpcIdentityPrompting.generateAsync(placeholder, lore, settlementName, usedNames, onGenerated);
+        NpcIdentityPrompting.generateAsync(placeholder, lore, settlementName, onGenerated);
         return placeholder;
     }
 }

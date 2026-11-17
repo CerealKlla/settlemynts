@@ -71,11 +71,12 @@ public final class NpcIdentityPrompting {
 
     /**
      * Asynchronously generates a real backstory/key facts for {@code placeholder} via the shared LLM
-     * client (the name itself is picked from {@link NameBank}, not the LLM -- see this class's own
-     * doc), persisting the result (overwriting the placeholder) once it returns. A no-op beyond
-     * logging a warning if the LLM is unreachable/unconfigured or the response can't be parsed -- the
-     * placeholder identity (set by the caller before this was ever invoked) stays in place either way,
-     * so a bad/missing response never leaves the NPC without SOME identity.
+     * client (the name/gender are already final and persisted on {@code placeholder} by the time this
+     * is called -- see {@link NpcIdentityBirth}'s own doc -- this only ever fills in backstory/facts
+     * on top of them), persisting the result (overwriting the placeholder) once it returns. A no-op
+     * beyond logging a warning if the LLM is unreachable/unconfigured or the response can't be parsed
+     * -- the placeholder identity (already carrying its real name) stays in place either way, so a
+     * bad/missing response never leaves the NPC nameless, only backstory-less.
      *
      * @param onGenerated optional (nullable), called with the real generated identity once persisted
      *                     -- only on success, never on a no-op/unparseable/unreachable-LLM path, and
@@ -89,14 +90,9 @@ public final class NpcIdentityPrompting {
      *                     roles -- this callback is how the caller gets notified once there's a real
      *                     name to push. Every other caller passes {@code null}.
      */
-    public static void generateAsync(NpcIdentity placeholder, LoreEntry lore, String settlementName, List<String> usedNamesIn, Consumer<NpcIdentity> onGenerated) {
-        // Gender and name are picked up front, synchronously -- both are plain in-memory picks, no
-        // reason to defer them onto the executor, and NpcIdentityBirth's placeholder display text can
-        // use the real given name immediately instead of "Unnamed X" even before the backstory comes
-        // back. Rolled once, here, and never again for this NPC's whole life.
-        NpcGender gender = NpcGender.roll();
-        String givenName = NameBank.pickGivenName(gender, usedNamesIn);
-        String name = NameBank.rollSurname() ? givenName + " " + NameBank.pickSurname() : givenName;
+    public static void generateAsync(NpcIdentity placeholder, LoreEntry lore, String settlementName, Consumer<NpcIdentity> onGenerated) {
+        NpcGender gender = placeholder.gender();
+        String name = placeholder.name();
 
         if (!Nuclyus.isLlmConfigured()) {
             return; // Placeholder identity stays in place -- see this method's own doc.

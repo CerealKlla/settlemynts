@@ -106,7 +106,7 @@ public final class NaturalSettlementPlotStore extends SavedData {
         }
     }
 
-    /** Every tracked natural village's plots -- see {@code resident.VillagerRespawnTicker}. */
+    /** Every tracked natural village's plots -- see {@code resident.VillagerBedSpawnTicker}. */
     public Map<SettlementKey, List<PlotRecord>> all() {
         return Map.copyOf(bySettlement);
     }

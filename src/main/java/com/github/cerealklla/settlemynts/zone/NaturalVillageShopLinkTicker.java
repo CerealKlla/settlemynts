@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 import com.github.cerealklla.cartographyr.api.Cartography;
 import com.github.cerealklla.cartographyr.geo.EntityId;
@@ -88,11 +89,21 @@ public final class NaturalVillageShopLinkTicker {
         List<Villager> idleCandidates = new ArrayList<>();
 
         for (Villager villager : villagers) {
+            if (villager.getPersistentData().contains(NaturalVillagePlotGenerator.PLOT_ID_TAG)) {
+                // Already linked -- re-assert its profession every scan instead of only at link time.
+                // Real bug, 2026-11-17: a profession this ticker force-assigns below carries no real
+                // job-site POI ticket behind it, which vanilla's own job-site validation periodically
+                // un-claims (reverting the profession back to NONE) -- the idle-candidate scan right
+                // below this loop would then rush to refill that "needed" zone type with a DIFFERENT
+                // random villager every 5 seconds. Live-reported symptom: an NPC's model flickering
+                // between a plain villager and a profession-robed one multiple times a minute. Treating
+                // the already-made assignment as a standing invariant to maintain -- not a one-time
+                // nudge -- keeps the same villager wearing its profession continuously, no flicker.
+                reassertProfession(level, plots, villager).ifPresent(linkedPlot -> satisfiedZoneTypes.add(linkedPlot.zoneTypeId()));
+                continue;
+            }
             if (villager.getVillagerData().profession().is(VillagerProfession.NONE)) {
                 idleCandidates.add(villager);
-            }
-            if (villager.getPersistentData().contains(NaturalVillagePlotGenerator.PLOT_ID_TAG)) {
-                continue; // Already linked.
             }
             Optional<Identifier> zoneTypeId = NaturalVillagePlotGenerator.zoneTypeForProfession(villager.getVillagerData().profession());
             if (zoneTypeId.isEmpty()) {
@@ -131,5 +142,24 @@ public final class NaturalVillageShopLinkTicker {
             chosen.setVillagerData(chosen.getVillagerData().withProfession(level.registryAccess(), profession.get()));
             chosen.getPersistentData().putIntArray(NaturalVillagePlotGenerator.PLOT_ID_TAG, UUIDUtil.uuidToIntArray(match.plotId()));
         }
+    }
+
+    /**
+     * Re-applies an already-linked villager's expected profession if vanilla's own job-site
+     * validation has since reverted it to {@code NONE} -- see the real-bug writeup at this method's
+     * own call site above. Returns the resolved linked {@link PlotRecord} (if any), so the caller can
+     * still count this zone type as satisfied even though this villager is skipped from the idle-
+     * candidate scan entirely.
+     */
+    private Optional<PlotRecord> reassertProfession(ServerLevel level, List<PlotRecord> plots, Villager villager) {
+        Optional<UUID> plotId = villager.getPersistentData().getIntArray(NaturalVillagePlotGenerator.PLOT_ID_TAG)
+                .map(UUIDUtil::uuidFromIntArray);
+        Optional<PlotRecord> plot = plotId.flatMap(id -> plots.stream().filter(p -> p.plotId().equals(id)).findFirst());
+        plot.ifPresent(p -> NaturalVillagePlotGenerator.representativeProfessionFor(p.zoneTypeId()).ifPresent(profession -> {
+            if (!villager.getVillagerData().profession().is(profession)) {
+                villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(), profession));
+            }
+        }));
+        return plot;
     }
 }
