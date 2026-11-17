@@ -91,14 +91,17 @@ public final class NaturalVillageShopLinkTicker {
         for (Villager villager : villagers) {
             if (villager.getPersistentData().contains(NaturalVillagePlotGenerator.PLOT_ID_TAG)) {
                 // Already linked -- re-assert its profession every scan instead of only at link time.
-                // Real bug, 2026-11-17: a profession this ticker force-assigns below carries no real
-                // job-site POI ticket behind it, which vanilla's own job-site validation periodically
-                // un-claims (reverting the profession back to NONE) -- the idle-candidate scan right
-                // below this loop would then rush to refill that "needed" zone type with a DIFFERENT
-                // random villager every 5 seconds. Live-reported symptom: an NPC's model flickering
-                // between a plain villager and a profession-robed one multiple times a minute. Treating
-                // the already-made assignment as a standing invariant to maintain -- not a one-time
-                // nudge -- keeps the same villager wearing its profession continuously, no flicker.
+                // Real bug, 2026-11-17 (and its real root cause, found the same day after a live report
+                // that this reassert-every-5-seconds fix didn't actually stop the flicker): vanilla's
+                // own CORE brain package runs `ResetProfession` EVERY TICK for every villager (confirmed
+                // against the decompiled source, `VillagerGoalPackages#getCorePackage`) -- it reverts a
+                // non-NONE/NITWIT profession straight back to NONE the instant a villager has no real
+                // JOB_SITE memory AND villagerXp == 0 AND level <= 1, which describes every villager
+                // this ticker force-assigns (no real POI claim is ever granted). A 5-second reassert
+                // ticker can only ever lose that race -- vanilla wins it back on literally the very next
+                // tick, which is exactly the "flickering multiple times a minute" symptom. The real fix
+                // (see reassertProfession's own doc) is defeating ResetProfession's own guard condition
+                // directly rather than fighting it reactively.
                 reassertProfession(level, plots, villager).ifPresent(linkedPlot -> satisfiedZoneTypes.add(linkedPlot.zoneTypeId()));
                 continue;
             }
@@ -139,7 +142,7 @@ public final class NaturalVillageShopLinkTicker {
                 continue;
             }
             Villager chosen = idleCandidates.get(nextCandidate++);
-            chosen.setVillagerData(chosen.getVillagerData().withProfession(level.registryAccess(), profession.get()));
+            assignProfession(level, chosen, profession.get());
             chosen.getPersistentData().putIntArray(NaturalVillagePlotGenerator.PLOT_ID_TAG, UUIDUtil.uuidToIntArray(match.plotId()));
         }
     }
@@ -157,9 +160,29 @@ public final class NaturalVillageShopLinkTicker {
         Optional<PlotRecord> plot = plotId.flatMap(id -> plots.stream().filter(p -> p.plotId().equals(id)).findFirst());
         plot.ifPresent(p -> NaturalVillagePlotGenerator.representativeProfessionFor(p.zoneTypeId()).ifPresent(profession -> {
             if (!villager.getVillagerData().profession().is(profession)) {
-                villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(), profession));
+                assignProfession(level, villager, profession);
             }
         }));
         return plot;
+    }
+
+    /**
+     * The actual fix for the flicker, 2026-11-17 -- see the real-root-cause writeup at this class's
+     * own call sites above. Vanilla's `ResetProfession` behavior only ever fires when a villager's
+     * {@code villagerXp} is still exactly 0 (among its other conditions) -- confirmed against the
+     * decompiled source. A real villager naturally crosses that threshold the first time it ever
+     * successfully trades, but one of this ticker's force-assigned villagers never does (nothing
+     * here ever opens a real trade with it), so it stays stuck at the vanilla default (0) forever
+     * unless something else bumps it. Setting it to 1 here permanently defeats that guard with no
+     * other observable effect (xp only otherwise matters for the trade-restock-unlock curve, which
+     * these villagers don't meaningfully participate in anyway) -- cheaper and more robust than
+     * fabricating a real {@code JOB_SITE} POI claim, which would need a matching physical POI block
+     * to exist and be free, something this ticker has no guarantee of.
+     */
+    private void assignProfession(ServerLevel level, Villager villager, ResourceKey<VillagerProfession> profession) {
+        villager.setVillagerData(villager.getVillagerData().withProfession(level.registryAccess(), profession));
+        if (villager.getVillagerXp() == 0) {
+            villager.setVillagerXp(1);
+        }
     }
 }
