@@ -93,6 +93,21 @@ public final class NaturalVillageGuardSpawnTicker {
             minZ = Math.min(minZ, vertex.z());
             maxZ = Math.max(maxZ, vertex.z());
         }
+        // Real bug fix, 2026-11-17 -- real report: "Ashallow seems to have had an issue and spawned
+        // an insane amount of npc guards." Root cause: `alive` below only ever counts currently-
+        // loaded GuardEntity instances (getEntitiesOfClass can't see into an unloaded chunk), but
+        // this scan runs every 5 seconds for EVERY known natural settlement unconditionally, whether
+        // or not anyone is anywhere near it. A settlement with nobody nearby reads `alive == 0`
+        // forever (its real, already-spawned guards are simply unloaded, not gone) and this ticker
+        // topped it back up to `target` on every single pass -- `addFreshEntity` happily materializes
+        // a new entity into an unloaded chunk regardless, so guards accumulated without bound the
+        // entire time nobody visited. Skip the whole settlement this pass if its own area isn't
+        // actually loaded -- the same "chunk not loaded -- skip this scan" rule
+        // `guardhouse.GuardSpawnTicker#fillStand` already follows for exactly this reason.
+        BlockPos center = new BlockPos((minX + maxX) / 2, level.getSeaLevel(), (minZ + maxZ) / 2);
+        if (!level.isLoaded(center)) {
+            return;
+        }
         AABB bounds = new AABB(minX, level.getMinY(), minZ, maxX, level.getMaxY(), maxZ);
         int alive = level.getEntitiesOfClass(GuardEntity.class, bounds, g -> settlement.equals(g.naturalSettlementKey())).size();
         if (alive >= target) {
