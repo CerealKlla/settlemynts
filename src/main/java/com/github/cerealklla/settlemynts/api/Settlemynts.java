@@ -812,6 +812,25 @@ public final class Settlemynts {
     }
 
     /**
+     * {@code entity -> settlementCoreId} directly, added 2026-11-17 for Terrytories' combat
+     * reputation listener (real report: "I was friendly with my town and then was still able to
+     * damage them and lost a shit load of reputation again"). {@link #findPlotIdForEntity} alone
+     * isn't enough for a {@link GuardEntity} -- a natural-village guard (spawned by {@code
+     * zone.NaturalVillageGuardSpawnTicker}) carries no real {@code plotId} at all, only a {@code
+     * naturalSettlementKey}, so the plotId-hop chain silently resolved to nothing for it, the exact
+     * same gap {@code GuardEntity#effectiveSettlementCoreId} was already built 2026-11-16 to close
+     * for {@code GuardSightGoal}/{@code GuardPriorityResponseGoal} -- this just extends that fix to
+     * a caller that still needed a settlementCoreId, not a plotId. Every other entity shape routes
+     * through the existing plotId chain unchanged.
+     */
+    public static Optional<UUID> findSettlementCoreIdForEntity(ServerLevel level, net.minecraft.world.entity.Entity entity) {
+        if (entity instanceof com.github.cerealklla.settlemynts.guardhouse.GuardEntity guard) {
+            return Optional.ofNullable(guard.effectiveSettlementCoreId());
+        }
+        return findPlotIdForEntity(entity).flatMap(plotId -> findSettlementCoreIdForPlot(level, plotId));
+    }
+
+    /**
      * Resolves the same two-flavor {@code settlementCoreId} {@link #findPlotAt}/{@link
      * #findSettlementCoreIdForPlot} use, for any position within {@code marginBlocks} of a
      * registered settlement's own overall Cartographyr polygon -- deliberately NOT scoped to any
