@@ -752,6 +752,16 @@ public final class Settlemynts {
     }
 
     /**
+     * Lets an external mod (Terrytories) mark a player as an ally of a specific settlement's Guards
+     * -- see {@code guardhouse.GuardAllyExtension}'s own doc for the full rationale. The predicate
+     * takes {@code (settlementCoreId, playerId)} and should answer whether that player is currently
+     * Friendly-standing with that settlement.
+     */
+    public static void registerGuardAllyExtension(java.util.function.BiPredicate<UUID, UUID> settlementCoreIdAndPlayerId) {
+        com.github.cerealklla.settlemynts.guardhouse.GuardAllyExtension.register(settlementCoreIdAndPlayerId);
+    }
+
+    /**
      * Fires whenever a player's NPC Menu actually opens for a real NPC, regardless of which of the
      * two real trigger paths opened it (a plain right-click, or the "G" key) -- see {@code
      * plotsign.NpcTalkedToHooks}' own doc for the real bug this exists to fix ("pressing 'G' doesn't

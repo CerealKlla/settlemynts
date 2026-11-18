@@ -35,6 +35,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.world.Container;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
@@ -354,6 +355,27 @@ public class GuardEntity extends PathfinderMob implements RangedAttackMob, com.g
             return new UUID(naturalSettlementKey.worldSeed(), naturalSettlementKey.settlementEntityId());
         }
         return null;
+    }
+
+    /**
+     * Real report, 2026-11-18: "my own guard isn't hurting me but he's still wasting time attacking
+     * me instead of patrolling" -- despite being Friendly-standing with his own settlement.
+     * {@code reputation.CombatReputationListener} (Terrytories) already zeroes the actual damage for
+     * a Friendly pair, but {@link HurtByTargetGoal} sets {@link #setTarget} to whoever last hit this
+     * guard via {@code setLastHurtByMob} regardless of whether any real damage landed -- vanilla
+     * filters that out for an ally via this exact hook (confirmed against the decompiled source:
+     * {@code TargetingConditions#forCombat()}'s {@code targeter.isAlliedTo(target)} check), the same
+     * one {@code tavern.TavernNpcEntity#considersEntityAsAlly} already overrides for its own
+     * owner-can't-be-targeted case. {@link GuardAllyExtension} is the Terrytories-free hook this mod
+     * needs to ask "is this player Friendly with this guard's settlement" -- mirrors {@link
+     * GuardHostilityExtension} exactly. {@link #effectiveSettlementCoreId()}, not the real-core-only
+     * {@link #getSettlementCoreId()}, so this covers natural-village guards too.
+     */
+    @Override
+    protected boolean considersEntityAsAlly(Entity other) {
+        return other instanceof ServerPlayer player
+                && GuardAllyExtension.isAlly(effectiveSettlementCoreId(), player.getUUID())
+                || super.considersEntityAsAlly(other);
     }
 
     /**
