@@ -854,14 +854,7 @@ public final class DebugCommands {
             newOwner = Optional.of(target.getUUID());
         }
 
-        PlotRecord updated = foundPlot.withOwner(newOwner);
-        foundCore.updatePlot(updated);
-
-        if (ModList.get().isLoaded("protectyons")) {
-            java.util.Set<UUID> permitted = com.github.cerealklla.settlemynts.zone.PlotPermissions.computeProtectionPermittedPlayers(updated, foundCore);
-            com.github.cerealklla.settlemynts.api.Settlemynts.resolvePolygonDirect(level, updated).ifPresent(polygon ->
-                    com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.registerPlot(level, updated.plotId(), polygon, permitted));
-        }
+        PlotRecord updated = com.github.cerealklla.settlemynts.zone.PlotPermissions.applyOwnerChange(level, foundCore, foundPlot, newOwner);
 
         String label = newOwner.isPresent() ? ownerArg : "NPC-owned (no owner)";
         source.sendSuccess(() -> Component.literal("Plot \"" + updated.name() + "\" owner set to " + label

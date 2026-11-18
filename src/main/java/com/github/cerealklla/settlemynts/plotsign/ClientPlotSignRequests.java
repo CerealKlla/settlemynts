@@ -23,6 +23,7 @@ public final class ClientPlotSignRequests {
     private static final ClientRequestSlot<OpenNpcMenuPayload> NPC_MENU = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenConfigurePlotPayload> CONFIGURE_PLOT = new ClientRequestSlot<>();
     private static final ClientRequestSlot<OpenMurmurRadioPayload> MURMUR_RADIO = new ClientRequestSlot<>();
+    private static final ClientRequestSlot<OpenChangeOwnerScreenPayload> CHANGE_OWNER_SCREEN = new ClientRequestSlot<>();
 
     private ClientPlotSignRequests() {
     }
@@ -121,5 +122,13 @@ public final class ClientPlotSignRequests {
 
     public static Optional<OpenMurmurRadioPayload> takePendingMurmurRadio() {
         return MURMUR_RADIO.takePending();
+    }
+
+    public static void requestChangeOwnerScreen(OpenChangeOwnerScreenPayload payload) {
+        CHANGE_OWNER_SCREEN.request(payload);
+    }
+
+    public static Optional<OpenChangeOwnerScreenPayload> takePendingChangeOwnerScreen() {
+        return CHANGE_OWNER_SCREEN.takePending();
     }
 }

@@ -567,6 +567,21 @@ public class SettlemyntsMod {
                 com.github.cerealklla.settlemynts.plotsign.SetPlantSelectionPayload.STREAM_CODEC,
                 (payload, context) -> setPlantSelection(payload, context));
 
+        // "Change Owner" (explicit request, 2026-11-17: Mayor/Town Planner can reassign a plot's
+        // Owner at any time, independent of canManage -- see OpenPlotConfigSignMenuPayload
+        // #canChangeOwner's own doc).
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestChangeOwnerScreenPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.RequestChangeOwnerScreenPayload.STREAM_CODEC,
+                (payload, context) -> requestChangeOwnerScreen(payload, context));
+
+        registrar.playToClient(com.github.cerealklla.settlemynts.plotsign.OpenChangeOwnerScreenPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.OpenChangeOwnerScreenPayload.STREAM_CODEC,
+                (payload, context) -> com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests.requestChangeOwnerScreen(payload));
+
+        registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.SetPlotOwnerFromSignPayload.TYPE,
+                com.github.cerealklla.settlemynts.plotsign.SetPlotOwnerFromSignPayload.STREAM_CODEC,
+                (payload, context) -> setPlotOwnerFromSign(payload, context));
+
         // Real Shop system (2026-10-05, replacing the old inert placeholder) -- see
         // bridge.YconomicsShopBridge and api.Settlemynts' Shop methods' own docs.
         registrar.playToServer(com.github.cerealklla.settlemynts.plotsign.RequestShopPayload.TYPE,
@@ -3490,6 +3505,82 @@ public class SettlemyntsMod {
         resolved.get().core().updatePlot(plot.withPlantSelections(
                 com.github.cerealklla.settlemynts.zone.WorkerPlantSelection.withSlot(plot.plantSelections(), slotIndex, itemId)));
         player.sendSystemMessage(Component.literal("Set slot " + (slotIndex + 1) + " to " + sample.getHoverName().getString() + "."));
+    }
+
+    /**
+     * "Change Owner" button -- explicit request, 2026-11-17: resolved via {@code
+     * founding.GhostTownHallCoreEntity#isTownPlanner} directly, NOT {@link #resolvePlotForManage}
+     * (which bakes in {@code canManage}'s narrower, already-owned-plot-excluding rule) -- a Mayor or
+     * any Town Planner can open this regardless of the plot's current Owner.
+     */
+    private static void requestChangeOwnerScreen(com.github.cerealklla.settlemynts.plotsign.RequestChangeOwnerScreenPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)
+                || !core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you're not a Town Planner here."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        String currentOwnerName = plot.owner()
+                .map(id -> {
+                    ServerPlayer online = serverLevel.getServer().getPlayerList().getPlayer(id);
+                    if (online != null) {
+                        return online.getName().getString();
+                    }
+                    return serverLevel.getServer().services().nameToIdCache().get(id).map(net.minecraft.server.players.NameAndId::name).orElse("");
+                })
+                .orElse("");
+        PacketDistributor.sendToPlayer(player, new com.github.cerealklla.settlemynts.plotsign.OpenChangeOwnerScreenPayload(
+                payload.signPos(), currentOwnerName, com.github.cerealklla.settlemynts.zone.KnownPlayerNames.all()));
+    }
+
+    /**
+     * "Set Owner"/"Clear (NPC-owned)" submit -- re-validates {@code isTownPlanner} itself (never
+     * trust the client's earlier screen-open check). {@code ownerName} blank means NPC-owned.
+     * Resolved via the real {@code nameToIdCache} (not {@code getPlayerByName}, which is online-only)
+     * so an offline player can be assigned too -- explicit request: "allow the mayor/town planners to
+     * change the owner of a plot at any time." Shares the actual mutation (and Protectyons re-sync)
+     * with the admin {@code /settlemynts setplotowner} debug command via {@code
+     * zone.PlotPermissions#applyOwnerChange}.
+     */
+    private static void setPlotOwnerFromSign(com.github.cerealklla.settlemynts.plotsign.SetPlotOwnerFromSignPayload payload, IPayloadContext context) {
+        if (!(context.player() instanceof ServerPlayer player) || !(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        if (!(serverLevel.getBlockEntity(payload.signPos()) instanceof com.github.cerealklla.settlemynts.plotsign.PlotConfigSignBlockEntity sign)
+                || sign.settlementCoreId() == null
+                || !(serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core)
+                || !core.isTownPlanner(player.getUUID())) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot, or you're not a Town Planner here."));
+            return;
+        }
+        PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
+        if (plot == null) {
+            player.sendSystemMessage(Component.literal("Couldn't resolve this plot anymore."));
+            return;
+        }
+        java.util.Optional<UUID> newOwner;
+        if (payload.ownerName().isBlank()) {
+            newOwner = java.util.Optional.empty();
+        } else {
+            newOwner = serverLevel.getServer().services().nameToIdCache().get(payload.ownerName()).map(net.minecraft.server.players.NameAndId::id);
+            if (newOwner.isEmpty()) {
+                player.sendSystemMessage(Component.literal("No player named \"" + payload.ownerName() + "\" could be resolved."));
+                return;
+            }
+        }
+        com.github.cerealklla.settlemynts.zone.PlotRecord updated =
+                com.github.cerealklla.settlemynts.zone.PlotPermissions.applyOwnerChange(serverLevel, core, plot, newOwner);
+        String label = newOwner.isPresent() ? payload.ownerName() : "NPC-owned (no owner)";
+        player.sendSystemMessage(Component.literal("Plot \"" + updated.name() + "\" owner set to " + label + "."));
     }
 
     // Main-inventory-only (excludes hotbar/armor/offhand), matching this suite's own established

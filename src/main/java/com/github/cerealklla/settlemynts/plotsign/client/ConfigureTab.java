@@ -13,6 +13,7 @@ import com.github.cerealklla.settlemynts.plotsign.ClientPlotSignRequests;
 import com.github.cerealklla.settlemynts.plotsign.OpenConfigurePlotPayload;
 import com.github.cerealklla.settlemynts.plotsign.OpenPlotConfigSignMenuPayload;
 import com.github.cerealklla.settlemynts.plotsign.RelocatePlotSignPayload;
+import com.github.cerealklla.settlemynts.plotsign.RequestChangeOwnerScreenPayload;
 import com.github.cerealklla.settlemynts.plotsign.RequestConfigurePlotPayload;
 import com.github.cerealklla.settlemynts.plotsign.SetMineSpecializationPayload;
 import com.github.cerealklla.settlemynts.plotsign.SetPlantSelectionPayload;
@@ -50,6 +51,7 @@ public final class ConfigureTab implements NuclyusMenu {
     private WidgetHost host;
     private OpenConfigurePlotPayload configured;
     private Button relocateButton;
+    private Button changeOwnerButton;
     private Button oreButton;
     private Button stoneButton;
     private Button excavationButton;
@@ -97,11 +99,22 @@ public final class ConfigureTab implements NuclyusMenu {
         Rect2i area = host.contentArea();
         int centerX = area.getX() + area.getWidth() / 2;
         int y = area.getY() + 20;
-        relocateButton = host.addMenuWidget(Button.builder(Component.literal("Relocate Plot Sign"), b -> relocate())
-                .bounds(centerX - 100, y, 200, 20).build());
-        y += 30;
+        // Widened 2026-11-17: this tab can now also show for a Town Planner who only has
+        // canChangeOwner (not canManage) on an already privately-owned plot -- the pre-existing
+        // controls below all stay canManage-gated, same as before this tab's own visibility widened.
+        if (data.canManage()) {
+            relocateButton = host.addMenuWidget(Button.builder(Component.literal("Relocate Plot Sign"), b -> relocate())
+                    .bounds(centerX - 100, y, 200, 20).build());
+            y += 30;
+        }
 
-        if (data.isMineshaft()) {
+        if (data.canChangeOwner()) {
+            changeOwnerButton = host.addMenuWidget(Button.builder(Component.literal("Change Owner"), b -> changeOwner())
+                    .bounds(centerX - 100, y, 200, 20).build());
+            y += 30;
+        }
+
+        if (data.canManage() && data.isMineshaft()) {
             oreButton = host.addMenuWidget(Button.builder(Component.literal("Specialization: Ore"), b -> setSpecialization(MineSpecialization.ORE))
                     .bounds(centerX - 235, y, 150, 20).build());
             stoneButton = host.addMenuWidget(Button.builder(Component.literal("Specialization: Stone"), b -> setSpecialization(MineSpecialization.STONE))
@@ -117,6 +130,10 @@ public final class ConfigureTab implements NuclyusMenu {
         if (relocateButton != null) {
             host.removeMenuWidget(relocateButton);
             relocateButton = null;
+        }
+        if (changeOwnerButton != null) {
+            host.removeMenuWidget(changeOwnerButton);
+            changeOwnerButton = null;
         }
         if (oreButton != null) {
             host.removeMenuWidget(oreButton);
@@ -209,10 +226,14 @@ public final class ConfigureTab implements NuclyusMenu {
 
     @Override
     public void render(GuiGraphicsExtractor graphics, Rect2i area, int mouseX, int mouseY, float partialTick) {
+        ClientPlotSignRequests.takePendingChangeOwnerScreen().ifPresent(payload ->
+                Minecraft.getInstance().setScreen(new ChangeOwnerScreen(payload)));
         // Mineshaft only ever needs its first real response (nothing here changes it afterward);
         // Farm/Lumberyard keeps re-checking after every Set/Clear click re-requests fresh data (see
         // #setPlantSlot), so its own slot labels can refresh in place without reopening the tab.
-        boolean keepChecking = data.isFarm() || data.isLumberyard();
+        // canManage-gated same as every other mutating control here, since this tab itself can now
+        // also show for a canChangeOwner-only (non-canManage) viewer -- see onShown's own doc.
+        boolean keepChecking = data.canManage() && (data.isFarm() || data.isLumberyard());
         if (data.isMineshaft() || keepChecking) {
             if (configured == null || keepChecking) {
                 ClientPlotSignRequests.takePendingConfigurePlot().ifPresent(payload -> {
@@ -240,7 +261,7 @@ public final class ConfigureTab implements NuclyusMenu {
 
     @Override
     public boolean mouseClicked(Rect2i area, MouseButtonEvent event, boolean doubleClick) {
-        if (!(data.isFarm() || data.isLumberyard())) {
+        if (!data.canManage() || !(data.isFarm() || data.isLumberyard())) {
             return false;
         }
         int visibleSlots = WorkerPlantSelection.slotsForTier(data.tier());
@@ -339,6 +360,10 @@ public final class ConfigureTab implements NuclyusMenu {
 
     private void relocate() {
         send(new RelocatePlotSignPayload(data.signPos()));
+    }
+
+    private void changeOwner() {
+        send(new RequestChangeOwnerScreenPayload(data.signPos()));
     }
 
     private void setSpecialization(MineSpecialization specialization) {

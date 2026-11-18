@@ -752,3 +752,47 @@ a location is removed outright once a periodic 10-second sweep finds no hostiles
 whole-suite (17 mods) rebuild + `runServer` boot-smoke-test clean. **Not yet live-tested at all** --
 needs a real fight to exercise both trigger paths, the closest-location pick across multiple active
 locations, claim/slot behavior under several guards, and the auto-clear.
+
+**"Change Owner" added to the Plot Config Sign, 2026-11-17** (see
+[context/classes/PlotConfigSign.md](context/classes/PlotConfigSign.md)'s own section, if present) --
+real report ("why is it saying I don't own this plot") traced to a genuine data gap (a plot's
+`owner` field never got set, most likely the Name/Owner text boxes being swapped at staking time --
+no code bug found there, Finalize's own payload wiring is correct) plus an explicit two-part follow-up
+request: (1) "allow the mayor/town planners to change the owner of a plot at any time" and (2) "auto-fill
+with players that have logged into the server before" with type-ahead. New "Change Owner" button on
+`client.ConfigureTab`, gated on a new `OpenPlotConfigSignMenuPayload#canChangeOwner` (packed into the
+existing `zoneTypeFlags` bitmask rather than a 12th top-level field) -- deliberately `founding
+.GhostTownHallCoreEntity#isTownPlanner` alone, NOT `zone.PlotPermissions#canManage` (which, since
+2026-10-05, locks a non-founder Town Planner out of a plot someone else already owns; this control is
+meant to reach exactly that case). `client.ChangeOwnerScreen` (new, standalone) pre-fills the current
+owner, offers up to 6 client-side-filtered prefix suggestions from a new `zone.KnownPlayerNames#all`
+(reads `usercache.json` directly -- confirmed no public enumeration method exists on vanilla's own
+`UserNameToIdResolver`), and submits via `SetPlotOwnerFromSignPayload`. Real resolution on submit
+goes through the official `MinecraftServer#services()#nameToIdCache()#get(name)` API instead of the
+online-players-only `getPlayerByName` Finalize still uses -- confirmed against the decompiled source
+that `DedicatedServer` itself already sets `resolveOfflineUsers(false)` whenever `online-mode=true`
+(always true here, see root CLAUDE.md), so a typo correctly resolves to nothing rather than silently
+fabricating a fake offline UUID; a real Mojang account can be assigned even if it's never joined this
+server. The actual mutation (+ Protectyons permission re-sync) is now a single shared
+`zone.PlotPermissions#applyOwnerChange`, used by both this and the pre-existing admin `/settlemynts
+setplotowner` debug command (refactored to call it too, removing the old duplicated inline logic).
+`ConfigureTab`'s other controls (Relocate Sign, Mineshaft Specialization, Farm/Lumberyard Plant
+Selection) stayed explicitly `canManage`-gated -- widening the whole tab's visibility to `canManage
+|| canChangeOwner` meant re-checking each of those individually so a canChangeOwner-only viewer can't
+also reach them. `./gradlew build` green, whole-suite (17 mods) rebuild + `runServer` boot-smoke-test
+clean. **Not yet live-tested.**
+
+**Two real live Production data fixes applied the same day, both pure data corrections (no code
+involved)**: (1) the Farm/Lumberyard/Blacksmith "Ancestors" reference Blueprints on Production still
+carried the stale off-by-one display-name bug Town Hall's own copy was fixed for back on 2026-10-10
+(Production's Farm/Lumberyard/Blacksmith sets never got the equivalent pass) -- each Tier 2-5 file's
+name field and filename were one Tier behind its own real, correct `tier` field (e.g. the real Tier 2
+Farm file displayed as "Farm Tier 1"), which collided two different tiers under the identical display
+name in Blueprynts' flat name-keyed lookup index and could silently resolve a "Tier 1" pick to the
+wrong (higher-tier) file's data, surfacing as "That Tier isn't unlocked for this plot yet." Renamed
+all 12 affected files (json + both preview images) to match their real tier. (2) Two of the user's own
+hand-saved Guardhouse Blueprints ("Guardhouse T3"/"Guardhouse T4") were saved while the Construction
+Site's own Tier was still set to 2, so despite their names they'd actually saved (and filed) as Tier
+2 -- corrected their `tier` field and moved them into the matching Tier 3/4 folders. Both fixes
+needed a Production restart (not a rebuild) to drop Blueprynts' in-memory name-index cache; confirmed
+clean boot afterward, no new errors.

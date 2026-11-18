@@ -1,10 +1,13 @@
 package com.github.cerealklla.settlemynts.zone;
 
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 import com.github.cerealklla.settlemynts.founding.GhostTownHallCoreEntity;
+
+import net.minecraft.server.level.ServerLevel;
 
 /**
  * "Mayor/Town Planner/Plot Owner" -- the permission gate the design doc calls for on the Plot Config
@@ -55,5 +58,23 @@ public final class PlotPermissions {
         }
         plot.owner().ifPresent(permitted::add);
         return permitted;
+    }
+
+    /**
+     * Applies a new Owner to {@code plot} and re-syncs Protectyons' permitted-player set from it --
+     * the one real mutation path the admin {@code debug.DebugCommands#setPlotOwner} command and the
+     * in-game "Change Owner" control ({@code plotsign.SetPlotOwnerFromSignPayload}, 2026-11-17) both
+     * share, so the two can never drift apart. Returns the updated record (the caller already has
+     * {@code core}, which is mutated in place by {@link GhostTownHallCoreEntity#updatePlot}).
+     */
+    public static PlotRecord applyOwnerChange(ServerLevel level, GhostTownHallCoreEntity core, PlotRecord plot, Optional<UUID> newOwner) {
+        PlotRecord updated = plot.withOwner(newOwner);
+        core.updatePlot(updated);
+        if (net.neoforged.fml.ModList.get().isLoaded("protectyons")) {
+            Set<UUID> permitted = computeProtectionPermittedPlayers(updated, core);
+            com.github.cerealklla.settlemynts.api.Settlemynts.resolvePolygonDirect(level, updated).ifPresent(polygon ->
+                    com.github.cerealklla.settlemynts.bridge.ProtectyonsPlotBridge.registerPlot(level, updated.plotId(), polygon, permitted));
+        }
+        return updated;
     }
 }

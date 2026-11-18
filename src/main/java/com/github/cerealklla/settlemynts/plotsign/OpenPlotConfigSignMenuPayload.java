@@ -55,6 +55,16 @@ import net.minecraft.resources.Identifier;
  * <p>{@code tavernStoolsAvailable} (added 2026-10-31, Tavern Plot Type, design doc Section 17) --
  * same shape as {@code guardKitStandsAvailable} above, for the new "Get Tavern Stools" button on
  * {@code client.TavernTab}.
+ *
+ * <p>{@code canChangeOwner} (packed into {@link #zoneTypeFlags} too, 2026-11-17, rather than adding
+ * a 12th top-level field) -- explicit request: "allow the mayor/town planners to change the owner of
+ * a plot at any time." Deliberately independent of {@code canManage} (which, since 2026-10-05, locks
+ * a non-founder Town Planner out of a plot someone else already owns) -- {@code
+ * founding.GhostTownHallCoreEntity#isTownPlanner} alone, which already includes the Mayor. Gates the
+ * new "Change Owner" button on {@code client.ConfigureTab}, and widens that whole tab's own
+ * visibility in {@code client.PlotConfigScreen#buildTabs} to {@code canManage || canChangeOwner} so a
+ * Town Planner locked out of every other Configure control by an existing Owner can still reach this
+ * one.
  */
 public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage, boolean hasGarrison, boolean isTownHall,
                                              boolean hasConstructionBox, int tier, int maxPlotTier, boolean canHireNpc,
@@ -66,15 +76,17 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
     private static final int FLAG_LUMBERYARD = 4;
     private static final int FLAG_TAVERN = 8;
     private static final int FLAG_MURMUR_TOWER = 16;
+    private static final int FLAG_CAN_CHANGE_OWNER = 32;
 
-    /** Packs the five single-purpose zone-type booleans into {@link #zoneTypeFlags} -- see this record's own class doc. */
-    public static int zoneFlags(boolean isMineshaft, boolean isFarm, boolean isLumberyard, boolean isTavern, boolean isMurmurTower) {
+    /** Packs the zone-type booleans plus {@code canChangeOwner} into {@link #zoneTypeFlags} -- see this record's own class doc. */
+    public static int zoneFlags(boolean isMineshaft, boolean isFarm, boolean isLumberyard, boolean isTavern, boolean isMurmurTower, boolean canChangeOwner) {
         int bits = 0;
         if (isMineshaft) bits |= FLAG_MINESHAFT;
         if (isFarm) bits |= FLAG_FARM;
         if (isLumberyard) bits |= FLAG_LUMBERYARD;
         if (isTavern) bits |= FLAG_TAVERN;
         if (isMurmurTower) bits |= FLAG_MURMUR_TOWER;
+        if (canChangeOwner) bits |= FLAG_CAN_CHANGE_OWNER;
         return bits;
     }
 
@@ -96,6 +108,10 @@ public record OpenPlotConfigSignMenuPayload(BlockPos signPos, boolean canManage,
 
     public boolean isMurmurTower() {
         return (zoneTypeFlags & FLAG_MURMUR_TOWER) != 0;
+    }
+
+    public boolean canChangeOwner() {
+        return (zoneTypeFlags & FLAG_CAN_CHANGE_OWNER) != 0;
     }
 
     public static final Type<OpenPlotConfigSignMenuPayload> TYPE =

@@ -87,10 +87,12 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
         boolean isTavern = false;
         int tavernStoolsAvailable = 0;
         boolean isMurmurTower = false;
+        boolean canChangeOwner = false;
         if (sign.settlementCoreId() != null && serverLevel.getEntity(sign.settlementCoreId()) instanceof GhostTownHallCoreEntity core) {
             PlotRecord plot = core.getPlots().stream().filter(p -> p.plotId().equals(sign.plotId())).findFirst().orElse(null);
             if (plot != null) {
                 canManage = PlotPermissions.canManage(plot, core, serverPlayer.getUUID());
+                canChangeOwner = core.isTownPlanner(serverPlayer.getUUID());
                 hasGarrison = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.guardhouse.GuardhouseConstants.GUARDHOUSE_ZONE_TYPE_ID);
                 isTownHall = plot.zoneTypeId().equals(GhostTownHallCoreEntity.TOWN_HALL_ZONE_TYPE_ID);
                 isMineshaft = plot.zoneTypeId().equals(com.github.cerealklla.settlemynts.zone.PlotWorkerKind.MINESHAFT_ZONE_TYPE_ID);
@@ -124,7 +126,7 @@ public class PlotConfigSignBlock extends HorizontalDirectionalBlock implements E
         // and let the client build a plain, non-container NuclyusMenuScreen from it.
         com.github.cerealklla.settlemynts.SettlemyntsMod.openPlotConfigMenu(serverPlayer,
                 new OpenPlotConfigSignMenuPayload(pos, canManage, hasGarrison, isTownHall, hasConstructionBox, tier, maxPlotTier, canHireNpc,
-                        guardKitStandsAvailable, OpenPlotConfigSignMenuPayload.zoneFlags(isMineshaft, isFarm, isLumberyard, isTavern, isMurmurTower),
+                        guardKitStandsAvailable, OpenPlotConfigSignMenuPayload.zoneFlags(isMineshaft, isFarm, isLumberyard, isTavern, isMurmurTower, canChangeOwner),
                         tavernStoolsAvailable));
         return InteractionResult.SUCCESS_SERVER;
     }

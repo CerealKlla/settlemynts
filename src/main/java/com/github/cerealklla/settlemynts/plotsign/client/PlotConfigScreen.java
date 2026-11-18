@@ -70,7 +70,11 @@ public final class PlotConfigScreen extends NuclyusContainerScreen<PlotConfigMen
         if (data.canManage() && data.hasConstructionBox() && data.tier() < 5 && data.tier() < data.maxPlotTier()) {
             tabs.add(new UpgradeTab(data));
         }
-        if (data.canManage()) {
+        // Widened 2026-11-17 to also admit a Town Planner who can't canManage this specific
+        // (already privately-owned) plot -- see OpenPlotConfigSignMenuPayload#canChangeOwner's own
+        // doc. ConfigureTab itself still gates its other controls (Relocate Sign, Specialization) on
+        // canManage specifically; only the new "Change Owner" button uses canChangeOwner.
+        if (data.canManage() || data.canChangeOwner()) {
             tabs.add(new ConfigureTab(data));
         }
         if (menu.hasShop()) {
