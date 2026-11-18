@@ -38,9 +38,12 @@ import net.neoforged.neoforge.event.entity.living.LivingConversionEvent;
  * resident") is still the right scope for an alert the whole settlement's guards should respond to.
  *
  * <p>Same {@code getClass() == Villager.class} scoping as {@link VillagerDeathListener} -- a {@code
- * ResidentVillagerEntity} can never reach this listener at all, since {@code
- * ResidentConversionGuard} cancels its own conversion outright before {@code Post} would ever fire
- * for one.
+ * ResidentVillagerEntity} (a distinct subclass) never reaches this listener either way, since this
+ * only matches the exact base {@code Villager} class. A converted Resident gets no bed-slot-vacate
+ * or Priority Location handling as a result -- not yet covered, since zombies converting a
+ * settlement's own residents is intended to be a real threat guards are meant to stop, not something
+ * this mod should paper over after the fact (removed 2026-11-18, see {@code
+ * resident.ResidentVillagerEntity}'s own former guard class, now deleted).
  */
 public final class VillagerConversionListener {
 

@@ -796,3 +796,24 @@ Site's own Tier was still set to 2, so despite their names they'd actually saved
 2 -- corrected their `tier` field and moved them into the matching Tier 3/4 folders. Both fixes
 needed a Production restart (not a rebuild) to drop Blueprynts' in-memory name-index cache; confirmed
 clean boot afterward, no new errors.
+
+**Zombified female plot worker rendered with a missing/placeholder texture, fixed 2026-11-18** --
+real report: two named Farm plot workers ("Saoirse"/"Ottilie"), after being killed by a zombie and
+converted into real vanilla `ZombieVillager`s, rendered as a flat purple/black missing-texture
+placeholder instead of a normal zombie-farmer skin. Root cause: the NPC gender feature (2026-11-05)
+represents "female" by registering a custom `registration.ModVillagerTypes#FEMALE` `VillagerType`,
+but only ever shipped a texture for the *living*-villager renderer's lookup path
+(`assets/settlemynts/textures/entity/villager/type/female.png`) -- vanilla's zombie-villager
+renderer resolves its skin from a completely separate path
+(`textures/entity/zombie_villager/type/<name>.png`), which had no matching file at all. A male
+worker always used one of vanilla's own built-in types (which has art for both paths), so only
+female-rolled workers were ever affected. Fixed by adding
+`assets/settlemynts/textures/entity/zombie_villager/type/female.png` (vanilla's own `plains` zombie-
+villager texture, reused directly -- correct UV layout for the zombie model, and a zombie villager
+carries no gendered visual distinction regardless of type). **Explicitly scoped out, same session**:
+no new zombie-conversion-immunity was added for Farm/Lumberjack/Miner workers (confirmed against the
+decompiled source that a zombie only ever rolls for `Villager`->`ZombieVillager` conversion on the
+hit that would otherwise be the killing blow -- Normal 50%/Hard 100%/Easy never -- not on an
+ordinary non-lethal bite) -- explicit user call: that's what Town Guards defending a settlement are
+for, not a hardcoded immunity. `./gradlew build` green, whole-suite (17 mods) rebuild + `runServer`
+boot-smoke-test clean.

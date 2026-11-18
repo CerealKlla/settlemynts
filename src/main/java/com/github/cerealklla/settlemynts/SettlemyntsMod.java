@@ -198,7 +198,6 @@ public class SettlemyntsMod {
         // purely static now, driven by ProximityScanPayload instead of PlayerTickEvent (see its own
         // doc). No registration needed here any more.
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.ResidentSpawnTicker());
-        NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.resident.ResidentConversionGuard());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.ShopMidnightRestockTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.SettlementProximityTicker());
         NeoForge.EVENT_BUS.register(new com.github.cerealklla.settlemynts.zone.ShopCraftingDebounceTicker());
